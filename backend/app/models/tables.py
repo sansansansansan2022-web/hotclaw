@@ -1,0 +1,232 @@
+"""ORM model definitions for all core tables."""
+
+from datetime import datetime
+from sqlalchemy import (
+    String,
+    Text,
+    Integer,
+    Float,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    JSON,
+    func,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class Base(DeclarativeBase):
+    """Base class for all ORM models."""
+    pass
+
+
+class TaskModel(Base):
+    """Task table: stores each task's full lifecycle."""
+    __tablename__ = "tasks"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    workflow_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    result_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    elapsed_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    node_runs: Mapped[list["TaskNodeRunModel"]] = relationship(back_populates="task", cascade="all, delete-orphan")
+    account_profile: Mapped["AccountProfileModel | None"] = relationship(back_populates="task", uselist=False)
+    topic_candidates: Mapped[list["TopicCandidateModel"]] = relationship(back_populates="task")
+    article_drafts: Mapped[list["ArticleDraftModel"]] = relationship(back_populates="task")
+
+
+class TaskNodeRunModel(Base):
+    """Node-level execution record for each agent in a task."""
+    __tablename__ = "task_node_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(64), ForeignKey("tasks.id"), nullable=False)
+    node_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    elapsed_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    model_used: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    task: Mapped["TaskModel"] = relationship(back_populates="node_runs")
+
+
+class AccountProfileModel(Base):
+    """Parsed account profile from user's positioning input."""
+    __tablename__ = "account_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(64), ForeignKey("tasks.id"), nullable=False, unique=True)
+    positioning: Mapped[str] = mapped_column(Text, nullable=False)
+    domain: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    subdomain: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    target_audience: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    tone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    content_style: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    keywords: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    task: Mapped["TaskModel"] = relationship(back_populates="account_profile")
+
+
+class TopicCandidateModel(Base):
+    """Candidate topics generated by the topic planner agent."""
+    __tablename__ = "topic_candidates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(64), ForeignKey("tasks.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    angle: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hook: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_emotion: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    estimated_appeal: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    selected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    task: Mapped["TaskModel"] = relationship(back_populates="topic_candidates")
+
+
+class ArticleDraftModel(Base):
+    """Generated article drafts."""
+    __tablename__ = "article_drafts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(64), ForeignKey("tasks.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    content_markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    content_html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    structure: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    task: Mapped["TaskModel"] = relationship(back_populates="article_drafts")
+    audit_result: Mapped["AuditResultModel | None"] = relationship(back_populates="draft", uselist=False)
+
+
+class AuditResultModel(Base):
+    """Audit results for article drafts."""
+    __tablename__ = "audit_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(64), ForeignKey("tasks.id"), nullable=False)
+    draft_id: Mapped[int] = mapped_column(Integer, ForeignKey("article_drafts.id"), nullable=False)
+    passed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    risk_level: Mapped[str] = mapped_column(String(20), nullable=False, default="low")
+    issues: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    overall_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    draft: Mapped["ArticleDraftModel"] = relationship(back_populates="audit_result")
+
+
+class AgentModel(Base):
+    """Agent configuration persisted from manifests."""
+    __tablename__ = "agents"
+
+    agent_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0.0")
+    module_path: Mapped[str] = mapped_column(String(200), nullable=False)
+    model_config_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    prompt_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_schema: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_schema: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    required_skills: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    retry_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    fallback_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SkillModel(Base):
+    """Skill configuration persisted from manifests."""
+    __tablename__ = "skills"
+
+    skill_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0.0")
+    module_path: Mapped[str] = mapped_column(String(200), nullable=False)
+    input_schema: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_schema: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    config_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class WorkflowTemplateModel(Base):
+    """Workflow template definitions."""
+    __tablename__ = "workflow_templates"
+
+    workflow_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[str] = mapped_column(String(20), nullable=False, default="1.0.0")
+    definition: Mapped[dict] = mapped_column(JSON, nullable=False)
+    input_schema: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_mapping: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SystemLogModel(Base):
+    """Structured system logs."""
+    __tablename__ = "system_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    node_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    level: Mapped[str] = mapped_column(String(10), nullable=False, default="INFO")
+    module: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
