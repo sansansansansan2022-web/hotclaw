@@ -44,7 +44,12 @@ class Settings(BaseSettings):
     skill_timeout: int = Field(default=60)
     llm_timeout: int = Field(default=60)
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "case_sensitive": False,
+        "extra": "ignore",  # 允许额外字段，避免与 LLMConfig 配置冲突
+    }
 
 
 settings = Settings()
