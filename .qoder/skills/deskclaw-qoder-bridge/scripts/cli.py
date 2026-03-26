@@ -235,7 +235,7 @@ def cmd_status(args) -> int:
         task = storage.load_task(args.task_id)
 
         if task is None:
-            print(f"❌ 任务不存在: {args.task_id}")
+            print("[X] 任务不存在: {args.task_id}")
             return 1
 
         print(generate_progress_report(task))
@@ -263,8 +263,8 @@ def cmd_status(args) -> int:
             print()
             print("测试结果:")
             for r in task.execution.test_results:
-                status = "✅" if r.get("passed") else "❌"
-                print(f"  {status} {r.get('name')}")
+                passed = "PASS" if r.get("passed") else "FAIL"
+                print(f"  [{passed}] {r.get('name')}")
 
     else:
         # 列出所有任务
@@ -299,9 +299,9 @@ def cmd_cancel(args) -> int:
     task = publisher.cancel_task(args.task_id, args.reason)
 
     if task:
-        print(f"✅ 任务已取消: {task.task_id}")
+        print(f"[OK] 任务已取消: {task.task_id}")
     else:
-        print(f"❌ 取消失败，可能任务不存在或状态不允许取消")
+        print(f"[X] 取消失败，可能任务不存在或状态不允许取消")
         return 1
 
     return 0

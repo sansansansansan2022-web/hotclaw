@@ -292,14 +292,69 @@ class QoderWorker:
         Returns:
             处理的的任务数量
         """
-        queued_tasks = self.storage.get_queued_tasks()
         processed = 0
 
+        # 处理 queued 状态的任务（认领并执行）
+        queued_tasks = self.storage.get_queued_tasks()
         for task in queued_tasks:
             if self.execute_single_task(task):
                 processed += 1
 
+        # 处理 claimed 状态的任务（继续执行）
+        claimed_tasks = self.storage.list_tasks(status=TaskStatus.CLAIMED)
+        for task in claimed_tasks:
+            if self.continue_claimed_task(task):
+                processed += 1
+
         return processed
+
+    def continue_claimed_task(self, task: Task) -> bool:
+        """
+        继续执行已认领的任务
+
+        Args:
+            task: 已认领的任务
+
+        Returns:
+            是否成功
+        """
+        try:
+            # 开始执行
+            if not self.start_execution(task):
+                return False
+
+            # 执行任务
+            if self.executor:
+                result = self.executor.execute(task)
+
+                # 根据结果更新状态
+                if result.error_message:
+                    self.complete_failure(
+                        task.task_id,
+                        result.error_message,
+                        result.result_summary
+                    )
+                else:
+                    self.complete_success(
+                        task.task_id,
+                        result.result_summary,
+                        result.changed_files,
+                        result.test_results
+                    )
+
+                # 更新最终执行信息
+                self.storage.update_execution(
+                    task.task_id,
+                    current_step="执行完成",
+                    next_action=""
+                )
+
+            return True
+
+        except Exception as e:
+            logger.exception(f"继续执行任务 {task.task_id} 时发生异常")
+            self.complete_failure(task.task_id, str(e))
+            return False
 
     def run_loop(self, max_iterations: Optional[int] = None) -> None:
         """
