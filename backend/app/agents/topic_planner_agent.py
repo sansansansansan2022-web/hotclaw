@@ -1,7 +1,12 @@
-"""Mock topic planner agent: generates candidate topics from profile and hot topics."""
+"""Topic planner agent: generates candidate topics from profile and hot topics.
 
-import asyncio
+Calls LLM to create topic proposals based on account profile and hot topics.
+"""
+
+import json
+import litellm
 from app.agents.base import BaseAgent, AgentResult
+from app.core.config import settings
 
 
 class TopicPlannerAgent(BaseAgent):
@@ -37,37 +42,87 @@ class TopicPlannerAgent(BaseAgent):
 - 按 estimated_appeal 降序排列"""
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
-        await asyncio.sleep(1.2)
+        profile = input_data.get("profile", {})
+        hot_topics = input_data.get("hot_topics", {})
+        system_prompt = context.get("system_prompt") or self.default_system_prompt
+        user_prompt = self._build_user_prompt(profile, hot_topics)
 
-        data = {
-            "topics": [
-                {
-                    "title": "AI工具正在淘汰这5类职场技能，你中了几个？",
-                    "angle": "从AI工具普及的角度切入，分析哪些技能正在被替代",
-                    "hook": "恐惧+自检",
-                    "target_emotion": "焦虑感",
-                    "estimated_appeal": 0.92,
-                    "reasoning": "AI话题热度高，结合职场定位，恐惧驱动型标题点击率高",
-                },
-                {
-                    "title": "35岁转型不是终点：3个成功案例告诉你真相",
-                    "angle": "正面案例解读，消解年龄焦虑",
-                    "hook": "案例+希望",
-                    "target_emotion": "希望感",
-                    "estimated_appeal": 0.88,
-                    "reasoning": "35岁话题持续热门，正面解读差异化，目标受众年龄匹配",
-                },
-                {
-                    "title": "春招季：互联网人跳槽前必须想清楚的3件事",
-                    "angle": "从春招热点切入，给出实用建议",
-                    "hook": "时效+实用",
-                    "target_emotion": "理性决策",
-                    "estimated_appeal": 0.85,
-                    "reasoning": "春招时效性强，实用型内容转发率高",
-                },
-            ]
-        }
-        return self._success(data)
+        try:
+            model = settings.llm_model_name
+            if not model.startswith("dashscope/"):
+                model = f"dashscope/{model}"
+
+            response = await litellm.acompletion(
+                model=model,
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_api_base_url,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                timeout=settings.llm_timeout,
+                custom_llm_provider="dashscope",
+            )
+            content = response.choices[0].message.content
+
+            # 解析 JSON
+            data = self._parse_json(content)
+            return self._success(data)
+
+        except json.JSONDecodeError as e:
+            return self._failure(code="JSON_PARSE_ERROR", message=f"JSON 解析失败: {str(e)}")
+        except Exception as e:
+            return self._failure(code="LLM_ERROR", message=str(e))
+
+    def _build_user_prompt(self, profile: dict, hot_topics: dict) -> str:
+        """构建用户提示词"""
+        domain = profile.get("domain", "未知")
+        subdomain = profile.get("subdomain", "")
+        tone = profile.get("tone", "中性")
+        target_audience = profile.get("target_audience", {})
+        keywords = profile.get("keywords", [])
+
+        topics_list = hot_topics.get("hot_topics", []) if isinstance(hot_topics, dict) else []
+
+        prompt_parts = [
+            "请根据以下信息策划 3-5 个有传播潜力的选题。",
+            "",
+            "## 账号信息",
+            f"- 主领域: {domain}",
+            f"- 细分领域: {subdomain}",
+            f"- 内容调性: {tone}",
+            f"- 目标人群: {target_audience.get('occupation', '通用')}",
+        ]
+
+        if keywords:
+            prompt_parts.append(f"- 关键词: {', '.join(keywords)}")
+
+        if topics_list:
+            prompt_parts.append("")
+            prompt_parts.append("## 当前热点")
+            for i, topic in enumerate(topics_list[:5], 1):
+                title = topic.get("title", "")
+                source = topic.get("source", "")
+                heat = topic.get("heat_score", 0)
+                relevance = topic.get("relevance_score", 0)
+                prompt_parts.append(f"{i}. {title} (来源: {source}, 热度: {heat}, 相关度: {relevance})")
+
+        prompt_parts.append("")
+        prompt_parts.append("请输出选题策划方案。")
+
+        return "\n".join(prompt_parts)
+
+    def _parse_json(self, content: str) -> dict:
+        """解析 LLM 返回的 JSON，处理 markdown 代码块"""
+        content = content.strip()
+        if content.startswith("```"):
+            parts = content.split("```")
+            if len(parts) >= 2:
+                content = parts[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+        return json.loads(content)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
         # Use hot topics directly as topics

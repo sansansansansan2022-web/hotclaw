@@ -1,7 +1,12 @@
-"""Mock audit agent: reviews content for risks and compliance."""
+"""Audit agent: reviews content for risks and compliance.
 
-import asyncio
+Calls LLM to audit article content for compliance and quality.
+"""
+
+import json
+import litellm
 from app.agents.base import BaseAgent, AgentResult
+from app.core.config import settings
 
 
 class AuditAgent(BaseAgent):
@@ -46,15 +51,85 @@ class AuditAgent(BaseAgent):
 - 审核应客观公正，不过度严苛也不放过真正的问题"""
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
-        await asyncio.sleep(0.8)
+        profile = input_data.get("profile", {})
+        titles_data = input_data.get("titles", {})
+        content_data = input_data.get("content", {})
+        system_prompt = context.get("system_prompt") or self.default_system_prompt
+        user_prompt = self._build_user_prompt(profile, titles_data, content_data)
 
-        data = {
-            "passed": True,
-            "risk_level": "low",
-            "issues": [],
-            "overall_comment": "内容整体合规，未发现敏感词或违规内容。文章结构完整，论述合理。",
-        }
-        return self._success(data)
+        try:
+            model = settings.llm_model_name
+            if not model.startswith("dashscope/"):
+                model = f"dashscope/{model}"
+
+            response = await litellm.acompletion(
+                model=model,
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_api_base_url,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                timeout=settings.llm_timeout,
+                custom_llm_provider="dashscope",
+            )
+            content = response.choices[0].message.content
+
+            # 解析 JSON
+            data = self._parse_json(content)
+            return self._success(data)
+
+        except json.JSONDecodeError as e:
+            return self._failure(code="JSON_PARSE_ERROR", message=f"JSON 解析失败: {str(e)}")
+        except Exception as e:
+            return self._failure(code="LLM_ERROR", message=str(e))
+
+    def _build_user_prompt(self, profile: dict, titles_data: dict, content_data: dict) -> str:
+        """构建用户提示词"""
+        tone = profile.get("tone", "中性")
+        domain = profile.get("domain", "未知")
+        title_list = titles_data.get("titles", []) if isinstance(titles_data, dict) else []
+        content_md = content_data.get("content_markdown", "") if isinstance(content_data, dict) else ""
+
+        prompt_parts = [
+            "请对以下文章进行合规性审核和质量评估。",
+            "",
+            "## 账号信息",
+            f"- 主领域: {domain}",
+            f"- 内容调性: {tone}",
+        ]
+
+        # 标题信息
+        if title_list:
+            prompt_parts.append("")
+            prompt_parts.append("## 候选标题")
+            for t in title_list[:3]:
+                prompt_parts.append(f"- {t.get('text', '')}")
+
+        # 文章内容
+        if content_md:
+            # 限制内容长度，避免超出 token 限制
+            content_preview = content_md[:3000] + "..." if len(content_md) > 3000 else content_md
+            prompt_parts.append("")
+            prompt_parts.append("## 文章正文")
+            prompt_parts.append(content_preview)
+
+        prompt_parts.append("")
+        prompt_parts.append("请输出审核结果。")
+
+        return "\n".join(prompt_parts)
+
+    def _parse_json(self, content: str) -> dict:
+        """解析 LLM 返回的 JSON，处理 markdown 代码块"""
+        content = content.strip()
+        if content.startswith("```"):
+            parts = content.split("```")
+            if len(parts) >= 2:
+                content = parts[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+        return json.loads(content)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
         return self._success({

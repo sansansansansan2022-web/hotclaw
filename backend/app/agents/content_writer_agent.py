@@ -1,7 +1,12 @@
-"""Mock content writer agent: generates full article content."""
+"""Content writer agent: generates full article content.
 
-import asyncio
+Calls LLM to generate complete article based on topic, title, and hot topics.
+"""
+
+import json
+import litellm
 from app.agents.base import BaseAgent, AgentResult
+from app.core.config import settings
 
 
 class ContentWriterAgent(BaseAgent):
@@ -44,82 +49,100 @@ class ContentWriterAgent(BaseAgent):
 - 不编造虚假数据或不存在的研究"""
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
-        await asyncio.sleep(2.0)
-
+        profile = input_data.get("profile", {})
+        topics = input_data.get("topics", {})
         titles_data = input_data.get("titles", {})
+        hot_topics = input_data.get("hot_topics", {})
+        system_prompt = context.get("system_prompt") or self.default_system_prompt
+        user_prompt = self._build_user_prompt(profile, topics, titles_data, hot_topics)
+
+        try:
+            model = settings.llm_model_name
+            if not model.startswith("dashscope/"):
+                model = f"dashscope/{model}"
+
+            response = await litellm.acompletion(
+                model=model,
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_api_base_url,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                timeout=settings.llm_timeout,
+                custom_llm_provider="dashscope",
+            )
+            content = response.choices[0].message.content
+
+            # 解析 JSON
+            data = self._parse_json(content)
+            return self._success(data)
+
+        except json.JSONDecodeError as e:
+            return self._failure(code="JSON_PARSE_ERROR", message=f"JSON 解析失败: {str(e)}")
+        except Exception as e:
+            return self._failure(code="LLM_ERROR", message=str(e))
+
+    def _build_user_prompt(self, profile: dict, topics: dict, titles_data: dict, hot_topics: dict) -> str:
+        """构建用户提示词"""
+        tone = profile.get("tone", "中性")
+        domain = profile.get("domain", "未知")
+        keywords = profile.get("keywords", [])
+
+        topic_list = topics.get("topics", []) if isinstance(topics, dict) else []
         title_list = titles_data.get("titles", []) if isinstance(titles_data, dict) else []
-        chosen_title = title_list[0]["text"] if title_list else "AI工具正在淘汰这5类职场技能"
+        hot_list = hot_topics.get("hot_topics", []) if isinstance(hot_topics, dict) else []
 
-        content_md = f"""# {chosen_title}
+        prompt_parts = [
+            "请根据以下信息生成一篇完整的微信公众号文章。",
+            "",
+            "## 账号信息",
+            f"- 主领域: {domain}",
+            f"- 内容调性: {tone}",
+        ]
+        if keywords:
+            prompt_parts.append(f"- 关键词: {', '.join(keywords)}")
 
-> 这是一个关于职场技能迭代的深度思考。
+        # 选题信息
+        if topic_list:
+            sorted_topics = sorted(topic_list, key=lambda x: x.get("estimated_appeal", 0), reverse=True)
+            top_topic = sorted_topics[0] if sorted_topics else {}
+            prompt_parts.append("")
+            prompt_parts.append("## 选中选题")
+            prompt_parts.append(f"- 标题: {top_topic.get('title', '')}")
+            prompt_parts.append(f"- 切入角度: {top_topic.get('angle', '')}")
+            prompt_parts.append(f"- 目标情绪: {top_topic.get('target_emotion', '')}")
 
-## 引言
+        # 候选标题
+        if title_list:
+            prompt_parts.append("")
+            prompt_parts.append("## 候选标题（使用得分最高的）")
+            for t in title_list[:3]:
+                prompt_parts.append(f"- [{t.get('score', 0):.1f}分] {t.get('text', '')}")
 
-最近刷到一条热搜："60%的职场人已经在日常工作中使用AI工具。"
+        # 热点素材
+        if hot_list:
+            prompt_parts.append("")
+            prompt_parts.append("## 相关热点素材")
+            for i, h in enumerate(hot_list[:3], 1):
+                prompt_parts.append(f"{i}. {h.get('title', '')} ({h.get('source', '')})")
 
-看到这个数字，我第一反应是：剩下的40%还好吗？
+        prompt_parts.append("")
+        prompt_parts.append("请输出完整的文章内容。")
 
-作为一个在互联网行业摸爬滚打多年的人，我想和大家聊聊，AI浪潮下，哪些技能正在贬值，而我们又该如何应对。
+        return "\n".join(prompt_parts)
 
-## 一、基础数据处理能力
-
-曾几何时，"会做Excel"是职场硬通货。但现在，AI工具可以在几秒内完成过去需要半天的数据整理工作。
-
-**不是说Excel没用了，而是"只会Excel"已经不够了。**
-
-## 二、简单的信息搜集和整理
-
-以前，能快速搜集行业信息、整理竞品资料的人很抢手。现在，AI可以在分钟级完成这些工作，而且覆盖面更广。
-
-## 三、标准化文案撰写
-
-通知、周报、常规营销文案……这些标准化写作正在被AI大幅替代。
-
-## 四、基础翻译能力
-
-AI翻译的质量已经能满足90%的日常需求。
-
-## 五、简单的代码编写
-
-GitHub Copilot等工具让"写CRUD"变成了AI的基本功。
-
-## 那我们该怎么办？
-
-别慌。被淘汰的是"技能"，不是"人"。
-
-关键是要从"执行者"转变为"决策者"和"创意者"：
-
-1. **培养判断力**——AI给你10个方案，你要能选出最好的那个
-2. **提升提问能力**——会用AI工具的人，本质上是"会提问的人"
-3. **深耕领域专业性**——AI是通才，人要做专家
-4. **强化人际协作**——这是AI暂时替代不了的
-
-## 最后
-
-与其焦虑AI会不会替代你，不如想想：你能不能借助AI，变成一个更强的你？
-
-**职场的终极竞争力，从来不是某个技能，而是持续学习和适应变化的能力。**
-
----
-
-*关注我，一起在职场中持续成长。*
-"""
-
-        data = {
-            "content_markdown": content_md,
-            "word_count": len(content_md),
-            "structure": {
-                "sections": [
-                    {"heading": "引言", "summary": "用数据和个人感受引入话题"},
-                    {"heading": "五类正在贬值的技能", "summary": "逐一分析被AI替代的技能"},
-                    {"heading": "应对策略", "summary": "给出4个转型建议"},
-                    {"heading": "结尾", "summary": "正向激励收尾"},
-                ]
-            },
-            "tags": ["职场", "AI", "技能", "成长"],
-        }
-        return self._success(data)
+    def _parse_json(self, content: str) -> dict:
+        """解析 LLM 返回的 JSON，处理 markdown 代码块"""
+        content = content.strip()
+        if content.startswith("```"):
+            parts = content.split("```")
+            if len(parts) >= 2:
+                content = parts[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+        return json.loads(content)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
         return self._success({

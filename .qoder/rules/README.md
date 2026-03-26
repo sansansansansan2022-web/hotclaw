@@ -18,7 +18,7 @@
 ## 如何开始
 
 在 Qoder Chat 中输入：
-
+·
 ```
 请阅读 .qoder/rules 目录下的规则文件，然后执行 current-task.md 中的任务
 ```

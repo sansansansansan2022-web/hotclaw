@@ -1,7 +1,12 @@
-"""Mock hot topic agent: analyzes hot topics relevant to the account profile."""
+"""Hot topic agent: analyzes hot topics relevant to the account profile.
 
-import asyncio
+Calls LLM to fetch and analyze hot topics based on account profile.
+"""
+
+import json
+import litellm
 from app.agents.base import BaseAgent, AgentResult
+from app.core.config import settings
 
 
 class HotTopicAgent(BaseAgent):
@@ -34,48 +39,75 @@ class HotTopicAgent(BaseAgent):
 - 摘要需客观精炼，不加主观判断"""
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
-        await asyncio.sleep(1.5)
+        profile = input_data.get("profile", {})
+        system_prompt = context.get("system_prompt") or self.default_system_prompt
+        user_prompt = self._build_user_prompt(profile)
 
-        data = {
-            "hot_topics": [
-                {
-                    "title": "2026年互联网行业春招趋势分析",
-                    "source": "百度热搜",
-                    "heat_score": 95,
-                    "summary": "今年春招岗位结构变化明显，AI相关岗位增长超200%",
-                    "relevance_score": 0.92,
-                },
-                {
-                    "title": "远程办公三年后：企业与员工的新博弈",
-                    "source": "微博热搜",
-                    "heat_score": 88,
-                    "summary": "越来越多企业要求回到办公室，员工如何应对",
-                    "relevance_score": 0.85,
-                },
-                {
-                    "title": "35岁程序员转型成功案例引发热议",
-                    "source": "知乎热榜",
-                    "heat_score": 82,
-                    "summary": "前大厂技术负责人分享转型产品经理的经验",
-                    "relevance_score": 0.90,
-                },
-                {
-                    "title": "AI工具如何改变职场工作流",
-                    "source": "36氪",
-                    "heat_score": 78,
-                    "summary": "调研显示60%职场人已在日常工作中使用AI工具",
-                    "relevance_score": 0.88,
-                },
-                {
-                    "title": "年轻人对加班文化的集体反思",
-                    "source": "微博热搜",
-                    "heat_score": 75,
-                    "summary": "多个社交平台出现反内卷讨论",
-                    "relevance_score": 0.80,
-                },
-            ]
-        }
-        return self._success(data)
+        try:
+            # 阿里云 dashscope 需要用 dashscope 前缀
+            model = settings.llm_model_name
+            if not model.startswith("dashscope/"):
+                model = f"dashscope/{model}"
+
+            response = await litellm.acompletion(
+                model=model,
+                api_key=settings.llm_api_key,
+                base_url=settings.llm_api_base_url,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                timeout=settings.llm_timeout,
+                custom_llm_provider="dashscope",
+            )
+            content = response.choices[0].message.content
+
+            # 解析 JSON
+            data = self._parse_json(content)
+            return self._success(data)
+
+        except json.JSONDecodeError as e:
+            return self._failure(code="JSON_PARSE_ERROR", message=f"JSON 解析失败: {str(e)}")
+        except Exception as e:
+            return self._failure(code="LLM_ERROR", message=str(e))
+
+    def _build_user_prompt(self, profile: dict) -> str:
+        """构建用户提示词"""
+        domain = profile.get("domain", "未知")
+        subdomain = profile.get("subdomain", "")
+        target_audience = profile.get("target_audience", {})
+        keywords = profile.get("keywords", [])
+
+        prompt_parts = [
+            f"请分析与我账号领域相关的热点话题。",
+            f"",
+            f"## 账号信息",
+            f"- 主领域: {domain}",
+            f"- 细分领域: {subdomain}",
+            f"- 目标人群: {target_audience.get('occupation', '通用')}",
+            f"- 年龄段: {target_audience.get('age_range', '未知')}",
+        ]
+
+        if keywords:
+            prompt_parts.append(f"- 关键词: {', '.join(keywords)}")
+
+        prompt_parts.append("")
+        prompt_parts.append("请输出与该领域相关的热点话题分析。")
+
+        return "\n".join(prompt_parts)
+
+    def _parse_json(self, content: str) -> dict:
+        """解析 LLM 返回的 JSON，处理 markdown 代码块"""
+        content = content.strip()
+        # 移除 markdown 代码块
+        if content.startswith("```"):
+            parts = content.split("```")
+            if len(parts) >= 2:
+                content = parts[1]
+                if content.startswith("json"):
+                    content = content[4:]
+                content = content.strip()
+        return json.loads(content)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
         return self._success({"hot_topics": []})
