@@ -3,9 +3,11 @@
 from app.llm.providers.dashscope import DashScopeProvider
 from app.llm.providers.openai import OpenAIProvider
 from app.llm.providers.compatible import OpenAICompatibleProvider
+from app.llm.providers.deepseek import DeepSeekProvider
 
 __all__ = [
     "DashScopeProvider",
     "OpenAIProvider",
     "OpenAICompatibleProvider",
+    "DeepSeekProvider",
 ]

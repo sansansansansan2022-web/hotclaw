@@ -25,6 +25,7 @@ from app.llm.config import LLMConfig
 from app.llm.providers.dashscope import DashScopeProvider
 from app.llm.providers.openai import OpenAIProvider
 from app.llm.providers.compatible import OpenAICompatibleProvider
+from app.llm.providers.deepseek import DeepSeekProvider
 from app.llm.gateway import LLMGateway
 
 
@@ -156,6 +157,128 @@ class TestDashScopeProvider:
         """测试配置错误"""
         with pytest.raises(LLMConfigurationError) as exc_info:
             DashScopeProvider(api_key="", base_url="")
+
+        assert exc_info.value.code == 3003
+        assert "API key" in str(exc_info.value)
+
+
+# =============================================================================
+# DeepSeekProvider Tests
+# =============================================================================
+
+class TestDeepSeekProvider:
+    """DeepSeekProvider 单元测试"""
+
+    @pytest.fixture
+    def provider(self):
+        """创建测试 Provider 实例"""
+        return DeepSeekProvider(
+            api_key="test-key",
+            base_url="https://api.deepseek.com",
+            timeout=30,
+        )
+
+    def test_supports_model(self, provider):
+        """测试模型支持检查"""
+        assert provider.supports_model("deepseek-chat")
+        assert provider.supports_model("deepseek-coder")
+        assert provider.supports_model("deepseek-reasoner")
+        assert provider.supports_model("deepseek/deepseek-chat")
+        assert not provider.supports_model("gpt-4")
+        assert not provider.supports_model("qwen3.5-plus")
+
+    def test_get_model_name(self, provider):
+        """测试模型名格式化"""
+        options = LLMCallOptions(model="deepseek-coder")
+        assert provider.get_model_name(options) == "deepseek-coder"
+
+        options = LLMCallOptions(model="deepseek/deepseek-chat")
+        assert provider.get_model_name(options) == "deepseek/deepseek-chat"
+
+        options = LLMCallOptions()
+        assert provider.get_model_name(options) == "deepseek-chat"
+
+    def test_build_messages(self, provider):
+        """测试消息构建"""
+        options = LLMCallOptions(system_prompt="你是助手")
+        messages = provider.build_messages("你好", options)
+
+        assert len(messages) == 2
+        assert messages[0]["role"] == "system"
+        assert messages[0]["content"] == "你是助手"
+        assert messages[1]["role"] == "user"
+        assert messages[1]["content"] == "你好"
+
+    @pytest.mark.asyncio
+    async def test_complete_success(self, provider):
+        """测试成功调用"""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="测试响应"))]
+        mock_response.usage = MagicMock(
+            prompt_tokens=10,
+            completion_tokens=20,
+            total_tokens=30,
+        )
+
+        with patch("app.llm.providers.deepseek.litellm.acompletion", new_callable=AsyncMock, return_value=mock_response):
+            meta = LLMCallMeta(agent_id="test_agent", trace_id="tr_test")
+            result = await provider.complete(
+                prompt="测试",
+                options=LLMCallOptions(system_prompt="你是一个助手"),
+                meta=meta,
+            )
+
+            assert result.content == "测试响应"
+            assert result.provider == "deepseek"
+            assert result.model == "deepseek-chat"
+            assert result.prompt_tokens == 10
+            assert result.completion_tokens == 20
+            assert result.total_tokens == 30
+            assert result.latency_ms > 0
+
+    @pytest.mark.asyncio
+    async def test_complete_timeout(self, provider):
+        """测试超时处理"""
+        with patch("app.llm.providers.deepseek.litellm.acompletion", new_callable=AsyncMock) as mock:
+            mock.side_effect = TimeoutError("Connection timeout")
+
+            meta = LLMCallMeta(agent_id="test_agent", trace_id="tr_test")
+
+            with pytest.raises(LLMTimeoutError) as exc_info:
+                await provider.complete(
+                    prompt="测试",
+                    options=LLMCallOptions(system_prompt="你是一个助手"),
+                    meta=meta,
+                )
+
+            assert "deepseek" in str(exc_info.value)
+            assert exc_info.value.code == 3001
+            assert exc_info.value.details["agent_id"] == "test_agent"
+            assert exc_info.value.details["timeout_seconds"] == 30
+
+    @pytest.mark.asyncio
+    async def test_complete_api_error(self, provider):
+        """测试 API 错误处理"""
+        with patch("app.llm.providers.deepseek.litellm.acompletion", new_callable=AsyncMock) as mock:
+            mock.side_effect = Exception("API rate limit exceeded")
+
+            meta = LLMCallMeta(agent_id="test_agent", trace_id="tr_test")
+
+            with pytest.raises(LLMAPIError) as exc_info:
+                await provider.complete(
+                    prompt="测试",
+                    options=LLMCallOptions(system_prompt="你是一个助手"),
+                    meta=meta,
+                )
+
+            assert "rate limit" in str(exc_info.value)
+            assert exc_info.value.code == 3002
+            assert exc_info.value.details["provider"] == "deepseek"
+
+    def test_configuration_error(self):
+        """测试配置错误"""
+        with pytest.raises(LLMConfigurationError) as exc_info:
+            DeepSeekProvider(api_key="", base_url="")
 
         assert exc_info.value.code == 3003
         assert "API key" in str(exc_info.value)

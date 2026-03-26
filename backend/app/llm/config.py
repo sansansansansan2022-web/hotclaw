@@ -14,7 +14,7 @@ class LLMConfig(BaseSettings):
     # 默认 Provider
     default_provider: str = Field(
         default="dashscope",
-        description="默认 LLM Provider: dashscope, openai, compatible",
+        description="默认 LLM Provider: dashscope, openai, compatible, deepseek",
     )
 
     # DashScope 配置
@@ -59,6 +59,20 @@ class LLMConfig(BaseSettings):
         description="默认兼容模式模型",
     )
 
+    # DeepSeek 配置
+    deepseek_api_key: str = Field(
+        default="",
+        description="DeepSeek API Key",
+    )
+    deepseek_base_url: str = Field(
+        default="https://api.deepseek.com",
+        description="DeepSeek API Base URL",
+    )
+    deepseek_model: str = Field(
+        default="deepseek-chat",
+        description="默认 DeepSeek 模型",
+    )
+
     # 通用配置
     timeout: int = Field(
         default=60,
@@ -79,7 +93,7 @@ class LLMConfig(BaseSettings):
     @field_validator("default_provider")
     @classmethod
     def validate_provider(cls, v: str) -> str:
-        valid = {"dashscope", "openai", "compatible"}
+        valid = {"dashscope", "openai", "compatible", "deepseek"}
         if v and v not in valid:
             raise ValueError(f"default_provider must be one of {valid}")
         return v
@@ -98,6 +112,7 @@ class LLMConfig(BaseSettings):
             "dashscope": self.dashscope_model,
             "openai": self.openai_model,
             "compatible": self.compatible_model,
+            "deepseek": self.deepseek_model,
         }.get(provider, "")
 
     def get_provider_config(self, provider: str) -> dict:
@@ -125,6 +140,11 @@ class LLMConfig(BaseSettings):
                 "api_key": self.compatible_api_key,
                 "base_url": self.compatible_base_url,
                 "model": self.compatible_model,
+            },
+            "deepseek": {
+                "api_key": self.deepseek_api_key,
+                "base_url": self.deepseek_base_url,
+                "model": self.deepseek_model,
             },
         }
         return configs.get(provider, {})

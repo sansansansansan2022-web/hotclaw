@@ -1,102 +1,214 @@
-/** PixelOffice types — shared across the pixel office engine.
- *
- * Based on OpenClaw-bot-review/lib/pixel-office/types.ts
- */
+// Inlined constants (no longer imported from constants)
+export const TILE_SIZE = 16
+export const DEFAULT_COLS = 21
+export const DEFAULT_ROWS = 17
+export const MAX_COLS = 64
+export const MAX_ROWS = 64
+export const MATRIX_EFFECT_DURATION = 0.3
 
-// ── Grid & Physics ──────────────────────────────────────────────
-export const TILE_SIZE = 16    // pixels per tile
-export const CHAR_WIDTH = 16   // character sprite width
-export const CHAR_HEIGHT = 24  // character sprite height (anchored bottom-center)
-
-// ── Character States ─────────────────────────────────────────────
-export const CharacterState = {
-  IDLE: 'idle',
-  WALK: 'walk',
-  TYPE: 'type',   // seated, working at desk
-} as const
-export type CharacterState = (typeof CharacterState)[keyof typeof CharacterState]
-
-// ── Directions ──────────────────────────────────────────────────
-export const Direction = {
-  DOWN:  0,
-  LEFT:  1,
-  RIGHT: 2,
-  UP:    3,
-} as const
-export type Direction = (typeof Direction)[keyof typeof Direction]
-
-// ── Sprite Data ─────────────────────────────────────────────────
-// 2D array of hex color strings ('' = transparent). [row][col]
-export type SpriteData = string[][]
-
-// ── Floor Tiles ─────────────────────────────────────────────────
 export const TileType = {
-  WALL:    0,
+  WALL: 0,
   FLOOR_1: 1,
   FLOOR_2: 2,
   FLOOR_3: 3,
-  VOID:    8,
+  FLOOR_4: 4,
+  FLOOR_5: 5,
+  FLOOR_6: 6,
+  FLOOR_7: 7,
+  VOID: 8,
 } as const
 export type TileType = (typeof TileType)[keyof typeof TileType]
 
-// ── Seats ────────────────────────────────────────────────────────
+/** Per-tile color settings for floor pattern colorization */
+export interface FloorColor {
+  /** Hue: 0-360 in colorize mode, -180 to +180 in adjust mode */
+  h: number
+  /** Saturation: 0-100 in colorize mode, -100 to +100 in adjust mode */
+  s: number
+  /** Brightness -100 to 100 */
+  b: number
+  /** Contrast -100 to 100 */
+  c: number
+  /** When true, use Photoshop-style Colorize (grayscale → fixed HSL). Default: adjust mode. */
+  colorize?: boolean
+}
+
+export const CharacterState = {
+  IDLE: 'idle',
+  WALK: 'walk',
+  TYPE: 'type',
+} as const
+export type CharacterState = (typeof CharacterState)[keyof typeof CharacterState]
+
+export const Direction = {
+  DOWN: 0,
+  LEFT: 1,
+  RIGHT: 2,
+  UP: 3,
+} as const
+export type Direction = (typeof Direction)[keyof typeof Direction]
+
+/** 2D array of hex color strings (or '' for transparent). [row][col] */
+export type SpriteData = string[][]
+
 export interface Seat {
+  /** Chair furniture uid */
   uid: string
-  seatCol: number   // tile column
-  seatRow: number   // tile row
+  /** Tile col where agent sits */
+  seatCol: number
+  /** Tile row where agent sits */
+  seatRow: number
+  /** Direction character faces when sitting (toward adjacent desk) */
   facingDir: Direction
   assigned: boolean
-  agentId: string | null  // backend agent_id
 }
 
-// ── Office Layout ───────────────────────────────────────────────
+export interface FurnitureInstance {
+  uid?: string
+  sprite: SpriteData
+  /** Pixel x (top-left) */
+  x: number
+  /** Pixel y (top-left) */
+  y: number
+  /** Y value used for depth sorting (typically bottom edge) */
+  zY: number
+  /** Optional emoji to render instead of sprite */
+  emoji?: string
+  /** Rotation in degrees for emoji rendering */
+  rotation?: number
+  /** Scale factor for emoji rendering (default 1.0) */
+  emojiScale?: number
+}
+
+export interface ToolActivity {
+  toolId: string
+  status: string
+  done: boolean
+  permissionWait?: boolean
+}
+
+export const FurnitureType = {
+  DESK: 'desk',
+  BOOKSHELF: 'bookshelf',
+  PLANT: 'plant',
+  COOLER: 'cooler',
+  WHITEBOARD: 'whiteboard',
+  CHAIR: 'chair',
+  PC: 'pc',
+  PC_BACK: 'pc_back',
+  CAMERA: 'camera',
+  LAMP: 'lamp',
+  // Tileset — Desks
+  TABLE_WOOD_SM_VERTICAL: 'ts_table_wood_sm_vertical',
+  TABLE_WOOD_SM_HORIZONTAL: 'ts_table_wood_sm_horizontal',
+  // Tileset — Chairs
+  CHAIR_CUSHION: 'ts_chair_cushion',
+  CHAIR_SPINNING: 'ts_chair_spinning',
+  BENCH: 'ts_bench',
+  // Tileset — Decor
+  WATER_COOLER: 'ts_water_cooler',
+  FRIDGE: 'ts_fridge',
+  DECO_3: 'ts_deco_3',
+  CLOCK: 'ts_clock',
+  LIBRARY_GRAY_FULL: 'ts_library_gray_full',
+  PLANT_SMALL: 'ts_plant_small',
+  PAINTING_LARGE_1: 'ts_painting_large_1',
+  PAINTING_LARGE_2: 'ts_painting_large_2',
+  PAINTING_SMALL_1: 'ts_painting_small_1',
+  PAINTING_SMALL_2: 'ts_painting_small_2',
+  PAINTING_SMALL_3: 'ts_painting_small_3',
+  SERVER_RACK: 'server_rack',
+  PHONE: 'phone',
+  SOFA: 'sofa',
+  COFFEE: 'coffee',
+} as const
+export type FurnitureType = (typeof FurnitureType)[keyof typeof FurnitureType]
+
+export const EditTool = {
+  TILE_PAINT: 'tile_paint',
+  WALL_PAINT: 'wall_paint',
+  FURNITURE_PLACE: 'furniture_place',
+  FURNITURE_PICK: 'furniture_pick',
+  SELECT: 'select',
+  EYEDROPPER: 'eyedropper',
+  ERASE: 'erase',
+} as const
+export type EditTool = (typeof EditTool)[keyof typeof EditTool]
+
+export interface FurnitureCatalogEntry {
+  type: string
+  label: string
+  footprintW: number
+  footprintH: number
+  sprite: SpriteData
+  isDesk: boolean
+  category?: string
+  orientation?: string
+  canPlaceOnSurfaces?: boolean
+  emoji?: string
+  emojiScale?: number
+  backgroundTiles?: number
+  canPlaceOnWalls?: boolean
+}
+
+export interface PlacedFurniture {
+  uid: string
+  type: string
+  col: number
+  row: number
+  color?: FloorColor
+  /** Rotation in degrees (0, 90, 180, 270) for emoji furniture */
+  rotation?: number
+}
+
 export interface OfficeLayout {
+  version: 1
   cols: number
   rows: number
-  tiles: TileType[][]
-  seats: Seat[]
+  tiles: TileType[]
+  furniture: PlacedFurniture[]
+  tileColors?: Array<FloorColor | null>
 }
 
-// ── Character ───────────────────────────────────────────────────
 export interface Character {
-  // Identity
-  id: number                    // 0-5 for 6 agents
-  agentId: string              // backend agent_id: "profile_agent" etc.
-  label: string                // display name: "小档" etc.
-
-  // Position
-  x: number                    // pixel center x
-  y: number                    // pixel center y
-  tileCol: number              // current tile column
-  tileRow: number              // current tile row
-
-  // Movement
+  id: number
   state: CharacterState
   dir: Direction
-  frame: number               // animation frame (0-3)
-  frameTimer: number          // time accumulator for animation
-  moveSpeed: number           // pixels per second
-
-  // Status
-  isActive: boolean           // true = working, false = idle
-  currentTool: string | null  // "typing", "reading", etc.
-
-  // Visual effects
-  bubbleText: string          // floating text above head
-  bubbleTimer: number         // countdown to hide bubble
-  bubbleType: 'task' | 'output' | 'error' | null
+  x: number
+  y: number
+  tileCol: number
+  tileRow: number
+  path: Array<{ col: number; row: number }>
+  moveProgress: number
+  currentTool: string | null
+  palette: number
+  hueShift: number
+  frame: number
+  frameTimer: number
+  moveSpeedMultiplier: number
+  wanderTimer: number
+  wanderCount: number
+  wanderLimit: number
+  isActive: boolean
+  seatId: string | null
+  bubbleType: 'permission' | 'waiting' | null
+  bubbleTimer: number
+  seatTimer: number
+  isSubagent: boolean
+  parentAgentId: number | null
+  label: string
   matrixEffect: 'spawn' | 'despawn' | null
   matrixEffectTimer: number
-
-  // Seat
-  seatId: string | null      // uid of assigned seat
-}
-
-// ── Office State ────────────────────────────────────────────────
-export interface OfficeStateData {
-  layout: OfficeLayout
-  characters: Map<number, Character>  // keyed by agent index 0-5
-  selectedAgentId: number | null
-  hoveredAgentId: number | null
-  nextAvailableSeat: number  // circular index for auto-assignment
+  matrixEffectSeeds: number[]
+  interactionTarget: { col: number; row: number; facingDir: Direction; furnitureType?: string } | null
+  isCat: boolean
+  isLobster: boolean
+  lobsterRageTimer: number
+  lobsterBubbles: Array<{ age: number; x: number; y: number }>
+  codeSnippets: Array<{ text: string; age: number; x: number; y: number }>
+  photoComments: Array<{ text: string; age: number; x: number }>
+  isViewingPhoto: boolean
+  isSystemRole?: boolean
+  systemRoleType?: 'gateway_sre'
+  systemStatus?: 'unknown' | 'healthy' | 'degraded' | 'down'
 }
