@@ -1,7 +1,7 @@
 """LLM Gateway - 统一 LLM 调用入口。
 
 提供统一的 LLM 调用接口，自动处理：
-- Provider 路由和选择
+- Provider 路由和选择（支持数据库动态配置）
 - 请求日志和追踪
 - 错误处理和异常转换
 - Provider 初始化和生命周期管理
@@ -16,6 +16,7 @@ from app.llm.exceptions import LLMCallError, LLMConfigurationError
 from app.llm.providers.dashscope import DashScopeProvider
 from app.llm.providers.openai import OpenAIProvider
 from app.llm.providers.compatible import OpenAICompatibleProvider
+from app.llm.providers.deepseek import DeepSeekProvider
 
 logger = get_logger(__name__)
 
@@ -23,6 +24,10 @@ logger = get_logger(__name__)
 class LLMGateway:
     """
     统一 LLM 网关门面
+
+    支持两种配置来源：
+    1. 数据库（优先级高）：用户在前端配置的 API Key
+    2. .env 文件（备用）：传统的环境变量配置
 
     使用示例:
         gateway = LLMGateway()
@@ -32,35 +37,110 @@ class LLMGateway:
             options=LLMCallOptions(system_prompt="你是一位专业的..."),
         )
         print(response.content)
-
-    或使用单例:
-        from app.llm import llm_gateway
-        response = await llm_gateway.complete(...)
     """
 
-    def __init__(self, config: LLMConfig | None = None):
+    def __init__(self, config: LLMConfig | None = None, use_db_config: bool = True):
         """
         初始化 LLM Gateway
 
         Args:
-            config: 可选的配置对象，默认使用全局配置
+            config: 可选的配置对象，默认使用全局 .env 配置
+            use_db_config: 是否从数据库加载用户配置（默认 True）
         """
         self.config = config or get_llm_config()
         self._providers: dict[str, LLMProvider] = {}
-        self._default_provider = self.config.default_provider
+        self._db_config: dict[str, dict] = {}
+        self._default_provider: str = self.config.default_provider
+
+        if use_db_config:
+            self._load_db_config()
+
         self._init_providers()
+
+    def _load_db_config(self) -> None:
+        """从数据库加载用户配置的 Provider"""
+        try:
+            import asyncio
+            from sqlalchemy import select
+            from app.db.session import async_session_factory
+            from app.models.tables import LLMProviderModel
+
+            # 同步方式获取数据库配置
+            async def _load():
+                async with AsyncSessionLocal() as session:
+                    result = await session.execute(
+                        select(LLMProviderModel).where(
+                            LLMProviderModel.is_enabled == True
+                        )
+                    )
+                    providers = result.scalars().all()
+
+                    db_config = {}
+                    default_provider = None
+
+                    for p in providers:
+                        db_config[p.provider_id] = {
+                            "api_key": p.api_key,
+                            "base_url": p.base_url,
+                            "default_model": p.default_model,
+                            "supported_models": p.supported_models or [],
+                            "timeout": p.timeout,
+                            "is_default": p.is_default,
+                        }
+                        if p.is_default:
+                            default_provider = p.provider_id
+
+                    return db_config, default_provider
+
+            # 运行异步加载
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # 如果已经在事件循环中，使用创建任务的方式
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, _load())
+                    self._db_config, default_from_db = future.result()
+            else:
+                self._db_config, default_from_db = asyncio.run(_load())
+
+            # 如果数据库有默认 Provider，覆盖 .env 配置
+            if default_from_db:
+                self._default_provider = default_from_db
+
+            if self._db_config:
+                logger.info(
+                    "llm_db_config_loaded",
+                    providers=list(self._db_config.keys()),
+                    default_provider=self._default_provider,
+                )
+
+        except Exception as e:
+            logger.warning(
+                "llm_db_config_load_failed",
+                error=str(e),
+                message="Will use .env config instead",
+            )
+            self._db_config = {}
 
     def _init_providers(self) -> None:
         """根据配置初始化所有可用的 Provider"""
         initialized = []
 
+        # 获取 Provider 配置（优先数据库，其次 .env）
+        def get_provider_config(provider_id: str) -> dict | None:
+            if provider_id in self._db_config:
+                return self._db_config[provider_id]
+            # 回退到 .env 配置
+            return self.config.get_provider_config(provider_id)
+
         # 初始化 DashScope
-        if self.config.dashscope_api_key:
+        dashscope_config = get_provider_config("dashscope")
+        if dashscope_config and dashscope_config.get("api_key"):
             try:
                 self._providers["dashscope"] = DashScopeProvider(
-                    api_key=self.config.dashscope_api_key,
-                    base_url=self.config.dashscope_base_url,
-                    timeout=self.config.timeout,
+                    api_key=dashscope_config["api_key"],
+                    base_url=dashscope_config.get("base_url") or self.config.dashscope_base_url,
+                    timeout=dashscope_config.get("timeout") or self.config.timeout,
                 )
                 initialized.append("dashscope")
             except LLMConfigurationError as e:
@@ -71,12 +151,13 @@ class LLMGateway:
                 )
 
         # 初始化 OpenAI
-        if self.config.openai_api_key:
+        openai_config = get_provider_config("openai")
+        if openai_config and openai_config.get("api_key"):
             try:
                 self._providers["openai"] = OpenAIProvider(
-                    api_key=self.config.openai_api_key,
-                    base_url=self.config.openai_base_url,
-                    timeout=self.config.timeout,
+                    api_key=openai_config["api_key"],
+                    base_url=openai_config.get("base_url") or self.config.openai_base_url,
+                    timeout=openai_config.get("timeout") or self.config.timeout,
                 )
                 initialized.append("openai")
             except LLMConfigurationError as e:
@@ -86,13 +167,31 @@ class LLMGateway:
                     reason=str(e),
                 )
 
+        # 初始化 DeepSeek
+        deepseek_config = get_provider_config("deepseek")
+        if deepseek_config and deepseek_config.get("api_key"):
+            try:
+                self._providers["deepseek"] = DeepSeekProvider(
+                    api_key=deepseek_config["api_key"],
+                    base_url=deepseek_config.get("base_url") or "https://api.deepseek.com",
+                    timeout=deepseek_config.get("timeout") or self.config.timeout,
+                )
+                initialized.append("deepseek")
+            except LLMConfigurationError as e:
+                logger.warning(
+                    "llm_provider_init_skipped",
+                    provider="deepseek",
+                    reason=str(e),
+                )
+
         # 初始化 OpenAI Compatible
-        if self.config.compatible_base_url:
+        compatible_config = get_provider_config("compatible")
+        if compatible_config and compatible_config.get("base_url"):
             try:
                 self._providers["compatible"] = OpenAICompatibleProvider(
-                    api_key=self.config.compatible_api_key or None,
-                    base_url=self.config.compatible_base_url,
-                    timeout=self.config.timeout,
+                    api_key=compatible_config.get("api_key") or None,
+                    base_url=compatible_config["base_url"],
+                    timeout=compatible_config.get("timeout") or self.config.timeout,
                 )
                 initialized.append("compatible")
             except LLMConfigurationError as e:
@@ -102,10 +201,28 @@ class LLMGateway:
                     reason=str(e),
                 )
 
+        # 初始化 Zhipu (智谱)
+        zhipu_config = get_provider_config("zhipu")
+        if zhipu_config and zhipu_config.get("api_key"):
+            try:
+                # Zhipu 也使用 OpenAI 兼容接口
+                self._providers["zhipu"] = OpenAICompatibleProvider(
+                    api_key=zhipu_config["api_key"],
+                    base_url=zhipu_config.get("base_url") or "https://open.bigmodel.cn/api/paas/v4",
+                    timeout=zhipu_config.get("timeout") or self.config.timeout,
+                )
+                initialized.append("zhipu")
+            except LLMConfigurationError as e:
+                logger.warning(
+                    "llm_provider_init_skipped",
+                    provider="zhipu",
+                    reason=str(e),
+                )
+
         if not initialized:
             logger.warning(
                 "no_llm_providers_initialized",
-                message="No LLM providers configured. Check API keys in .env",
+                message="No LLM providers configured. Check API keys in database or .env",
             )
         else:
             logger.info(
@@ -140,7 +257,14 @@ class LLMGateway:
             LLMConfigurationError: Provider 未配置
         """
         selected_provider = provider or self._default_provider
-        model = options.model or self.config.get_default_model(selected_provider)
+
+        # 获取默认模型（优先数据库配置）
+        model = options.model
+        if not model:
+            if selected_provider in self._db_config:
+                model = self._db_config[selected_provider].get("default_model")
+            if not model:
+                model = self.config.get_default_model(selected_provider)
 
         # 构建调用元信息
         meta = LLMCallMeta(
@@ -154,7 +278,7 @@ class LLMGateway:
             agent_id=agent_id,
             trace_id=trace_id,
             provider=selected_provider,
-            model=model,
+            model=model or "auto",
             system_prompt_length=len(options.system_prompt),
             prompt_length=len(prompt),
             temperature=options.temperature,
@@ -216,7 +340,7 @@ class LLMGateway:
                 agent_id=agent_id,
                 trace_id=trace_id,
                 provider=selected_provider,
-                model=model,
+                model=model or "auto",
                 error_type=type(e).__name__,
                 error_message=str(e),
                 exc_info=True,  # 记录完整堆栈
@@ -278,9 +402,22 @@ class LLMGateway:
         """检查 Provider 是否可用"""
         return provider in self._providers
 
+    def get_default_provider(self) -> str:
+        """获取默认 Provider"""
+        return self._default_provider
+
     def get_config(self) -> LLMConfig:
-        """获取配置对象"""
+        """获取 .env 配置对象"""
         return self.config
+
+    def get_db_config(self) -> dict[str, dict]:
+        """获取数据库配置"""
+        return self._db_config.copy()
+
+    def reload_config(self) -> None:
+        """重新加载配置（数据库 + .env）"""
+        self._load_db_config()
+        self._init_providers()
 
 
 # 全局单例实例

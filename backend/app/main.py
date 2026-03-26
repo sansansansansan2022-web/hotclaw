@@ -16,6 +16,7 @@ from app.api.task_routes import router as task_router
 from app.api.stream_routes import router as stream_router
 from app.api.agent_routes import router as agent_router
 from app.api.skill_routes import router as skill_router
+from app.api.llm_provider_routes import router as llm_provider_router
 
 # Import agent implementations to register them
 from app.agents.profile_agent import ProfileAgent
@@ -134,6 +135,7 @@ app.include_router(task_router)
 app.include_router(stream_router)
 app.include_router(agent_router)
 app.include_router(skill_router)
+app.include_router(llm_provider_router)
 
 
 @app.get("/api/v1/health")

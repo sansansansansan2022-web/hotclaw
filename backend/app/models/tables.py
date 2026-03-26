@@ -230,3 +230,55 @@ class SystemLogModel(Base):
     message: Mapped[str] = mapped_column(Text, nullable=False)
     context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+
+class LLMProviderModel(Base):
+    """LLM Provider configuration (user-defined API keys and settings)."""
+    __tablename__ = "llm_providers"
+
+    provider_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    """Provider ID: openai, dashscope, deepseek, zhipu, ollama, custom"""
+
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    """显示名称，如 "OpenAI", "DeepSeek", "Qwen" """
+
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """描述信息"""
+
+    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """API Key（加密存储更安全，生产环境建议加密）"""
+
+    base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    """API Base URL"""
+
+    default_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    """默认模型"""
+
+    supported_models: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    """支持的模型列表"""
+
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    """是否启用"""
+
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    """是否为默认 Provider"""
+
+    timeout: Mapped[int] = mapped_column(Integer, nullable=False, default=60)
+    """超时时间（秒）"""
+
+    extra_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    """额外配置（如 temperature 默认值等）"""
+
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    """状态：active, inactive"""
+
+    test_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    """测试状态：untested, success, failed"""
+
+    test_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """测试消息或错误信息"""
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
