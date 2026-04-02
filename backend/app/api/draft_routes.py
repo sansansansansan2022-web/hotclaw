@@ -23,6 +23,7 @@ from app.schemas.draft import (
     AuditResultInfo,
 )
 from app.services.draft_service import draft_service
+from app.services.publish_record_service import publish_record_service, PublishRecordError
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/drafts", tags=["drafts"])
@@ -296,7 +297,7 @@ async def get_wechat_publish_status(
     Get WeChat publish status for a draft.
     """
     try:
-        record = await draft_service.get_wechat_publish_record(draft_id, db)
+        record = await publish_record_service.get_latest_for_draft(draft_id, db)
 
         if not record:
             return {
@@ -313,18 +314,127 @@ async def get_wechat_publish_status(
             "message": "ok",
             "data": {
                 "has_record": True,
+                "record_id": record.id,
                 "draft_id": record.draft_id,
                 "wechat_draft_id": record.wechat_draft_id,
                 "media_id": record.media_id,
                 "publish_id": record.publish_id,
                 "publish_status": record.publish_status,
+                "source_mode": record.source_mode,
+                "trigger_type": record.trigger_type,
+                "publish_attempt": record.publish_attempt,
+                "retry_count": record.retry_count,
                 "error_code": record.error_code,
                 "error_message": record.error_message,
-                "source": record.source,
+                "url": record.url,
+                "started_at": record.started_at.isoformat() if record.started_at else None,
+                "finished_at": record.finished_at.isoformat() if record.finished_at else None,
+                "published_at": record.published_at.isoformat() if record.published_at else None,
+                "last_checked_at": record.last_checked_at.isoformat() if record.last_checked_at else None,
                 "created_at": record.created_at.isoformat() if record.created_at else None,
-                "updated_at": record.updated_at.isoformat() if record.updated_at else None,
             }
         }
     except Exception as e:
         logger.error("draft_wechat_status_error", draft_id=draft_id, error=str(e))
         raise
+
+
+@router.get("/{draft_id}/publish-records")
+async def list_draft_publish_records(
+    draft_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get all publish records for a draft (including retries).
+    """
+    try:
+        records = await publish_record_service.get_records_for_draft(draft_id, db)
+
+        return {
+            "code": 0,
+            "message": "ok",
+            "data": {
+                "draft_id": draft_id,
+                "total": len(records),
+                "records": [
+                    {
+                        "id": r.id,
+                        "publish_status": r.publish_status,
+                        "source_mode": r.source_mode,
+                        "trigger_type": r.trigger_type,
+                        "publish_attempt": r.publish_attempt,
+                        "retry_count": r.retry_count,
+                        "error_code": r.error_code,
+                        "error_message": r.error_message,
+                        "url": r.url,
+                        "started_at": r.started_at.isoformat() if r.started_at else None,
+                        "published_at": r.published_at.isoformat() if r.published_at else None,
+                        "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+                        "created_at": r.created_at.isoformat() if r.created_at else None,
+                    }
+                    for r in records
+                ]
+            }
+        }
+    except Exception as e:
+        logger.error("draft_publish_records_error", draft_id=draft_id, error=str(e))
+        raise
+
+
+@router.post("/{draft_id}/retry-publish")
+async def retry_publish_draft(
+    draft_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retry failed publish for a draft.
+
+    Only allowed when:
+    - Draft has a failed publish record
+    - Retry count < 3
+    """
+    try:
+        draft, result = await draft_service.retry_publish_to_wechat(draft_id, db)
+        await db.commit()
+
+        return {
+            "code": 0,
+            "message": "Retry publish initiated successfully",
+            "data": {
+                "draft_id": draft.id,
+                "draft_status": draft.draft_status,
+                "publish_status": draft.publish_status,
+                "published_at": draft.published_at.isoformat() if draft.published_at else None,
+                "wechat_media_id": result.get("media_id"),
+                "wechat_publish_id": result.get("publish_id"),
+            }
+        }
+    except PublishRecordError as e:
+        logger.warning("draft_retry_publish_record_error", draft_id=draft_id, error=str(e))
+        return {
+            "code": 9004,
+            "message": str(e),
+            "data": {
+                "draft_id": draft_id,
+                "publish_status": "failed",
+                "error": str(e)
+            }
+        }
+    except DraftPublishError as e:
+        logger.error("draft_retry_publish_error", draft_id=draft_id, error=e.message)
+        return {
+            "code": 9004,
+            "message": e.message,
+            "data": {
+                "draft_id": draft_id,
+                "publish_status": "failed",
+                "error": str(e)
+            }
+        }
+    except Exception as e:
+        logger.error("draft_retry_publish_unexpected_error", draft_id=draft_id, error=str(e))
+        return {
+            "code": 5000,
+            "message": f"Internal error: {str(e)}",
+            "data": None
+        }

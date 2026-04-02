@@ -3,8 +3,19 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { getDraft, confirmPublishDraft, discardDraft, rejectDraft, rerunFromDraft } from "@/lib/api";
-import type { DraftDetail } from "@/types";
+import {
+  getDraft,
+  confirmPublishDraft,
+  discardDraft,
+  rejectDraft,
+  rerunFromDraft,
+  getDraftWeChatStatus,
+  getDraftPublishRecords,
+  retryPublishDraft,
+  refreshPublishStatus,
+  publishDraftToWeChat,
+} from "@/lib/api";
+import type { DraftDetail, WeChatPublishStatus, PublishRecord } from "@/types";
 
 export default function DraftDetailPage() {
   const params = useParams();
@@ -16,6 +27,11 @@ export default function DraftDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"content" | "candidates">("content");
 
+  // Publish status state
+  const [publishStatus, setPublishStatus] = useState<WeChatPublishStatus | null>(null);
+  const [publishRecords, setPublishRecords] = useState<PublishRecord[]>([]);
+  const [publishLoading, setPublishLoading] = useState(false);
+
   useEffect(() => {
     loadDraft();
   }, [draftId]);
@@ -26,10 +42,28 @@ export default function DraftDetailPage() {
     try {
       const data = await getDraft(draftId);
       setDraft(data);
+      // Load publish status after draft
+      loadPublishStatus();
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载失败");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadPublishStatus() {
+    setPublishLoading(true);
+    try {
+      const status = await getDraftWeChatStatus(draftId);
+      setPublishStatus(status);
+      if (status.has_record) {
+        const records = await getDraftPublishRecords(draftId);
+        setPublishRecords(records.records);
+      }
+    } catch (e) {
+      console.error("Failed to load publish status:", e);
+    } finally {
+      setPublishLoading(false);
     }
   }
 
@@ -42,6 +76,62 @@ export default function DraftDetailPage() {
       loadDraft();
     } catch (e) {
       alert(e instanceof Error ? e.message : "确认发布失败");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handlePublishToWeChat() {
+    if (!confirm("确定要发布到微信公众号吗？")) return;
+    setActionLoading("wechat");
+    try {
+      const result = await publishDraftToWeChat(draftId);
+      if (result.error) {
+        alert(`发布失败: ${result.error}`);
+      } else {
+        alert("发布成功！");
+      }
+      loadDraft();
+      loadPublishStatus();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "发布失败");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleRetryPublish() {
+    if (!confirm("确定要重试发布吗？")) return;
+    setActionLoading("retry");
+    try {
+      const result = await retryPublishDraft(draftId);
+      if (result.error) {
+        alert(`重试失败: ${result.error}`);
+      } else {
+        alert("重试成功！");
+      }
+      loadDraft();
+      loadPublishStatus();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "重试失败");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  async function handleRefreshStatus() {
+    if (!publishStatus?.record_id) {
+      alert("无发布记录可刷新");
+      return;
+    }
+    setActionLoading("refresh");
+    try {
+      const result = await refreshPublishStatus(publishStatus.record_id);
+      alert(result.message);
+      loadDraft();
+      loadPublishStatus();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "刷新失败");
     } finally {
       setActionLoading(null);
     }
@@ -89,7 +179,7 @@ export default function DraftDetailPage() {
     }
   }
 
-  function formatDate(dateStr: string | null) {
+  function formatDate(dateStr: string | null | undefined) {
     if (!dateStr) return "-";
     return new Date(dateStr).toLocaleString("zh-CN");
   }
@@ -115,10 +205,14 @@ export default function DraftDetailPage() {
     switch (status) {
       case "published":
         return <span className="px-3 py-1 text-sm rounded-full bg-green-900/30 text-green-400 border border-green-700">已发布</span>;
-      case "pending":
+      case "publishing":
         return <span className="px-3 py-1 text-sm rounded-full bg-yellow-900/30 text-yellow-400 border border-yellow-700">发布中</span>;
+      case "pending":
+        return <span className="px-3 py-1 text-sm rounded-full bg-yellow-900/30 text-yellow-400 border border-yellow-700">等待发布</span>;
       case "failed":
         return <span className="px-3 py-1 text-sm rounded-full bg-red-900/30 text-red-400 border border-red-700">发布失败</span>;
+      case "unknown":
+        return <span className="px-3 py-1 text-sm rounded-full bg-slate-700/50 text-slate-400 border border-slate-600">状态未知</span>;
       case "not_published":
       default:
         return <span className="px-3 py-1 text-sm rounded-full bg-slate-700/50 text-slate-400 border border-slate-600">未发布</span>;
@@ -137,28 +231,20 @@ export default function DraftDetailPage() {
     );
   }
 
-  // 简单 Markdown 转 HTML（用于预览）
+  // Simple Markdown to HTML renderer
   function renderMarkdown(content: string): string {
     return content
-      // 标题
       .replace(/^### (.+)$/gm, '<h3 class="text-lg font-semibold text-white mt-4 mb-2">$1</h3>')
       .replace(/^## (.+)$/gm, '<h2 class="text-xl font-semibold text-white mt-6 mb-3">$1</h2>')
       .replace(/^# (.+)$/gm, '<h1 class="text-2xl font-bold text-white mt-8 mb-4">$1</h1>')
-      // 粗体和斜体
       .replace(/\*\*(.+?)\*\*/g, '<strong class="font-bold text-white">$1</strong>')
       .replace(/\*(.+?)\*/g, '<em class="italic text-slate-300">$1</em>')
-      // 引用
       .replace(/^> (.+)$/gm, '<blockquote class="border-l-4 border-cyan-600 pl-4 py-2 my-4 bg-slate-800/50 text-slate-300 italic">$1</blockquote>')
-      // 代码块
       .replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre class="bg-slate-900 rounded-lg p-4 my-4 overflow-x-auto"><code class="text-sm text-slate-300">$2</code></pre>')
-      // 行内代码
       .replace(/`(.+?)`/g, '<code class="bg-slate-800 text-cyan-400 px-1 py-0.5 rounded text-sm">$1</code>')
-      // 列表
       .replace(/^- (.+)$/gm, '<li class="ml-4 text-slate-300 list-disc">$1</li>')
       .replace(/^(\d+)\. (.+)$/gm, '<li class="ml-4 text-slate-300 list-decimal">$2</li>')
-      // 段落
       .replace(/\n\n/g, '</p><p class="text-slate-300 leading-relaxed my-3">')
-      // 换行
       .replace(/\n/g, "<br/>");
   }
 
@@ -194,8 +280,9 @@ export default function DraftDetailPage() {
   const isDiscarded = draft.draft_status === "discarded";
   const isRejected = draft.draft_status === "rejected";
   const isPublished = draft.publish_status === "published";
-  // Terminal states: discarded, rejected, or published cannot be operated on
-  const isTerminal = isDiscarded || isRejected || isPublished;
+  const isFailed = draft.publish_status === "failed";
+  const isPublishing = draft.publish_status === "publishing";
+  const isTerminal = isDiscarded || isRejected;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
@@ -229,9 +316,104 @@ export default function DraftDetailPage() {
             <span>字数: {draft.word_count}</span>
             <span>来源: {draft.source_type === "semi_auto_task" ? "半自动任务" : "手动任务"}</span>
             <span>创建: {formatDate(draft.created_at)}</span>
-            {draft.published_at && <span>发布: {formatDate(draft.published_at)}</span>}
+            {draft.published_at && <span className="text-green-400">发布: {formatDate(draft.published_at)}</span>}
           </div>
         </div>
+
+        {/* WeChat Publish Status Section */}
+        {publishLoading ? (
+          <div className="mb-6 bg-slate-800/60 border border-slate-700 rounded-xl p-5">
+            <div className="text-slate-400 text-sm">加载发布状态...</div>
+          </div>
+        ) : publishStatus?.has_record && (
+          <div className="mb-6 bg-slate-800/60 border border-slate-700 rounded-xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-medium text-white">📤 微信发布状态</h2>
+              <button
+                onClick={handleRefreshStatus}
+                disabled={actionLoading === "refresh" || !publishStatus?.record_id}
+                className="text-sm px-3 py-1 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-800 text-slate-300 rounded-lg transition-colors"
+              >
+                {actionLoading === "refresh" ? "刷新中..." : "🔄 刷新状态"}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+              <div className="bg-slate-900/50 rounded-lg p-3">
+                <div className="text-xs text-slate-400 mb-1">状态</div>
+                <div className="font-medium">{getPublishStatusBadge(publishStatus.publish_status)}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3">
+                <div className="text-xs text-slate-400 mb-1">触发方式</div>
+                <div className="text-sm text-white">{publishStatus.trigger_type || "-"}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3">
+                <div className="text-xs text-slate-400 mb-1">发布次数</div>
+                <div className="text-sm text-white">{publishStatus.publish_attempt || 1}</div>
+              </div>
+              <div className="bg-slate-900/50 rounded-lg p-3">
+                <div className="text-xs text-slate-400 mb-1">重试次数</div>
+                <div className="text-sm text-white">{publishStatus.retry_count || 0}</div>
+              </div>
+            </div>
+
+            {publishStatus.publish_status === "published" && publishStatus.url && (
+              <div className="mb-3">
+                <a
+                  href={publishStatus.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-cyan-400 hover:underline text-sm"
+                >
+                  🔗 查看已发布文章
+                </a>
+              </div>
+            )}
+
+            {publishStatus.publish_status === "failed" && publishStatus.error_message && (
+              <div className="bg-red-900/20 border border-red-700/50 rounded-lg p-3 mb-4">
+                <div className="text-xs text-red-400 mb-1">失败原因</div>
+                <div className="text-sm text-red-300">{publishStatus.error_message}</div>
+              </div>
+            )}
+
+            {/* Publish History */}
+            {publishRecords.length > 1 && (
+              <div className="mt-4 pt-4 border-t border-slate-700">
+                <h3 className="text-sm font-medium text-slate-300 mb-2">发布历史</h3>
+                <div className="space-y-2">
+                  {publishRecords.map((record) => (
+                    <div
+                      key={record.id}
+                      className={`text-xs p-2 rounded ${
+                        record.publish_status === "published"
+                          ? "bg-green-900/20 border border-green-700/50"
+                          : record.publish_status === "failed"
+                          ? "bg-red-900/20 border border-red-700/50"
+                          : "bg-slate-700/50 border border-slate-600"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-300">
+                          第{record.publish_attempt}次 · {record.trigger_type} · {formatDate(record.created_at)}
+                        </span>
+                        <span className={
+                          record.publish_status === "published" ? "text-green-400" :
+                          record.publish_status === "failed" ? "text-red-400" : "text-yellow-400"
+                        }>
+                          {record.publish_status}
+                        </span>
+                      </div>
+                      {record.error_message && (
+                        <div className="text-slate-400 mt-1">{record.error_message}</div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Audit Result */}
         {draft.audit_result && (
@@ -355,14 +537,6 @@ export default function DraftDetailPage() {
           </div>
         )}
 
-        {/* Publish Error */}
-        {draft.publish_status === "failed" && draft.publish_error_message && (
-          <div className="mt-6 bg-red-900/30 border border-red-700 rounded-xl p-5">
-            <h2 className="text-lg font-medium text-red-400 mb-2">发布失败</h2>
-            <p className="text-red-300 text-sm">{draft.publish_error_message}</p>
-          </div>
-        )}
-
         {/* Actions */}
         {!isDiscarded && (
           <div className="mt-6 bg-slate-800/60 border border-slate-700 rounded-xl p-5">
@@ -371,11 +545,11 @@ export default function DraftDetailPage() {
               {isPendingReview && !isPublished && (
                 <>
                   <button
-                    onClick={handleConfirmPublish}
-                    disabled={actionLoading === "confirm"}
-                    className="bg-green-600 hover:bg-green-500 disabled:bg-slate-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                    onClick={handlePublishToWeChat}
+                    disabled={actionLoading === "wechat" || isPublishing}
+                    className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
                   >
-                    {actionLoading === "confirm" ? "处理中..." : "✅ 确认发布"}
+                    {actionLoading === "wechat" ? "发布中..." : isPublishing ? "发布中..." : "🚀 发布到微信"}
                   </button>
                   <button
                     onClick={handleReject}
@@ -385,6 +559,28 @@ export default function DraftDetailPage() {
                     {actionLoading === "reject" ? "处理中..." : "❌ 拒绝草稿"}
                   </button>
                 </>
+              )}
+
+              {/* Retry Button - only show when failed */}
+              {isFailed && (
+                <button
+                  onClick={handleRetryPublish}
+                  disabled={actionLoading === "retry"}
+                  className="bg-orange-600 hover:bg-orange-500 disabled:bg-slate-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                >
+                  {actionLoading === "retry" ? "重试中..." : "🔄 重试发布"}
+                </button>
+              )}
+
+              {/* Refresh Status Button - show when has record and not published */}
+              {publishStatus?.has_record && !isPublished && (
+                <button
+                  onClick={handleRefreshStatus}
+                  disabled={actionLoading === "refresh"}
+                  className="bg-slate-600 hover:bg-slate-500 disabled:bg-slate-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                >
+                  {actionLoading === "refresh" ? "刷新中..." : "🔄 刷新发布状态"}
+                </button>
               )}
 
               {isPendingReview && (

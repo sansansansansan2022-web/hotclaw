@@ -7,6 +7,7 @@
 - 草稿状态
 - 审核结果
 - 发布频率限制
+- 幂等性检查
 """
 
 from sqlalchemy import select
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logger import get_logger
 from app.models.tables import ArticleDraftModel, AccountModel
 from app.models.wechat_config import WeChatConfigModel
+from app.services.publish_record_service import publish_record_service
 
 logger = get_logger(__name__)
 
@@ -34,13 +36,20 @@ class PublishDecisionService:
     3. Draft status allows publishing
     4. Audit result passes (if applicable)
     5. No rate limiting issues
+    6. Idempotency check - no duplicate publishing
     """
+
+    # Publish statuses that block new publish
+    BLOCKED_PUBLISH_STATUSES = {"published"}
+    # Draft statuses that block publish
+    BLOCKED_DRAFT_STATUSES = {"discarded", "rejected", "published"}
 
     async def validate_for_publish(
         self,
         draft_id: int,
         db: AsyncSession,
-        source: str = "manual_confirm"
+        source: str = "manual_confirm",
+        is_retry: bool = False,
     ) -> dict:
         """
         Validate all conditions before publishing.
@@ -49,6 +58,7 @@ class PublishDecisionService:
             draft_id: Draft ID to validate
             db: Database session
             source: Publish source (manual_confirm, semi_auto_confirm, full_auto)
+            is_retry: If True, skip idempotency check (retry case)
 
         Returns:
             dict with validation result and context
@@ -69,16 +79,18 @@ class PublishDecisionService:
             "account_id": draft.account_id,
             "draft_status": draft.draft_status,
             "publish_status": draft.publish_status,
-            "source": source
+            "source": source,
+            "is_retry": is_retry,
         }
 
         # 1. Check draft status allows publishing
-        if draft.publish_status == "published":
+        if draft.publish_status in self.BLOCKED_PUBLISH_STATUSES:
             raise PublishDecisionError(
-                f"Draft {draft_id} already published, cannot republish"
+                f"Draft {draft_id} already published (status: {draft.publish_status}), "
+                f"cannot republish. Use retry if needed."
             )
 
-        if draft.draft_status in {"discarded", "rejected"}:
+        if draft.draft_status in self.BLOCKED_DRAFT_STATUSES:
             raise PublishDecisionError(
                 f"Draft {draft_id} is {draft.draft_status}, cannot publish"
             )
@@ -128,31 +140,46 @@ class PublishDecisionService:
 
         context["wechat_app_id"] = wechat_config.app_id
 
-        # 4. For semi_auto, source must be semi_auto_confirm
-        if account.operation_mode == "semi_auto" and source not in {"semi_auto_confirm", "manual_confirm"}:
-            raise PublishDecisionError(
-                f"semi_auto account requires semi_auto_confirm source, got {source}"
-            )
-
-        # 5. For full_auto, source must be full_auto
-        if account.operation_mode == "full_auto" and source != "full_auto":
-            # full_auto should always use full_auto source
-            if source not in {"full_auto", "semi_auto_confirm"}:
-                logger.warning(
-                    "publish_decision_full_auto_source",
-                    draft_id=draft_id,
-                    expected="full_auto",
-                    got=source
+        # 4. Idempotency check (skip for retry)
+        if not is_retry:
+            has_active = await publish_record_service.has_active_publishing(draft_id, db)
+            if has_active:
+                raise PublishDecisionError(
+                    f"Draft {draft_id} already has an active publishing record "
+                    f"(pending/publishing). Please wait for current publish to complete."
                 )
 
-        # 6. Check auto_publish setting
+            # Check latest record status
+            latest = await publish_record_service.get_latest_for_draft(draft_id, db)
+            if latest and latest.publish_status == "failed" and latest.retry_count >= 3:
+                raise PublishDecisionError(
+                    f"Draft {draft_id} has exceeded maximum retry attempts (3). "
+                    f"Please create a new draft instead."
+                )
+
+        # 5. For semi_auto, source must be semi_auto_confirm or manual_confirm
+        if account.operation_mode == "semi_auto" and source not in {"semi_auto_confirm", "manual_confirm"}:
+            raise PublishDecisionError(
+                f"semi_auto account requires manual_confirm source, got {source}"
+            )
+
+        # 6. For full_auto, source must be full_auto
+        if account.operation_mode == "full_auto" and source not in {"full_auto", "semi_auto_confirm", "manual_confirm"}:
+            logger.warning(
+                "publish_decision_full_auto_source",
+                draft_id=draft_id,
+                expected="full_auto",
+                got=source
+            )
+
+        # 7. Check auto_publish setting for full_auto
         if source == "full_auto" and not account.auto_publish_enabled:
             raise PublishDecisionError(
                 f"Account {draft.account_id} has auto_publish disabled. "
                 f"Cannot auto publish in full_auto mode."
             )
 
-        # 7. Audit result check (if available)
+        # 8. Audit result check (if available)
         from app.models.tables import AuditResultModel
         stmt = select(AuditResultModel).where(AuditResultModel.draft_id == draft_id)
         result = await db.execute(stmt)

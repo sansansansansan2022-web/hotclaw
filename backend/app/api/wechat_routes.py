@@ -1,11 +1,12 @@
 """WeChat configuration API routes."""
 
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.session import get_db
-from app.models.wechat_config import WeChatConfigModel
+from app.models.wechat_config import WeChatConfigModel, WeChatPublishRecordModel
 from app.models.tables import AccountModel
 from app.schemas.wechat import (
     WeChatConfigCreate,
@@ -16,6 +17,8 @@ from app.schemas.wechat import (
     WeChatTestConnectionResponse,
 )
 from app.services.wechat_token_service import wechat_token_service, WeChatTokenError
+from app.services.wechat_publish_service import wechat_publish_service, WeChatPublishError
+from app.services.publish_record_service import publish_record_service
 from app.core.logger import get_logger
 
 router = APIRouter(prefix="/api/v1/wechat", tags=["wechat"])
@@ -196,3 +199,150 @@ async def test_wechat_connection(
             "message": message
         }
     }
+
+
+@router.get("/publish-records/{record_id}")
+async def get_publish_record(
+    record_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a single publish record by ID.
+    """
+    record = await publish_record_service.get_record(record_id, db)
+
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Publish record {record_id} not found")
+
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "id": record.id,
+            "draft_id": record.draft_id,
+            "task_id": record.task_id,
+            "account_id": record.account_id,
+            "wechat_draft_id": record.wechat_draft_id,
+            "media_id": record.media_id,
+            "publish_id": record.publish_id,
+            "article_id": record.article_id,
+            "url": record.url,
+            "publish_status": record.publish_status,
+            "source_mode": record.source_mode,
+            "trigger_type": record.trigger_type,
+            "publish_attempt": record.publish_attempt,
+            "retry_count": record.retry_count,
+            "error_code": record.error_code,
+            "error_message": record.error_message,
+            "started_at": record.started_at.isoformat() if record.started_at else None,
+            "finished_at": record.finished_at.isoformat() if record.finished_at else None,
+            "published_at": record.published_at.isoformat() if record.published_at else None,
+            "last_checked_at": record.last_checked_at.isoformat() if record.last_checked_at else None,
+            "created_at": record.created_at.isoformat() if record.created_at else None,
+        }
+    }
+
+
+@router.post("/publish-records/{record_id}/refresh-status")
+async def refresh_publish_status(
+    record_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Refresh publish status from WeChat API.
+
+    Syncs the latest status from WeChat to local record and draft.
+    """
+    record = await publish_record_service.get_record(record_id, db)
+
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Publish record {record_id} not found")
+
+    if not record.publish_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Publish record {record_id} has no publish_id, cannot refresh"
+        )
+
+    # Get WeChat config
+    stmt = select(WeChatConfigModel).where(
+        WeChatConfigModel.account_id == record.account_id
+    )
+    result = await db.execute(stmt)
+    wechat_config = result.scalar_one_or_none()
+
+    if not wechat_config:
+        raise HTTPException(
+            status_code=400,
+            detail=f"WeChat config not found for account {record.account_id}"
+        )
+
+    try:
+        # Query WeChat publish status
+        status_result = await wechat_publish_service.get_publish_status(
+            app_id=wechat_config.app_id,
+            app_secret=wechat_config.app_secret,
+            publish_id=record.publish_id
+        )
+
+        # Update local record
+        new_status = status_result.get("status", "unknown")
+
+        if new_status == "success":
+            await publish_record_service.update_status(
+                record_id=record_id,
+                db=db,
+                status="published",
+                article_id=status_result.get("article_id"),
+                last_checked_at=datetime.now(timezone.utc),
+            )
+            # Sync draft status
+            await publish_record_service.sync_draft_status(record.draft_id, db)
+        elif new_status == "failed":
+            await publish_record_service.update_status(
+                record_id=record_id,
+                db=db,
+                status="failed",
+                last_checked_at=datetime.now(timezone.utc),
+            )
+            await publish_record_service.sync_draft_status(record.draft_id, db)
+        else:
+            # Still pending
+            await publish_record_service.update_status(
+                record_id=record_id,
+                db=db,
+                status="publishing",
+                last_checked_at=datetime.now(timezone.utc),
+            )
+
+        await db.commit()
+
+        # Get updated record
+        updated = await publish_record_service.get_record(record_id, db)
+
+        return {
+            "code": 0,
+            "message": "ok",
+            "data": {
+                "record_id": record_id,
+                "previous_status": record.publish_status,
+                "new_status": updated.publish_status if updated else new_status,
+                "synced_draft": True,
+                "message": f"Status refreshed: {new_status}"
+            }
+        }
+
+    except WeChatPublishError as e:
+        logger.error(
+            "refresh_publish_status_failed",
+            record_id=record_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=502, detail=f"WeChat API error: {str(e)}")
+    except Exception as e:
+        logger.error(
+            "refresh_publish_status_error",
+            record_id=record_id,
+            error=str(e)
+        )
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")

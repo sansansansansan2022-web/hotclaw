@@ -291,7 +291,7 @@ export interface AccountListResponse {
 // --- Draft ---
 
 export type DraftStatus = "draft" | "pending_review" | "approved" | "rejected" | "discarded";
-export type PublishStatus = "not_published" | "pending" | "published" | "failed";
+export type PublishStatus = "not_published" | "pending" | "publishing" | "published" | "failed" | "unknown";
 export type SourceType = "manual_task" | "semi_auto_task";
 
 export interface DraftSummary {
@@ -426,16 +426,24 @@ export interface WeChatTestConnectionResponse {
 
 export interface WeChatPublishStatus {
   has_record: boolean;
+  record_id?: number;
   draft_id: number;
   wechat_draft_id?: string;
   media_id?: string;
   publish_id?: string;
-  publish_status: "pending" | "success" | "failed";
+  publish_status: "pending" | "publishing" | "published" | "failed" | "unknown";
+  source_mode?: string;
+  trigger_type?: string;
+  publish_attempt?: number;
+  retry_count?: number;
   error_code?: string;
   error_message?: string;
-  source: string;
-  created_at: string;
-  updated_at: string;
+  url?: string;
+  started_at?: string;
+  finished_at?: string;
+  published_at?: string;
+  last_checked_at?: string;
+  created_at?: string;
 }
 
 export interface WeChatPublishResult {
@@ -445,4 +453,37 @@ export interface WeChatPublishResult {
   published_at: string | null;
   wechat_media_id?: string;
   wechat_publish_id?: string;
+  error?: string;
+}
+
+// Publish Record
+export interface PublishRecord {
+  id: number;
+  publish_status: string;
+  source_mode: string;
+  trigger_type: string;
+  publish_attempt: number;
+  retry_count: number;
+  error_code?: string;
+  error_message?: string;
+  url?: string;
+  started_at?: string;
+  published_at?: string;
+  finished_at?: string;
+  created_at: string;
+}
+
+export interface PublishRecordListResponse {
+  draft_id: number;
+  total: number;
+  records: PublishRecord[];
+}
+
+// Refresh Status Response
+export interface RefreshStatusResponse {
+  record_id: number;
+  previous_status: string;
+  new_status: string;
+  synced_draft: boolean;
+  message: string;
 }

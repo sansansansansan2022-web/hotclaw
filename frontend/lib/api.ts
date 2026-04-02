@@ -36,6 +36,11 @@ import type {
   DraftDiscardData,
   DraftRejectData,
   DraftRerunData,
+  WeChatPublishStatus,
+  WeChatPublishResult,
+  PublishRecord,
+  PublishRecordListResponse,
+  RefreshStatusResponse,
 } from "@/types";
 
 // API 基础路径（通过 Next.js 代理）
@@ -509,8 +514,6 @@ import type {
   WeChatConfigUpdate,
   WeChatTestConnectionRequest,
   WeChatTestConnectionResponse,
-  WeChatPublishStatus,
-  WeChatPublishResult,
 } from "@/types";
 
 /** 获取账号的微信配置 */
@@ -571,4 +574,36 @@ export async function getDraftWeChatStatus(
   draftId: number
 ): Promise<WeChatPublishStatus> {
   return request<WeChatPublishStatus>(`/drafts/${draftId}/wechat-status`);
+}
+
+/** 获取草稿的所有发布记录 */
+export async function getDraftPublishRecords(
+  draftId: number
+): Promise<PublishRecordListResponse> {
+  return request<PublishRecordListResponse>(`/drafts/${draftId}/publish-records`);
+}
+
+/** 重试发布草稿到微信 */
+export async function retryPublishDraft(
+  draftId: number
+): Promise<WeChatPublishResult> {
+  return request<WeChatPublishResult>(`/drafts/${draftId}/retry-publish`, {
+    method: "POST",
+  });
+}
+
+/** 获取单个发布记录 */
+export async function getPublishRecord(
+  recordId: number
+): Promise<PublishRecord> {
+  return request<PublishRecord>(`/wechat/publish-records/${recordId}`);
+}
+
+/** 刷新发布状态 */
+export async function refreshPublishStatus(
+  recordId: number
+): Promise<RefreshStatusResponse> {
+  return request<RefreshStatusResponse>(`/wechat/publish-records/${recordId}/refresh-status`, {
+    method: "POST",
+  });
 }
