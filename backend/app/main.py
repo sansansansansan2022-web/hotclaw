@@ -156,6 +156,10 @@ async def hotclaw_error_handler(request: Request, exc: HotClawError) -> JSONResp
         3: 502,  # 3xxx -> 502 外部服务错误
         4: 400,  # 4xxx -> 400 配置错误
         5: 500,  # 5xxx -> 500 系统错误
+        6: 400,  # 6xxx -> 400 账号错误
+        7: 500,  # 7xxx -> 500 调度器错误
+        8: 409,  # 8xxx -> 409 任务冲突错误
+        9: 400,  # 9xxx -> 400 草稿错误
     }
     category = exc.code // 1000
     http_status = status_map.get(category, 500)
