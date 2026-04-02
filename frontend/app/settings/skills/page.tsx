@@ -24,49 +24,58 @@ export default function SkillsPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#1a1a2e] text-gray-200 font-mono">
-      <header className="bg-[#2a2a4a] border-b border-gray-700 px-6 py-3 flex items-center gap-4">
-        <Link href="/" className="text-cyan-400 hover:text-cyan-300 text-[12px]">&larr; 返回编辑部</Link>
-        <span className="text-[14px] text-gray-300 tracking-widest">Skill 管理</span>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+      <header className="bg-slate-800/80 backdrop-blur-sm border-b border-slate-700 px-6 py-4 sticky top-0 z-20">
+        <div className="max-w-[800px] mx-auto flex items-center gap-4">
+          <Link href="/settings" className="text-cyan-400 hover:text-cyan-300 text-sm">
+            &larr; 设置中心
+          </Link>
+          <span className="text-slate-500">/</span>
+          <span className="text-white font-medium text-sm">技能配置</span>
+        </div>
       </header>
 
       <main className="max-w-[800px] mx-auto p-6">
-        <div className="text-[10px] text-cyan-400/80 mb-3 border-b border-gray-700/50 pb-1">
-          已注册 Skill
+        <div className="text-xs text-cyan-400/80 mb-4 border-b border-slate-700/50 pb-2 font-medium">
+          已注册技能
         </div>
 
         {loading ? (
-          <div className="text-[10px] text-gray-500 py-12 text-center">加载中...</div>
+          <div className="flex items-center justify-center py-20 gap-3">
+            <div className="w-8 h-8 border-4 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+            <span className="text-slate-500 text-sm">加载中...</span>
+          </div>
         ) : skills.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-[12px] text-gray-500 mb-2">暂无已注册的 Skill</div>
-            <div className="text-[9px] text-gray-600">
-              Skill 是 Agent 调用的原子能力。MVP 阶段使用 Mock Agent，暂未注册独立 Skill。
+          <div className="text-center py-16">
+            <div className="text-5xl mb-4">&#128161;</div>
+            <div className="text-slate-400 text-sm mb-2">暂无已注册的技能</div>
+            <div className="text-slate-600 text-xs max-w-md mx-auto">
+              Skill 是 Agent 调用的原子能力单元，可在 skills/ 目录下实现并注册到系统。
             </div>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {skills.map((s) => (
               <div
                 key={s.skill_id}
-                className="bg-gray-900/50 border border-gray-700 rounded-sm px-4 py-3"
+                className="bg-slate-800/50 border border-slate-700 rounded-xl px-5 py-4"
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mb-2">
                   <div>
-                    <div className="text-[11px] text-gray-300 font-bold">{s.name}</div>
-                    <div className="text-[9px] text-gray-500 mt-0.5">{s.skill_id} v{s.version}</div>
+                    <div className="text-white font-medium text-sm">{s.name}</div>
+                    <div className="text-xs text-slate-500 mt-0.5 font-mono">{s.skill_id} v{s.version}</div>
                   </div>
-                  <span className={`text-[9px] px-2 py-0.5 rounded-sm border ${
+                  <span className={`text-xs px-2.5 py-1 rounded-lg border ${
                     s.status === "active"
-                      ? "text-green-400 border-green-600/30"
-                      : "text-gray-400 border-gray-600/30"
+                      ? "text-green-400 border-green-600/40 bg-green-900/20"
+                      : "text-slate-400 border-slate-600/40 bg-slate-800"
                   }`}>
                     {s.status}
                   </span>
                 </div>
-                <div className="text-[10px] text-gray-400 mt-1">{s.description}</div>
-                {s.config_data && (
-                  <pre className="mt-2 text-[9px] text-gray-500 bg-gray-800/50 p-2 rounded-sm overflow-auto max-h-[100px]">
+                <div className="text-sm text-slate-400 mb-3">{s.description}</div>
+                {s.config_data && Object.keys(s.config_data).length > 0 && (
+                  <pre className="mt-2 text-xs text-slate-500 bg-slate-900/60 p-3 rounded-lg overflow-auto max-h-[120px] font-mono">
                     {JSON.stringify(s.config_data, null, 2)}
                   </pre>
                 )}

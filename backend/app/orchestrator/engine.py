@@ -38,6 +38,7 @@ from app.core.tracer import get_trace_id
 from app.models.tables import TaskModel, TaskNodeRunModel, AgentModel
 from app.orchestrator.workspace import Workspace
 from app.orchestrator.broadcaster import broadcaster
+from app.services.account_service import account_service
 
 logger = get_logger(__name__)
 
@@ -168,6 +169,14 @@ class OrchestratorEngine:
         workspace = Workspace(task_id=task.id, input_data=task.input_data or {})
         nodes = DEFAULT_WORKFLOW_NODES
         total_tokens = 0
+
+        # ===== Account Context 注入 =====
+        # 如果任务关联了账号，获取账号上下文并注入到 workspace
+        # 这样智能体可以访问账号的定位、受众、内容策略等信息
+        account_context = await account_service.get_account_context(task.account_id, db)
+        if account_context:
+            workspace.set("account_context", account_context)
+            logger.info("account_context_injected", account_id=task.account_id)
 
         # ===== 初始化任务状态 =====
         task.status = "running"

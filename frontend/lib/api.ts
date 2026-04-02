@@ -22,6 +22,20 @@ import type {
   TaskDetail,
   NodeRun,
   TaskSummary,
+  AccountCreateRequest,
+  AccountUpdateRequest,
+  AccountSummary,
+  AccountDetail,
+  AccountCreateData,
+  AccountRunData,
+  AccountListResponse,
+  DraftSummary,
+  DraftDetail,
+  DraftListResponse,
+  DraftConfirmData,
+  DraftDiscardData,
+  DraftRejectData,
+  DraftRerunData,
 } from "@/types";
 
 // API 基础路径（通过 Next.js 代理）
@@ -74,9 +88,19 @@ export async function getTaskNodes(taskId: string): Promise<{ nodes: NodeRun[] }
 /** 任务列表（分页） */
 export async function listTasks(
   page = 1,
-  pageSize = 20
+  pageSize = 20,
+  status?: string
 ): Promise<{ tasks: TaskSummary[]; pagination: { page: number; page_size: number; total: number } }> {
-  return request(`/tasks?page=${page}&page_size=${pageSize}`);
+  const qs = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  if (status) qs.set("status", status);
+  return request(`/tasks?${qs}`);
+}
+
+/** 重跑任务 */
+export async function rerunTask(taskId: string): Promise<TaskCreateData> {
+  return request<TaskCreateData>(`/tasks/${taskId}/rerun`, {
+    method: "POST",
+  });
 }
 
 /**
@@ -360,3 +384,117 @@ export const LLM_PROVIDER_TEMPLATES = [
     base_url: "http://localhost:8000/v1",
   },
 ] as const;
+
+// =============================================================================
+// Account 相关 API
+// =============================================================================
+
+/** 创建账号 */
+export async function createAccount(data: AccountCreateRequest): Promise<AccountCreateData> {
+  return request<AccountCreateData>("/accounts", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+/** 账号列表（分页） */
+export async function listAccounts(
+  page = 1,
+  pageSize = 20
+): Promise<AccountListResponse> {
+  const qs = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  return request<AccountListResponse>(`/accounts?${qs}`);
+}
+
+/** 获取账号详情 */
+export async function getAccount(accountId: string): Promise<AccountDetail> {
+  return request<AccountDetail>(`/accounts/${accountId}`);
+}
+
+/** 更新账号 */
+export async function updateAccount(
+  accountId: string,
+  data: AccountUpdateRequest
+): Promise<AccountSummary> {
+  return request<AccountSummary>(`/accounts/${accountId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+/** 手动触发账号运行 */
+export async function runAccount(accountId: string): Promise<AccountRunData> {
+  return request<AccountRunData>(`/accounts/${accountId}/run`, {
+    method: "POST",
+  });
+}
+
+/** 启用账号 */
+export async function enableAccount(accountId: string): Promise<AccountSummary> {
+  return request<AccountSummary>(`/accounts/${accountId}/enable`, {
+    method: "POST",
+  });
+}
+
+/** 禁用账号 */
+export async function disableAccount(accountId: string): Promise<AccountSummary> {
+  return request<AccountSummary>(`/accounts/${accountId}/disable`, {
+    method: "POST",
+  });
+}
+
+// =============================================================================
+// Draft 草稿箱相关 API
+// =============================================================================
+
+/** 草稿列表（分页） */
+export async function listDrafts(
+  page = 1,
+  pageSize = 20,
+  filters?: { draft_status?: string; publish_status?: string; account_id?: string }
+): Promise<DraftListResponse> {
+  const qs = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+  if (filters?.draft_status) qs.set("draft_status", filters.draft_status);
+  if (filters?.publish_status) qs.set("publish_status", filters.publish_status);
+  if (filters?.account_id) qs.set("account_id", filters.account_id);
+  return request<DraftListResponse>(`/drafts?${qs}`);
+}
+
+/** 获取待确认草稿数量 */
+export async function getPendingDraftCount(accountId?: string): Promise<{ count: number }> {
+  const qs = accountId ? `?account_id=${accountId}` : "";
+  return request<{ count: number }>(`/drafts/pending-count${qs}`);
+}
+
+/** 获取草稿详情 */
+export async function getDraft(draftId: number): Promise<DraftDetail> {
+  return request<DraftDetail>(`/drafts/${draftId}`);
+}
+
+/** 确认发布草稿 */
+export async function confirmPublishDraft(draftId: number): Promise<DraftConfirmData> {
+  return request<DraftConfirmData>(`/drafts/${draftId}/confirm-publish`, {
+    method: "POST",
+  });
+}
+
+/** 废弃草稿 */
+export async function discardDraft(draftId: number): Promise<DraftDiscardData> {
+  return request<DraftDiscardData>(`/drafts/${draftId}/discard`, {
+    method: "POST",
+  });
+}
+
+/** 拒绝草稿 */
+export async function rejectDraft(draftId: number): Promise<DraftRejectData> {
+  return request<DraftRejectData>(`/drafts/${draftId}/reject`, {
+    method: "POST",
+  });
+}
+
+/** 从草稿重跑 */
+export async function rerunFromDraft(draftId: number): Promise<DraftRerunData> {
+  return request<DraftRerunData>(`/drafts/${draftId}/rerun`, {
+    method: "POST",
+  });
+}

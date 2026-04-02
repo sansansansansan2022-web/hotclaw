@@ -34,6 +34,8 @@ from app.api.agent_routes import router as agent_router
 from app.api.skill_routes import router as skill_router
 from app.api.llm_provider_routes import router as llm_provider_router
 from app.api.system_config_routes import router as system_config_router
+from app.api.account_routes import router as account_router
+from app.api.draft_routes import router as draft_router
 
 # Import agent implementations to register them
 # 【关键】导入所有智能体类，触发注册
@@ -93,9 +95,14 @@ async def lifespan(app: FastAPI):
         await init_default_configs(db)
     logger.info("system_configs_initialized")
 
+    # Start Account Scheduler
+    from app.scheduler.account_scheduler import account_scheduler
+    await account_scheduler.start()
+
     logger.info("app_started", env=settings.app_env, debug=settings.app_debug)
     yield
     # ===== SHUTDOWN =====
+    await account_scheduler.stop()
     logger.info("app_shutdown")
 
 
@@ -196,6 +203,8 @@ app.include_router(agent_router)
 app.include_router(skill_router)
 app.include_router(llm_provider_router)
 app.include_router(system_config_router)
+app.include_router(account_router)
+app.include_router(draft_router)
 
 
 @app.get("/api/v1/health")

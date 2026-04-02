@@ -33,13 +33,73 @@ export interface TaskDetail {
   status: TaskStatus;
   input_data: { positioning: string } | null;
   workflow_id: string;
-  result_data: Record<string, unknown> | null;
+  result_data: TaskResultData | null;
   error_message: string | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
   elapsed_seconds: number | null;
   total_tokens: number | null;
+}
+
+// --- Task Result Data (from result_data snapshot) ---
+
+export interface TaskResultData {
+  input?: { positioning: string };
+  profile?: AccountProfile;
+  hot_topics?: { hot_topics: HotTopic[] };
+  topics?: { topics: TopicCandidate[] };
+  titles?: { selected_topic: string; titles: TitleCandidate[] };
+  content?: ArticleContent;
+  audit_result?: AuditResult;
+  [key: string]: unknown;
+}
+
+export interface AccountProfile {
+  domain: string;
+  subdomain: string;
+  target_audience: {
+    age_range: string;
+    occupation: string;
+    interests: string[];
+  };
+  tone: string;
+  content_style: string;
+  keywords: string[];
+  positioning_raw: string;
+}
+
+export interface HotTopic {
+  title: string;
+  source: string;
+  heat_score: number;
+  summary: string;
+  relevance_score: number;
+}
+
+export interface TopicCandidate {
+  title: string;
+  angle: string;
+  hook: string;
+  target_emotion: string;
+  estimated_appeal: number;
+  reasoning: string;
+}
+
+export interface TitleCandidate {
+  text: string;
+  style: string;
+  score: number;
+  reasoning: string;
+}
+
+export interface ArticleContent {
+  content_markdown: string;
+  word_count: number;
+  structure: {
+    sections: { heading: string; summary: string }[];
+  };
+  tags: string[];
 }
 
 export interface NodeRun {
@@ -61,6 +121,22 @@ export interface TaskSummary {
   status: TaskStatus;
   created_at: string;
   elapsed_seconds: number | null;
+  error_message: string | null;
+  audit_result: AuditResult | null;
+}
+
+export interface AuditResult {
+  passed: boolean;
+  risk_level: "low" | "medium" | "high" | "unknown";
+  issues: AuditIssue[];
+  overall_comment: string;
+}
+
+export interface AuditIssue {
+  type: string;
+  description: string;
+  severity: "low" | "medium" | "high";
+  location?: string;
 }
 
 // --- SSE events ---
@@ -115,4 +191,187 @@ export interface DashboardStats {
   avg_reads: number;
   articles_count: number;
   weekly_growth: number;
+}
+
+// --- Account ---
+
+export type OperationMode = "manual" | "semi_auto" | "full_auto";
+export type PostingFrequency = "daily" | "weekly" | "biweekly" | "monthly";
+
+export interface AccountCreateRequest {
+  name: string;
+  category?: string;
+  positioning: string;
+  audience?: string;
+  tone_style?: string;
+  posting_frequency?: PostingFrequency;
+  posting_time?: string;
+  content_strategy?: string;
+  reference_accounts?: string;
+  operation_mode?: OperationMode;
+  auto_run_enabled?: boolean;
+  auto_publish_enabled?: boolean;
+  is_active?: boolean;
+}
+
+export interface AccountUpdateRequest {
+  name?: string;
+  category?: string;
+  positioning?: string;
+  audience?: string;
+  tone_style?: string;
+  posting_frequency?: PostingFrequency;
+  posting_time?: string;
+  content_strategy?: string;
+  reference_accounts?: string;
+  operation_mode?: OperationMode;
+  auto_run_enabled?: boolean;
+  auto_publish_enabled?: boolean;
+  is_active?: boolean;
+}
+
+export interface AccountSummary {
+  account_id: string;
+  name: string;
+  category: string | null;
+  positioning: string;
+  operation_mode: OperationMode;
+  posting_frequency: PostingFrequency | null;
+  auto_run_enabled: boolean;
+  is_active: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_run_status: string | null;
+  last_error_message: string | null;
+  created_at: string;
+}
+
+export interface AccountTaskSummary {
+  task_id: string;
+  status: TaskStatus;
+  created_at: string;
+  elapsed_seconds: number | null;
+}
+
+export interface AccountDetail extends AccountSummary {
+  audience: string | null;
+  tone_style: string | null;
+  posting_time: string | null;
+  content_strategy: string | null;
+  reference_accounts: string | null;
+  auto_publish_enabled: boolean;
+  updated_at: string;
+  recent_tasks: AccountTaskSummary[];
+}
+
+export interface AccountCreateData {
+  account_id: string;
+  name: string;
+  is_active: boolean;
+  operation_mode: OperationMode;
+}
+
+export interface AccountRunData {
+  account_id: string;
+  task_id: string;
+  status: TaskStatus;
+  operation_mode: OperationMode;
+}
+
+export interface AccountListResponse {
+  accounts: AccountSummary[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total: number;
+    total_pages: number;
+  };
+}
+
+// --- Draft ---
+
+export type DraftStatus = "draft" | "pending_review" | "approved" | "rejected" | "discarded";
+export type PublishStatus = "not_published" | "pending" | "published" | "failed";
+export type SourceType = "manual_task" | "semi_auto_task";
+
+export interface DraftSummary {
+  id: number;
+  task_id: string;
+  account_id: string | null;
+  title: string;
+  selected_topic: string | null;
+  draft_status: DraftStatus;
+  publish_status: PublishStatus;
+  publish_review_required: boolean;
+  source_type: SourceType;
+  word_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AuditResultInfo {
+  passed: boolean;
+  risk_level: string;
+  overall_comment: string | null;
+  issues: unknown[] | null;
+}
+
+export interface DraftDetail {
+  id: number;
+  task_id: string;
+  account_id: string | null;
+  account_name: string | null;
+  title: string;
+  title_candidates: unknown[] | null;
+  selected_topic: string | null;
+  summary: string | null;
+  content_markdown: string;
+  content_html: string | null;
+  word_count: number;
+  tags: string[] | null;
+  draft_status: DraftStatus;
+  publish_status: PublishStatus;
+  publish_review_required: boolean;
+  source_type: SourceType;
+  confirmed_at: string | null;
+  confirmed_by: string | null;
+  published_at: string | null;
+  publish_error_message: string | null;
+  audit_result: AuditResultInfo | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DraftListResponse {
+  drafts: DraftSummary[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total: number;
+    total_pages: number;
+  };
+}
+
+export interface DraftConfirmData {
+  draft_id: number;
+  draft_status: string;
+  publish_status: string;
+  confirmed_at: string;
+}
+
+export interface DraftDiscardData {
+  draft_id: number;
+  draft_status: string;
+}
+
+export interface DraftRejectData {
+  draft_id: number;
+  draft_status: string;
+}
+
+export interface DraftRerunData {
+  draft_id: number;
+  original_task_id: string;
+  new_task_id: string;
+  status: TaskStatus;
 }

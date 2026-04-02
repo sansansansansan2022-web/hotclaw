@@ -75,6 +75,8 @@ class TaskSummary(BaseModel):
     status: str
     created_at: datetime
     elapsed_seconds: float | None = None
+    error_message: str | None = None
+    audit_result: dict | None = None
 
 
 class TaskListResponse(BaseModel):

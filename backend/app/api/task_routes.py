@@ -244,15 +244,54 @@ async def list_tasks(
         positioning = ""
         if t.input_data and isinstance(t.input_data, dict):
             positioning = t.input_data.get("positioning", "")
+
+        # Extract audit_result from result_data
+        audit_result = None
+        if t.result_data and isinstance(t.result_data, dict):
+            audit_result = t.result_data.get("audit_result")
+
         tasks_data.append({
             "task_id": t.id,
             "positioning_summary": positioning[:50] + ("..." if len(positioning) > 50 else ""),
             "status": t.status,
             "created_at": t.created_at.isoformat() if t.created_at else None,
             "elapsed_seconds": t.elapsed_seconds,
+            "error_message": t.error_message,
+            "audit_result": audit_result,
         })
 
     return ApiResponse(data={
         "tasks": tasks_data,
         "pagination": {"page": page, "page_size": page_size, "total": total},
+    })
+
+
+@router.post("/{task_id}/rerun")
+async def rerun_task(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
+    """
+    Rerun a completed or failed task.
+
+    【重跑任务 API】
+
+    工作流程：
+    1. 查询任务状态（不允许 running 状态重跑）
+    2. 删除旧的节点运行记录
+    3. 重置任务状态为 pending
+    4. 清空 result_data 和 error_message
+    5. 异步启动编排引擎
+
+    Returns:
+        { task_id, status, created_at, workflow_id }
+    """
+    task = await task_service.rerun_task(task_id, db)
+    await db.commit()
+
+    bg_task = asyncio.create_task(_run_task_in_background(task.id))
+    _background_tasks[task.id] = bg_task
+
+    return ApiResponse(data={
+        "task_id": task.id,
+        "status": task.status,
+        "created_at": task.created_at.isoformat() if task.created_at else None,
+        "workflow_id": task.workflow_id,
     })

@@ -17,6 +17,11 @@ def generate_task_id() -> str:
     return f"task_{nanoid(size=12)}"
 
 
+def generate_account_id() -> str:
+    """Generate a new account ID. Format: acct_{nanoid(12)}"""
+    return f"acct_{nanoid(size=12)}"
+
+
 def get_trace_id() -> str:
     return _trace_id_var.get()
 

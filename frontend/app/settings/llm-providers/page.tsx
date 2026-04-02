@@ -225,12 +225,15 @@ export default function LLMProvidersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#1a1a2e] text-gray-200 font-mono">
-      <header className="bg-[#2a2a4a] border-b border-gray-700 px-6 py-3 flex items-center gap-4">
-        <Link href="/" className="text-cyan-400 hover:text-cyan-300 text-[12px]">
-          &larr; 返回编辑部
-        </Link>
-        <span className="text-[14px] text-gray-300 tracking-widest">LLM API 配置</span>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+      <header className="bg-slate-800/80 backdrop-blur-sm border-b border-slate-700 px-6 py-4 sticky top-0 z-20">
+        <div className="max-w-[1000px] mx-auto flex items-center gap-4">
+          <Link href="/settings" className="text-cyan-400 hover:text-cyan-300 text-sm">
+            &larr; 设置中心
+          </Link>
+          <span className="text-slate-500">/</span>
+          <span className="text-white font-medium text-sm">LLM Provider 配置</span>
+        </div>
       </header>
 
       <main className="max-w-[1000px] mx-auto p-6 flex gap-6">

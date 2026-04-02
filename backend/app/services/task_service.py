@@ -43,9 +43,21 @@ class TaskService:
             raise TaskAlreadyRunningError(task_id)
 
         try:
-            await orchestrator_engine.run(task, db)
+            # Run the orchestrator
+            result_data = await orchestrator_engine.run(task, db)
+
+            # Create draft from task result BEFORE commit to ensure atomicity
+            # Draft creation failure should not fail the task
+            await self._create_draft_from_task_result(task, result_data, db)
+
+            # Commit task result and draft together
             await db.commit()
             logger.info("task_completed", task_id=task_id)
+
+            # If this task is bound to an account, refresh the account's next_run_at
+            if task.account_id:
+                await self._refresh_account_next_run(task.account_id, db)
+
         except Exception as e:
             task.status = "failed"
             task.error_message = str(e)
@@ -55,6 +67,10 @@ class TaskService:
             db.add(task)
             await db.commit()
             logger.error("task_failed", task_id=task_id, error=str(e))
+
+            # If this task is bound to an account, update the account's run status
+            if task.account_id:
+                await self._update_account_run_status_on_failure(task.account_id, db, str(e))
 
             await broadcaster.broadcast(task_id, "task_error", {
                 "task_id": task_id,
@@ -113,6 +129,32 @@ class TaskService:
         result = await db.execute(stmt)
         return list(result.scalars().all())
 
+    async def rerun_task(self, task_id: str, db: AsyncSession) -> TaskModel:
+        """Reset a completed/failed task and prepare it for re-execution."""
+        task = await self._get_task(task_id, db)
+        if task.status == "running":
+            raise TaskAlreadyRunningError(task_id)
+
+        # Delete old node runs
+        from sqlalchemy import delete
+        await db.execute(
+            delete(TaskNodeRunModel).where(TaskNodeRunModel.task_id == task_id)
+        )
+
+        # Reset task state
+        task.status = "pending"
+        task.result_data = None
+        task.error_message = None
+        task.started_at = None
+        task.completed_at = None
+        task.elapsed_seconds = None
+        task.total_tokens = None
+        db.add(task)
+        await db.flush()
+        logger.info("task_rerun_prepared", task_id=task_id)
+
+        return task
+
     async def _get_task(self, task_id: str, db: AsyncSession) -> TaskModel:
         stmt = select(TaskModel).where(TaskModel.id == task_id)
         result = await db.execute(stmt)
@@ -120,6 +162,66 @@ class TaskService:
         if task is None:
             raise TaskNotFoundError(task_id)
         return task
+
+    async def _refresh_account_next_run(self, account_id: str, db: AsyncSession) -> None:
+        """Refresh account's next_run_at after task completion."""
+        try:
+            from app.services.account_service import account_service
+            await account_service.refresh_next_run(account_id, db)
+            logger.info("account_next_run_refreshed_after_task", account_id=account_id)
+        except Exception as e:
+            logger.warning("failed_to_refresh_account_next_run", account_id=account_id, error=str(e))
+
+    async def _update_account_run_status_on_failure(
+        self, account_id: str, db: AsyncSession, error_message: str
+    ) -> None:
+        """Update account's run status after task failure."""
+        try:
+            from app.services.account_service import account_service
+            await account_service.update_account_run_status(account_id, db, "failed", error_message)
+            logger.info("account_run_status_updated_on_failure", account_id=account_id)
+        except Exception as e:
+            logger.warning("failed_to_update_account_run_status", account_id=account_id, error=str(e))
+
+    async def _create_draft_from_task_result(
+        self, task: TaskModel, result_data: dict, db: AsyncSession
+    ) -> None:
+        """
+        Create a draft from task result data.
+
+        For semi_auto accounts, draft will be in 'pending_review' status.
+        For manual accounts, draft will be in 'draft' status.
+
+        This method is called after task completion.
+        """
+        try:
+            from app.services.draft_service import draft_service
+
+            # Get account operation mode if account_id exists
+            operation_mode = None
+            if task.account_id:
+                from sqlalchemy import select
+                from app.models.tables import AccountModel
+                stmt = select(AccountModel.operation_mode).where(AccountModel.id == task.account_id)
+                result = await db.execute(stmt)
+                operation_mode = result.scalar_one_or_none()
+
+            draft = await draft_service.create_draft_from_task(
+                task_id=task.id,
+                result_data=result_data,
+                account_id=task.account_id,
+                operation_mode=operation_mode,
+                db=db
+            )
+            logger.info(
+                "draft_created_from_task",
+                task_id=task.id,
+                draft_id=draft.id,
+                draft_status=draft.draft_status
+            )
+        except Exception as e:
+            # Draft creation failure should not fail the task
+            logger.error("draft_creation_failed", task_id=task.id, error=str(e))
 
 
 task_service = TaskService()

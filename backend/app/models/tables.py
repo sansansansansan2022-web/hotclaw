@@ -20,11 +20,54 @@ class Base(DeclarativeBase):
     pass
 
 
+# =============================================================================
+# Account Models
+# =============================================================================
+
+
+class AccountModel(Base):
+    """WeChat Official Account managed by the platform."""
+    __tablename__ = "accounts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    positioning: Mapped[str] = mapped_column(Text, nullable=False)
+    audience: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tone_style: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    posting_frequency: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    posting_time: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    content_strategy: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference_accounts: Mapped[str | None] = mapped_column(Text, nullable=True)
+    operation_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    auto_run_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    auto_publish_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_run_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    tasks: Mapped[list["TaskModel"]] = relationship(back_populates="account")
+
+
+# =============================================================================
+# Task Models
+# =============================================================================
+
+
 class TaskModel(Base):
     """Task table: stores each task's full lifecycle."""
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("accounts.id"), nullable=True, index=True
+    )
     workflow_id: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     input_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -42,7 +85,10 @@ class TaskModel(Base):
     node_runs: Mapped[list["TaskNodeRunModel"]] = relationship(back_populates="task", cascade="all, delete-orphan")
     account_profile: Mapped["AccountProfileModel | None"] = relationship(back_populates="task", uselist=False)
     topic_candidates: Mapped[list["TopicCandidateModel"]] = relationship(back_populates="task")
-    article_drafts: Mapped[list["ArticleDraftModel"]] = relationship(back_populates="task")
+    article_drafts: Mapped[list["ArticleDraftModel"]] = relationship(
+        back_populates="task", foreign_keys="ArticleDraftModel.task_id"
+    )
+    account: Mapped["AccountModel | None"] = relationship(back_populates="tasks")
 
 
 class TaskNodeRunModel(Base):
@@ -122,20 +168,41 @@ class ArticleDraftModel(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     task_id: Mapped[str] = mapped_column(String(64), ForeignKey("tasks.id"), nullable=False)
+    account_id: Mapped[str | None] = mapped_column(String(64), ForeignKey("accounts.id"), nullable=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     content_markdown: Mapped[str] = mapped_column(Text, nullable=False)
     content_html: Mapped[str | None] = mapped_column(Text, nullable=True)
     word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     structure: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    # Draft status: draft / pending_review / approved / rejected / discarded
+    draft_status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    # Publish status: not_published / pending / published / failed
+    publish_status: Mapped[str] = mapped_column(String(20), nullable=False, default="not_published")
+    # Whether manual review is required before publishing
+    publish_review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # Source type: manual_task / semi_auto_task
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False, default="manual_task")
+    # Selected topic info
+    selected_topic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Title candidates
+    title_candidates: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Summary/hook
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Publish timestamps
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    confirmed_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    publish_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    task: Mapped["TaskModel"] = relationship(back_populates="article_drafts")
-    audit_result: Mapped["AuditResultModel | None"] = relationship(back_populates="draft", uselist=False)
+    task: Mapped["TaskModel"] = relationship(back_populates="article_drafts", foreign_keys=[task_id])
+    account: Mapped["AccountModel | None"] = relationship(foreign_keys=[account_id])
+    # Note: audit_result should be fetched via query by draft_id, not via relationship
+    # to avoid circular import issues
 
 
 class AuditResultModel(Base):
@@ -153,8 +220,7 @@ class AuditResultModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
-
-    draft: Mapped["ArticleDraftModel"] = relationship(back_populates="audit_result")
+    # Note: No back_populates relationship to avoid circular imports
 
 
 class AgentModel(Base):

@@ -220,3 +220,146 @@ class InternalError(HotClawError):
     def __init__(self, message: str = "internal server error", details: dict | None = None):
         # 5000: 系统错误（直接映射 HTTP 500）
         super().__init__(code=5000, message=message, details=details)
+
+
+# ============================================================================
+# Account Errors (6xxx → HTTP 400/404)
+# ============================================================================
+
+
+class AccountNotFoundError(HotClawError):
+    """Account does not exist."""
+
+    def __init__(self, account_id: str):
+        super().__init__(code=6001, message=f"account not found: {account_id}")
+
+
+class AccountInactiveError(HotClawError):
+    """Account is not active, cannot run."""
+
+    def __init__(self, account_id: str):
+        super().__init__(code=6002, message=f"account is not active: {account_id}")
+
+
+class AccountValidationError(HotClawError):
+    """Account field validation failed."""
+
+    def __init__(self, message: str = "account validation error", details: dict | None = None):
+        super().__init__(code=6003, message=message, details=details)
+
+
+# ============================================================================
+# Scheduler Errors (7xxx → HTTP 500)
+# ============================================================================
+
+
+class SchedulerError(HotClawError):
+    """Scheduler internal error."""
+
+    def __init__(self, message: str = "scheduler error", details: dict | None = None):
+        super().__init__(code=7001, message=message, details=details)
+
+
+class SchedulerAccountSkipError(HotClawError):
+    """Account should be skipped by scheduler."""
+
+    def __init__(self, account_id: str, reason: str):
+        super().__init__(
+            code=7002,
+            message=f"account {account_id} skipped: {reason}",
+            details={"account_id": account_id, "reason": reason}
+        )
+
+
+class SchedulerTaskCreateError(HotClawError):
+    """Failed to create task for account."""
+
+    def __init__(self, account_id: str, reason: str):
+        super().__init__(
+            code=7003,
+            message=f"failed to create task for account {account_id}: {reason}",
+            details={"account_id": account_id, "reason": reason}
+        )
+
+
+# ============================================================================
+# Task Errors (8xxx → HTTP 400/409)
+# ============================================================================
+
+
+class TaskAlreadyExistsError(HotClawError):
+    """Task already exists for this account, duplicate run not allowed."""
+
+    def __init__(self, account_id: str, task_id: str):
+        super().__init__(
+            code=8001,
+            message=f"account {account_id} already has running/pending task: {task_id}",
+            details={"account_id": account_id, "task_id": task_id}
+        )
+
+
+class TaskCreateError(HotClawError):
+    """Failed to create task."""
+
+    def __init__(self, account_id: str, reason: str):
+        super().__init__(
+            code=8002,
+            message=f"failed to create task for account {account_id}: {reason}",
+            details={"account_id": account_id, "reason": reason}
+        )
+
+
+# ============================================================================
+# Draft Errors (9xxx → HTTP 400/404/409)
+# ============================================================================
+
+
+class DraftNotFoundError(HotClawError):
+    """Draft does not exist."""
+
+    def __init__(self, draft_id: int):
+        super().__init__(code=9001, message=f"draft not found: {draft_id}")
+
+
+class DraftInvalidStatusError(HotClawError):
+    """Draft status does not allow the requested operation."""
+
+    def __init__(self, draft_id: int, current_status: str, operation: str):
+        super().__init__(
+            code=9002,
+            message=f"draft {draft_id} cannot {operation} in status '{current_status}'",
+            details={"draft_id": draft_id, "current_status": current_status, "operation": operation}
+        )
+
+
+class DraftAlreadyPublishedError(HotClawError):
+    """Draft has already been published."""
+
+    def __init__(self, draft_id: int):
+        super().__init__(
+            code=9003,
+            message=f"draft {draft_id} has already been published",
+            details={"draft_id": draft_id}
+        )
+
+
+class DraftPublishError(HotClawError):
+    """Failed to publish draft."""
+
+    def __init__(self, draft_id: int, reason: str):
+        super().__init__(
+            code=9004,
+            message=f"failed to publish draft {draft_id}: {reason}",
+            details={"draft_id": draft_id, "reason": reason}
+        )
+
+
+class DraftCreateError(HotClawError):
+    """Failed to create draft from task result."""
+
+    def __init__(self, task_id: str, reason: str):
+        super().__init__(
+            code=9005,
+            message=f"failed to create draft for task {task_id}: {reason}",
+            details={"task_id": task_id, "reason": reason}
+        )
