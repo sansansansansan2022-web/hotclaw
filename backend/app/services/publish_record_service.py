@@ -373,7 +373,9 @@ class PublishRecordService:
         """
         Sync draft status from latest publish record.
 
-        Updates draft.publish_status, draft.publish_error_message, draft.published_at.
+        Updates:
+        - draft.publish_status, draft.publish_error_message, draft.published_at
+        - account.last_publish_status, account.last_publish_error_message, account.last_published_at
 
         Args:
             draft_id: Draft ID
@@ -412,6 +414,44 @@ class PublishRecordService:
             draft.publish_error_message = "Unknown publish status"
 
         db.add(draft)
+        await db.flush()
+
+        # Sync account publish status
+        if draft.account_id:
+            from sqlalchemy import update
+            from app.models.tables import AccountModel
+
+            update_data = {
+                "last_publish_status": latest.publish_status,
+            }
+            if latest.error_message:
+                update_data["last_publish_error_message"] = latest.error_message[:500]
+            if latest.publish_status == self.STATUS_PUBLISHED and latest.published_at:
+                update_data["last_published_at"] = latest.published_at
+
+            stmt = (
+                update(AccountModel)
+                .where(AccountModel.id == draft.account_id)
+                .values(**update_data)
+            )
+            await db.execute(stmt)
+
+        logger.info(
+            "draft_status_synced",
+            draft_id=draft_id,
+            new_status=draft.publish_status,
+            account_id=draft.account_id
+        )
+
+        return {
+            "synced": True,
+            "draft_id": draft_id,
+            "draft_publish_status": draft.publish_status,
+            "error_message": draft.publish_error_message,
+            "published_at": draft.published_at.isoformat() if draft.published_at else None,
+            "account_id": draft.account_id,
+            "account_publish_status": latest.publish_status
+        }
         await db.flush()
 
         logger.info(

@@ -47,6 +47,10 @@ class AccountModel(Base):
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_run_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     last_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Publish tracking fields
+    last_publish_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_publish_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()

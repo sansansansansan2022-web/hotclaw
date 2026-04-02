@@ -292,13 +292,14 @@ class DraftService:
         confirmed_by: str = "user",
         source_mode: str = "manual",
         trigger_type: str = "manual_confirm",
+        existing_record_id: int | None = None,
     ) -> tuple[ArticleDraftModel, dict]:
         """
         Publish draft to WeChat official account (real publish).
 
         This method:
         1. Validates publish conditions via PublishDecisionService
-        2. Creates publish record via PublishRecordService
+        2. Creates or uses existing publish record via PublishRecordService
         3. Calls real WeChat API via WeChatPublishService
         4. Updates draft status and publish record
         5. Handles failure compensation (token refresh, retry)
@@ -309,6 +310,7 @@ class DraftService:
             confirmed_by: Who confirmed (default: 'user')
             source_mode: Source mode (manual/semi_auto/full_auto)
             trigger_type: Trigger type (manual_confirm/semi_auto_confirm/full_auto/retry)
+            existing_record_id: If provided, use this existing record instead of creating new one
 
         Returns:
             Tuple of (updated_draft, publish_result)
@@ -326,7 +328,7 @@ class DraftService:
         # Step 1: Validate publish conditions
         try:
             context = await publish_decision_service.validate_for_publish(
-                draft_id, db, source=trigger_type
+                draft_id, db, source=trigger_type, is_retry=(existing_record_id is not None)
             )
         except PublishDecisionError:
             raise
@@ -339,23 +341,33 @@ class DraftService:
             draft.account_id, db
         )
 
-        # Step 4: Create publish record via service
-        request_snapshot = f"title={draft.title[:50]}..."
-        try:
-            publish_record = await publish_record_service.create_record(
-                draft_id=draft_id,
-                account_id=draft.account_id,
-                task_id=draft.task_id,
+        # Step 4: Create or use existing publish record
+        if existing_record_id:
+            # Use existing record (for retry)
+            record_id = existing_record_id
+            # Update record status to pending
+            await publish_record_service.update_status(
+                record_id=record_id,
                 db=db,
-                source_mode=source_mode,
-                trigger_type=trigger_type,
-                request_snapshot=request_snapshot,
+                status="pending",
             )
-        except PublishRecordError as e:
-            logger.error("publish_record_create_failed", draft_id=draft_id, error=str(e))
-            raise DraftPublishError(draft_id, f"Failed to create publish record: {e}")
-
-        record_id = publish_record.id
+        else:
+            # Create new record
+            request_snapshot = f"title={draft.title[:50]}..."
+            try:
+                publish_record = await publish_record_service.create_record(
+                    draft_id=draft_id,
+                    account_id=draft.account_id,
+                    task_id=draft.task_id,
+                    db=db,
+                    source_mode=source_mode,
+                    trigger_type=trigger_type,
+                    request_snapshot=request_snapshot,
+                )
+            except PublishRecordError as e:
+                logger.error("publish_record_create_failed", draft_id=draft_id, error=str(e))
+                raise DraftPublishError(draft_id, f"Failed to create publish record: {e}")
+            record_id = publish_record.id
 
         # Step 5: Update draft status to publishing
         draft.publish_status = "publishing"
@@ -402,6 +414,9 @@ class DraftService:
                 draft.publish_error_message = None
                 db.add(draft)
                 await db.flush()
+
+                # Step 9: Sync account publish status
+                await self._sync_account_publish_status(draft.account_id, db, "published")
 
                 logger.info(
                     "draft_published_to_wechat",
@@ -519,12 +534,49 @@ class DraftService:
         db.add(draft)
         await db.flush()
 
+        # Sync account publish status
+        if draft.account_id:
+            await self._sync_account_publish_status(draft.account_id, db, "failed", error_message[:200])
+
         logger.warning(
             "draft_wechat_publish_failed",
             draft_id=draft.id,
             record_id=record_id,
             error_code=error_code,
             error_message=error_message
+        )
+
+    async def _sync_account_publish_status(
+        self,
+        account_id: str,
+        db: AsyncSession,
+        status: str,
+        error_message: str | None = None,
+    ):
+        """Sync publish status to account."""
+        from app.models.tables import AccountModel
+        from sqlalchemy import update
+
+        update_data = {
+            "last_publish_status": status,
+        }
+        if error_message:
+            update_data["last_publish_error_message"] = error_message[:500]
+        if status == "published":
+            update_data["last_published_at"] = datetime.now(timezone.utc)
+
+        stmt = (
+            update(AccountModel)
+            .where(AccountModel.id == account_id)
+            .values(**update_data)
+        )
+        await db.execute(stmt)
+        await db.flush()
+
+        logger.info(
+            "account_publish_status_synced",
+            account_id=account_id,
+            status=status
         )
 
     async def retry_publish_to_wechat(
@@ -571,7 +623,7 @@ class DraftService:
                 f"Please create a new draft instead."
             )
 
-        # Create new retry record
+        # Create new retry record (this will be the record we use)
         try:
             new_record = await publish_record_service.increment_retry(
                 record_id=latest.id,
@@ -587,21 +639,14 @@ class DraftService:
         account = result.scalar_one_or_none()
         source_mode = account.operation_mode if account else latest.source_mode
 
-        # Validate and publish (skip idempotency check for retry)
-        try:
-            context = await publish_decision_service.validate_for_publish(
-                draft_id, db, source="manual_retry", is_retry=True
-            )
-        except PublishDecisionError:
-            raise
-
-        # Publish with retry trigger type
+        # Publish with the new record ID (existing_record_id)
         return await self.publish_to_wechat(
             draft_id=draft_id,
             db=db,
             confirmed_by=confirmed_by,
             source_mode=source_mode,
             trigger_type="manual_retry",
+            existing_record_id=new_record.id,
         )
 
     def _markdown_to_html(self, markdown: str) -> str:

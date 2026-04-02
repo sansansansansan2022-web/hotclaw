@@ -243,6 +243,10 @@ export interface AccountSummary {
   next_run_at: string | null;
   last_run_status: string | null;
   last_error_message: string | null;
+  // Publish tracking fields
+  last_publish_status: string | null;
+  last_publish_error_message: string | null;
+  last_published_at: string | null;
   created_at: string;
 }
 
