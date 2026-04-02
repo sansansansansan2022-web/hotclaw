@@ -4,6 +4,14 @@ import Link from "next/link";
 
 const SETTINGS_ITEMS = [
   {
+    href: "/settings/wechat",
+    icon: "&#128247;",
+    title: "微信公众号配置",
+    description: "配置公众号 AppID、AppSecret，开通真实发布能力",
+    tags: ["AppID", "AppSecret", "发布配置"],
+    color: "green",
+  },
+  {
     href: "/settings/llm-providers",
     icon: "&#9881;",
     title: "LLM Provider 配置",
@@ -30,6 +38,12 @@ const SETTINGS_ITEMS = [
 ];
 
 const COLOR_MAP: Record<string, { border: string; iconBg: string; iconText: string; tagBg: string }> = {
+  green: {
+    border: "hover:border-emerald-500/50",
+    iconBg: "bg-emerald-500/10",
+    iconText: "text-emerald-400",
+    tagBg: "bg-emerald-900/30 text-emerald-300",
+  },
   cyan: {
     border: "hover:border-cyan-500/50",
     iconBg: "bg-cyan-500/10",

@@ -375,3 +375,74 @@ export interface DraftRerunData {
   new_task_id: string;
   status: TaskStatus;
 }
+
+// --- WeChat Config ---
+
+export interface WeChatConfigSummary {
+  account_id: string;
+  app_id_masked: string;
+  has_app_secret: boolean;
+  default_author: string | null;
+  is_enabled: boolean;
+  test_status: string | null;
+  test_message: string | null;
+  last_sync_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WeChatConfigCreate {
+  account_id: string;
+  app_id: string;
+  app_secret: string;
+  default_author?: string;
+  default_thumb_media_id?: string;
+  need_open_comment?: boolean;
+  only_fans_can_comment?: boolean;
+  is_enabled?: boolean;
+}
+
+export interface WeChatConfigUpdate {
+  app_id?: string;
+  app_secret?: string;
+  default_author?: string;
+  default_thumb_media_id?: string;
+  need_open_comment?: boolean;
+  only_fans_can_comment?: boolean;
+  is_enabled?: boolean;
+}
+
+export interface WeChatTestConnectionRequest {
+  app_id: string;
+  app_secret: string;
+}
+
+export interface WeChatTestConnectionResponse {
+  success: boolean;
+  message: string;
+}
+
+// --- WeChat Publish ---
+
+export interface WeChatPublishStatus {
+  has_record: boolean;
+  draft_id: number;
+  wechat_draft_id?: string;
+  media_id?: string;
+  publish_id?: string;
+  publish_status: "pending" | "success" | "failed";
+  error_code?: string;
+  error_message?: string;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WeChatPublishResult {
+  draft_id: number;
+  draft_status: string;
+  publish_status: string;
+  published_at: string | null;
+  wechat_media_id?: string;
+  wechat_publish_id?: string;
+}

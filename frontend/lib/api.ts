@@ -498,3 +498,77 @@ export async function rerunFromDraft(draftId: number): Promise<DraftRerunData> {
     method: "POST",
   });
 }
+
+// =============================================================================
+// WeChat 相关 API
+// =============================================================================
+
+import type {
+  WeChatConfigSummary,
+  WeChatConfigCreate,
+  WeChatConfigUpdate,
+  WeChatTestConnectionRequest,
+  WeChatTestConnectionResponse,
+  WeChatPublishStatus,
+  WeChatPublishResult,
+} from "@/types";
+
+/** 获取账号的微信配置 */
+export async function getWeChatConfig(accountId: string): Promise<WeChatConfigSummary> {
+  return request<WeChatConfigSummary>(`/wechat/config/${accountId}`);
+}
+
+/** 创建微信配置 */
+export async function createWeChatConfig(data: WeChatConfigCreate): Promise<{
+  account_id: string;
+  app_id_masked: string;
+  has_app_secret: boolean;
+  is_enabled: boolean;
+}> {
+  return request(`/wechat/config`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+/** 更新微信配置 */
+export async function updateWeChatConfig(
+  accountId: string,
+  data: WeChatConfigUpdate
+): Promise<{
+  account_id: string;
+  app_id_masked: string;
+  has_app_secret: boolean;
+  is_enabled: boolean;
+}> {
+  return request(`/wechat/config/${accountId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+/** 测试微信连接 */
+export async function testWeChatConnection(
+  data: WeChatTestConnectionRequest
+): Promise<WeChatTestConnectionResponse> {
+  return request<WeChatTestConnectionResponse>("/wechat/test-connection", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+/** 发布草稿到微信 */
+export async function publishDraftToWeChat(
+  draftId: number
+): Promise<WeChatPublishResult> {
+  return request<WeChatPublishResult>(`/drafts/${draftId}/publish-to-wechat`, {
+    method: "POST",
+  });
+}
+
+/** 获取草稿的微信发布状态 */
+export async function getDraftWeChatStatus(
+  draftId: number
+): Promise<WeChatPublishStatus> {
+  return request<WeChatPublishStatus>(`/drafts/${draftId}/wechat-status`);
+}

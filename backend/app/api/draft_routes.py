@@ -233,3 +233,98 @@ async def get_pending_review_count(
     except Exception as e:
         logger.error("draft_pending_count_error", error=str(e))
         raise
+
+
+@router.post("/{draft_id}/publish-to-wechat")
+async def publish_draft_to_wechat(
+    draft_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Publish draft to WeChat official account.
+
+    This endpoint:
+    1. Validates publish conditions
+    2. Calls real WeChat API
+    3. Updates draft status
+
+    If WeChat config is not set up, returns 400 error.
+    If publish fails, draft status is updated with error message.
+    """
+    try:
+        draft, result = await draft_service.publish_to_wechat(draft_id, db)
+        await db.commit()
+
+        return {
+            "code": 0,
+            "message": "Published to WeChat successfully",
+            "data": {
+                "draft_id": draft.id,
+                "draft_status": draft.draft_status,
+                "publish_status": draft.publish_status,
+                "published_at": draft.published_at.isoformat() if draft.published_at else None,
+                "wechat_media_id": result.get("media_id"),
+                "wechat_publish_id": result.get("publish_id"),
+            }
+        }
+    except DraftPublishError as e:
+        logger.error("draft_wechat_publish_error", draft_id=draft_id, error=e.message)
+        return {
+            "code": 9004,
+            "message": e.message,
+            "data": {
+                "draft_id": draft_id,
+                "publish_status": "failed",
+                "error": str(e)
+            }
+        }
+    except Exception as e:
+        logger.error("draft_wechat_publish_unexpected_error", draft_id=draft_id, error=str(e))
+        return {
+            "code": 5000,
+            "message": f"Internal error: {str(e)}",
+            "data": None
+        }
+
+
+@router.get("/{draft_id}/wechat-status")
+async def get_wechat_publish_status(
+    draft_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get WeChat publish status for a draft.
+    """
+    try:
+        record = await draft_service.get_wechat_publish_record(draft_id, db)
+
+        if not record:
+            return {
+                "code": 0,
+                "message": "No WeChat publish record found",
+                "data": {
+                    "has_record": False,
+                    "draft_id": draft_id
+                }
+            }
+
+        return {
+            "code": 0,
+            "message": "ok",
+            "data": {
+                "has_record": True,
+                "draft_id": record.draft_id,
+                "wechat_draft_id": record.wechat_draft_id,
+                "media_id": record.media_id,
+                "publish_id": record.publish_id,
+                "publish_status": record.publish_status,
+                "error_code": record.error_code,
+                "error_message": record.error_message,
+                "source": record.source,
+                "created_at": record.created_at.isoformat() if record.created_at else None,
+                "updated_at": record.updated_at.isoformat() if record.updated_at else None,
+            }
+        }
+    except Exception as e:
+        logger.error("draft_wechat_status_error", draft_id=draft_id, error=str(e))
+        raise

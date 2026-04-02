@@ -16,6 +16,7 @@ from app.core.exceptions import (
 from app.core.logger import get_logger
 from app.core.tracer import generate_task_id
 from app.models.tables import ArticleDraftModel, AuditResultModel, TaskModel, AccountModel
+from app.models.wechat_config import WeChatConfigModel, WeChatPublishRecordModel
 
 logger = get_logger(__name__)
 
@@ -283,6 +284,156 @@ class DraftService:
         )
 
         return draft
+
+    async def publish_to_wechat(
+        self,
+        draft_id: int,
+        db: AsyncSession,
+        confirmed_by: str = "user"
+    ) -> tuple[ArticleDraftModel, dict]:
+        """
+        Publish draft to WeChat official account (real publish).
+
+        This method:
+        1. Validates publish conditions via PublishDecisionService
+        2. Calls real WeChat API via WeChatPublishService
+        3. Creates publish record
+        4. Updates draft status
+
+        Args:
+            draft_id: The draft ID
+            db: Database session
+            confirmed_by: Who confirmed (default: 'user')
+
+        Returns:
+            Tuple of (updated_draft, publish_result)
+
+        Raises:
+            PublishDecisionError: If validation fails
+            WeChatPublishError: If WeChat publish fails
+        """
+        from app.services.publish_decision_service import publish_decision_service, PublishDecisionError
+        from app.services.wechat_publish_service import wechat_publish_service, WeChatPublishError
+
+        # Step 1: Validate publish conditions
+        try:
+            context = await publish_decision_service.validate_for_publish(
+                draft_id, db, source="manual_confirm"
+            )
+        except PublishDecisionError:
+            raise
+
+        # Step 2: Get draft
+        draft = await self.get_draft(draft_id, db)
+
+        # Step 3: Get WeChat config
+        wechat_config = await publish_decision_service.get_wechat_config(
+            draft.account_id, db
+        )
+
+        # Step 4: Create publish record
+        publish_record = WeChatPublishRecordModel(
+            draft_id=draft_id,
+            account_id=draft.account_id,
+            publish_status="pending",
+            source="manual_confirm"
+        )
+        db.add(publish_record)
+        await db.flush()
+
+        # Step 5: Call real WeChat publish API
+        try:
+            result = await wechat_publish_service.publish_article(
+                app_id=wechat_config.app_id,
+                app_secret=wechat_config.app_secret,
+                title=draft.title,
+                author=wechat_config.default_author,
+                digest=draft.summary,
+                content_html=draft.content_html or self._markdown_to_html(draft.content_markdown),
+                thumb_media_id=wechat_config.default_thumb_media_id,
+                need_open_comment=wechat_config.need_open_comment,
+                only_fans_can_comment=wechat_config.only_fans_can_comment
+            )
+
+            # Step 6: Update publish record on success
+            publish_record.publish_status = "success"
+            publish_record.wechat_draft_id = result.get("media_id")
+            publish_record.media_id = result.get("media_id")
+            publish_record.publish_id = result.get("publish_id")
+            publish_record.url = result.get("url")
+            db.add(publish_record)
+
+            # Step 7: Update draft status
+            draft.draft_status = "published"
+            draft.publish_status = "published"
+            draft.confirmed_at = datetime.now(timezone.utc)
+            draft.confirmed_by = confirmed_by
+            draft.published_at = datetime.now(timezone.utc)
+            draft.publish_error_message = None
+            db.add(draft)
+
+            await db.flush()
+
+            logger.info(
+                "draft_published_to_wechat",
+                draft_id=draft_id,
+                media_id=result.get("media_id"),
+                publish_id=result.get("publish_id")
+            )
+
+            return draft, result
+
+        except WeChatPublishError as e:
+            # Step 6 (error): Update publish record on failure
+            publish_record.publish_status = "failed"
+            publish_record.error_message = str(e)
+            db.add(publish_record)
+
+            # Update draft error message
+            draft.publish_error_message = f"WeChat publish failed: {str(e)}"
+            db.add(draft)
+
+            await db.flush()
+
+            logger.error(
+                "draft_wechat_publish_failed",
+                draft_id=draft_id,
+                error=str(e)
+            )
+
+            raise DraftPublishError(draft_id, str(e))
+
+    def _markdown_to_html(self, markdown: str) -> str:
+        """Convert markdown to basic HTML for WeChat."""
+        if not markdown:
+            return ""
+        # Simple conversion - in production, use a proper markdown library
+        import re
+        html = markdown
+        # Headers
+        html = re.sub(r'^### (.+)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
+        html = re.sub(r'^## (.+)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+        html = re.sub(r'^# (.+)$', r'<h1>\1</h1>', html, flags=re.MULTILINE)
+        # Bold
+        html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html)
+        # Italic
+        html = re.sub(r'\*(.+?)\*', r'<em>\1</em>', html)
+        # Paragraphs
+        html = re.sub(r'\n\n', '</p><p>', html)
+        html = f'<p>{html}</p>'
+        return html
+
+    async def get_wechat_publish_record(
+        self,
+        draft_id: int,
+        db: AsyncSession
+    ) -> WeChatPublishRecordModel | None:
+        """Get WeChat publish record for a draft."""
+        stmt = select(WeChatPublishRecordModel).where(
+            WeChatPublishRecordModel.draft_id == draft_id
+        ).order_by(desc(WeChatPublishRecordModel.created_at))
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def discard_draft(
         self, draft_id: int, db: AsyncSession

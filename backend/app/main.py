@@ -36,6 +36,7 @@ from app.api.llm_provider_routes import router as llm_provider_router
 from app.api.system_config_routes import router as system_config_router
 from app.api.account_routes import router as account_router
 from app.api.draft_routes import router as draft_router
+from app.api.wechat_routes import router as wechat_router
 
 # Import agent implementations to register them
 # 【关键】导入所有智能体类，触发注册
@@ -84,6 +85,8 @@ async def lifespan(app: FastAPI):
     # 【开发友好】自动创建数据库表，无需手动运行 migration
     from app.db.session import engine
     from app.models.tables import Base
+    from app.models.wechat_config import WeChatConfigModel, WeChatPublishRecordModel
+    # Import all models to ensure they are registered with Base
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("database_tables_ready")
@@ -209,6 +212,7 @@ app.include_router(llm_provider_router)
 app.include_router(system_config_router)
 app.include_router(account_router)
 app.include_router(draft_router)
+app.include_router(wechat_router)
 
 
 @app.get("/api/v1/health")
