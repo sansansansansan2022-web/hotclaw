@@ -1,10 +1,21 @@
-"""LLM Gateway - 统一 LLM 调用入口。
+"""
+LLM Gateway - 统一 LLM 调用入口。
 
-提供统一的 LLM 调用接口，自动处理：
-- Provider 路由和选择（支持数据库动态配置）
-- 请求日志和追踪
-- 错误处理和异常转换
-- Provider 初始化和生命周期管理
+【LLM 网关】
+提供统一的 LLM 调用接口，是整个系统的"大模型入口"。
+采用 Facade 门面模式，对外隐藏多 Provider 的复杂性。
+
+核心功能：
+- Provider 路由：根据 agent_id 选择合适的 LLM Provider
+- 配置优先级：数据库自定义配置 > .env 环境变量
+- 请求日志：每次调用记录完整的调用元信息
+- 错误转换：将 Provider 异常转换为统一的 LLMCallError
+
+面试点：
+- Facade 门面模式
+- 配置优先级设计
+- LLM 调用最佳实践（超时、重试、JSON 输出解析）
+- 多 Provider 架构
 """
 
 from typing import Any
@@ -58,16 +69,22 @@ class LLMGateway:
         self._init_providers()
 
     def _load_db_config(self) -> None:
-        """从数据库加载用户配置的 Provider"""
+        """
+        从数据库加载用户配置的 Provider。
+
+        【配置优先级】
+        数据库配置 > .env 配置
+        这样用户可以在前端动态配置 API Key，
+        而无需重启服务器或修改环境变量。
+        """
         try:
             import asyncio
             from sqlalchemy import select
             from app.db.session import async_session_factory
             from app.models.tables import LLMProviderModel
 
-            # 同步方式获取数据库配置
             async def _load():
-                async with AsyncSessionLocal() as session:
+                async with async_session_factory() as session:
                     result = await session.execute(
                         select(LLMProviderModel).where(
                             LLMProviderModel.is_enabled == True
@@ -92,18 +109,12 @@ class LLMGateway:
 
                     return db_config, default_provider
 
-            # 运行异步加载
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # 如果已经在事件循环中，使用创建任务的方式
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, _load())
-                    self._db_config, default_from_db = future.result()
-            else:
-                self._db_config, default_from_db = asyncio.run(_load())
+            # 处理异步加载（可能在事件循环中或外调用）
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                self._db_config, default_from_db = pool.submit(asyncio.run, _load()).result()
 
-            # 如果数据库有默认 Provider，覆盖 .env 配置
+            # 覆盖默认 Provider
             if default_from_db:
                 self._default_provider = default_from_db
 
@@ -123,17 +134,20 @@ class LLMGateway:
             self._db_config = {}
 
     def _init_providers(self) -> None:
-        """根据配置初始化所有可用的 Provider"""
-        initialized = []
+        """
+        根据配置初始化所有可用的 Provider。
 
-        # 获取 Provider 配置（优先数据库，其次 .env）
+        【Provider 初始化策略】
+        只初始化有有效 API Key 的 Provider。
+        如果某个 Provider 没有配置，优雅地跳过并记录警告。
+        """
         def get_provider_config(provider_id: str) -> dict | None:
+            # 优先数据库配置，回退到 .env
             if provider_id in self._db_config:
                 return self._db_config[provider_id]
-            # 回退到 .env 配置
             return self.config.get_provider_config(provider_id)
 
-        # 初始化 DashScope
+        # 初始化 DashScope（阿里云通义千问）
         dashscope_config = get_provider_config("dashscope")
         if dashscope_config and dashscope_config.get("api_key"):
             try:
@@ -142,13 +156,9 @@ class LLMGateway:
                     base_url=dashscope_config.get("base_url") or self.config.dashscope_base_url,
                     timeout=dashscope_config.get("timeout") or self.config.timeout,
                 )
-                initialized.append("dashscope")
+                logger.info("llm_provider_initialized", provider="dashscope")
             except LLMConfigurationError as e:
-                logger.warning(
-                    "llm_provider_init_skipped",
-                    provider="dashscope",
-                    reason=str(e),
-                )
+                logger.warning("llm_provider_init_skipped", provider="dashscope", reason=str(e))
 
         # 初始化 OpenAI
         openai_config = get_provider_config("openai")
@@ -159,13 +169,9 @@ class LLMGateway:
                     base_url=openai_config.get("base_url") or self.config.openai_base_url,
                     timeout=openai_config.get("timeout") or self.config.timeout,
                 )
-                initialized.append("openai")
+                logger.info("llm_provider_initialized", provider="openai")
             except LLMConfigurationError as e:
-                logger.warning(
-                    "llm_provider_init_skipped",
-                    provider="openai",
-                    reason=str(e),
-                )
+                logger.warning("llm_provider_init_skipped", provider="openai", reason=str(e))
 
         # 初始化 DeepSeek
         deepseek_config = get_provider_config("deepseek")
@@ -176,15 +182,11 @@ class LLMGateway:
                     base_url=deepseek_config.get("base_url") or "https://api.deepseek.com",
                     timeout=deepseek_config.get("timeout") or self.config.timeout,
                 )
-                initialized.append("deepseek")
+                logger.info("llm_provider_initialized", provider="deepseek")
             except LLMConfigurationError as e:
-                logger.warning(
-                    "llm_provider_init_skipped",
-                    provider="deepseek",
-                    reason=str(e),
-                )
+                logger.warning("llm_provider_init_skipped", provider="deepseek", reason=str(e))
 
-        # 初始化 OpenAI Compatible
+        # 初始化 OpenAI Compatible（兼容接口）
         compatible_config = get_provider_config("compatible")
         if compatible_config and compatible_config.get("base_url"):
             try:
@@ -193,33 +195,24 @@ class LLMGateway:
                     base_url=compatible_config["base_url"],
                     timeout=compatible_config.get("timeout") or self.config.timeout,
                 )
-                initialized.append("compatible")
+                logger.info("llm_provider_initialized", provider="compatible")
             except LLMConfigurationError as e:
-                logger.warning(
-                    "llm_provider_init_skipped",
-                    provider="compatible",
-                    reason=str(e),
-                )
+                logger.warning("llm_provider_init_skipped", provider="compatible", reason=str(e))
 
-        # 初始化 Zhipu (智谱)
+        # 初始化 Zhipu（智谱）
         zhipu_config = get_provider_config("zhipu")
         if zhipu_config and zhipu_config.get("api_key"):
             try:
-                # Zhipu 也使用 OpenAI 兼容接口
                 self._providers["zhipu"] = OpenAICompatibleProvider(
                     api_key=zhipu_config["api_key"],
                     base_url=zhipu_config.get("base_url") or "https://open.bigmodel.cn/api/paas/v4",
                     timeout=zhipu_config.get("timeout") or self.config.timeout,
                 )
-                initialized.append("zhipu")
+                logger.info("llm_provider_initialized", provider="zhipu")
             except LLMConfigurationError as e:
-                logger.warning(
-                    "llm_provider_init_skipped",
-                    provider="zhipu",
-                    reason=str(e),
-                )
+                logger.warning("llm_provider_init_skipped", provider="zhipu", reason=str(e))
 
-        if not initialized:
+        if not self._providers:
             logger.warning(
                 "no_llm_providers_initialized",
                 message="No LLM providers configured. Check API keys in database or .env",
@@ -227,7 +220,7 @@ class LLMGateway:
         else:
             logger.info(
                 "llm_providers_initialized",
-                providers=initialized,
+                providers=list(self._providers.keys()),
                 default_provider=self._default_provider,
             )
 
@@ -242,23 +235,26 @@ class LLMGateway:
         """
         执行 LLM 补全调用
 
+        【核心方法】智能体调用 LLM 的入口
+
         Args:
             agent_id: 调用方 agent ID（用于日志和追踪）
             prompt: 用户输入提示词
-            options: 调用选项
-            provider: 可选，指定 provider（默认使用配置中的 default_provider）
-            trace_id: 可选，追踪 ID
+            options: 调用选项（system_prompt, temperature, max_tokens 等）
+            provider: 可选，指定 provider（默认使用配置的 default_provider）
+            trace_id: 可选，追踪 ID（用于日志关联）
 
         Returns:
-            LLMResponse
+            LLMResponse: 包含 content, model, latency_ms, token 使用量
 
         Raises:
             LLMCallError: 调用失败
             LLMConfigurationError: Provider 未配置
         """
+        # 选择 Provider（优先参数，次优先数据库配置，最后用默认）
         selected_provider = provider or self._default_provider
 
-        # 获取默认模型（优先数据库配置）
+        # 选择模型（优先 options，次优先数据库配置，最后用默认）
         model = options.model
         if not model:
             if selected_provider in self._db_config:
@@ -267,23 +263,7 @@ class LLMGateway:
                 model = self.config.get_default_model(selected_provider)
 
         # 构建调用元信息
-        meta = LLMCallMeta(
-            agent_id=agent_id,
-            trace_id=trace_id,
-        )
-
-        # 日志：调用开始
-        logger.info(
-            "llm_call_start",
-            agent_id=agent_id,
-            trace_id=trace_id,
-            provider=selected_provider,
-            model=model or "auto",
-            system_prompt_length=len(options.system_prompt),
-            prompt_length=len(prompt),
-            temperature=options.temperature,
-            max_tokens=options.max_tokens,
-        )
+        meta = LLMCallMeta(agent_id=agent_id, trace_id=trace_id)
 
         # 获取 Provider 实例
         provider_instance = self._providers.get(selected_provider)
@@ -295,64 +275,37 @@ class LLMGateway:
             )
             logger.error(
                 "llm_call_failed",
-                agent_id=agent_id,
-                trace_id=trace_id,
-                provider=selected_provider,
-                error_type="LLMConfigurationError",
-                error_message=error_msg,
+                agent_id=agent_id, provider=selected_provider,
+                error_type="LLMConfigurationError", error_message=error_msg,
             )
-            raise LLMConfigurationError(
-                provider=selected_provider,
-                message=error_msg,
-            )
+            raise LLMConfigurationError(provider=selected_provider, message=error_msg)
 
         try:
             # 执行调用
-            response = await provider_instance.complete(
-                prompt=prompt,
-                options=options,
-                meta=meta,
-            )
+            response = await provider_instance.complete(prompt=prompt, options=options, meta=meta)
 
-            # 日志：调用成功
+            # 记录成功日志
             logger.info(
                 "llm_call_success",
-                agent_id=agent_id,
-                trace_id=trace_id,
-                provider=selected_provider,
-                model=response.model,
+                agent_id=agent_id, provider=selected_provider, model=response.model,
                 latency_ms=round(response.latency_ms, 2),
                 prompt_tokens=response.prompt_tokens,
                 completion_tokens=response.completion_tokens,
                 total_tokens=response.total_tokens,
             )
-
             return response
 
         except LLMCallError:
-            # 已经是标准异常，直接重新抛出（日志已在 Provider 中记录）
-            raise
-
+            raise  # Provider 异常已记录日志，直接重新抛出
         except Exception as e:
-            # 未预期的异常
             logger.error(
                 "llm_call_failed",
-                agent_id=agent_id,
-                trace_id=trace_id,
-                provider=selected_provider,
-                model=model or "auto",
-                error_type=type(e).__name__,
-                error_message=str(e),
-                exc_info=True,  # 记录完整堆栈
+                agent_id=agent_id, provider=selected_provider, model=model or "auto",
+                error_type=type(e).__name__, error_message=str(e), exc_info=True,
             )
             raise LLMCallError(
                 message=f"Unexpected error during LLM call: {str(e)}",
-                details={
-                    "agent_id": agent_id,
-                    "provider": selected_provider,
-                    "model": model,
-                    "original_error": type(e).__name__,
-                },
+                details={"agent_id": agent_id, "provider": selected_provider, "model": model},
             ) from e
 
     async def complete_with_messages(
@@ -366,66 +319,62 @@ class LLMGateway:
         """
         使用预构建的消息列表执行 LLM 调用
 
-        Args:
-            agent_id: 调用方 agent ID
-            messages: 预构建的消息列表
-            options: 调用选项（注意：system_prompt 会被忽略）
-            provider: 可选，指定 provider
-            trace_id: 可选，追踪 ID
-
-        Returns:
-            LLMResponse
+        【多轮对话方法】
+        与 complete() 的区别：messages 是完整的对话历史，
+        包含 system/user/assistant 消息，适合复杂对话场景。
         """
-        # 创建新的 options，覆盖 messages
         call_options = LLMCallOptions(
-            system_prompt="",  # 忽略，使用 messages
+            system_prompt="",  # 忽略，使用 messages 中的内容
             messages=messages,
             temperature=options.temperature,
             max_tokens=options.max_tokens,
             model=options.model,
         )
-
-        # 构建一个空 prompt（messages 已包含所有内容）
         return await self.complete(
-            agent_id=agent_id,
-            prompt="",  # messages 已包含用户消息
-            options=call_options,
-            provider=provider,
-            trace_id=trace_id,
+            agent_id=agent_id, prompt="",  # messages 已包含所有内容
+            options=call_options, provider=provider, trace_id=trace_id,
         )
 
     def get_available_providers(self) -> list[str]:
-        """获取已初始化的 Provider 列表"""
+        """获取已初始化的 Provider 列表。"""
         return list(self._providers.keys())
 
     def is_provider_available(self, provider: str) -> bool:
-        """检查 Provider 是否可用"""
+        """检查 Provider 是否可用。"""
         return provider in self._providers
 
     def get_default_provider(self) -> str:
-        """获取默认 Provider"""
+        """获取默认 Provider。"""
         return self._default_provider
 
     def get_config(self) -> LLMConfig:
-        """获取 .env 配置对象"""
+        """获取 .env 配置对象。"""
         return self.config
 
     def get_db_config(self) -> dict[str, dict]:
-        """获取数据库配置"""
+        """获取数据库配置。"""
         return self._db_config.copy()
 
     def reload_config(self) -> None:
-        """重新加载配置（数据库 + .env）"""
+        """
+        重新加载配置。
+
+        管理员在数据库修改 LLM 配置后调用，
+        重新初始化所有 Provider。
+        """
         self._load_db_config()
         self._init_providers()
 
 
-# 全局单例实例
+# =============================================================================
+# 全局单例
+# =============================================================================
+
 _llm_gateway: LLMGateway | None = None
 
 
 def get_llm_gateway() -> LLMGateway:
-    """获取 LLM Gateway 单例"""
+    """获取 LLM Gateway 单例，延迟初始化。"""
     global _llm_gateway
     if _llm_gateway is None:
         _llm_gateway = LLMGateway()
@@ -433,7 +382,7 @@ def get_llm_gateway() -> LLMGateway:
 
 
 def reload_llm_gateway() -> LLMGateway:
-    """重新加载 LLM Gateway（清除缓存）"""
+    """重新加载 LLM Gateway（清除缓存，重新初始化）。"""
     global _llm_gateway
     _llm_gateway = LLMGateway()
     return _llm_gateway

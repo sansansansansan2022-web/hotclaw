@@ -1,4 +1,19 @@
-/** API client for HotClaw backend. */
+/**
+ * API client for HotClaw backend.
+ *
+ * 【API 客户端】
+ * 封装所有后端 API 调用，统一处理：
+ * - 请求序列化/反序列化
+ * - 错误处理（code !== 0 → throw Error）
+ * - 路径前缀（/api/v1）
+ * - SSE URL 生成（直连后端）
+ *
+ * 面试点：
+ * - fetch API + async/await
+ * - 统一错误处理
+ * - SSR/CSR 环境判断
+ * - SSE 直连绕过代理
+ */
 
 import type {
   ApiResponse,
@@ -9,20 +24,36 @@ import type {
   TaskSummary,
 } from "@/types";
 
+// API 基础路径（通过 Next.js 代理）
 const BASE = "/api/v1";
 
+/**
+ * request — 统一请求方法
+ *
+ * 所有 API 调用都通过此函数，自动：
+ * 1. 拼接 BASE 路径
+ * 2. 设置 Content-Type
+ * 3. 解析响应 JSON
+ * 4. 检查 code 字段（非 0 则抛出错误）
+ */
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
   const body: ApiResponse<T> = await res.json();
+  // 后端返回 code !== 0 表示业务错误
   if (body.code !== 0) {
     throw new Error(body.message || "request failed");
   }
   return body.data;
 }
 
+// =============================================================================
+// 任务相关 API
+// =============================================================================
+
+/** 创建任务 */
 export async function createTask(positioning: string): Promise<TaskCreateData> {
   return request<TaskCreateData>("/tasks", {
     method: "POST",
@@ -30,14 +61,17 @@ export async function createTask(positioning: string): Promise<TaskCreateData> {
   });
 }
 
+/** 获取任务详情 */
 export async function getTaskDetail(taskId: string): Promise<TaskDetail> {
   return request<TaskDetail>(`/tasks/${taskId}`);
 }
 
+/** 获取节点执行记录 */
 export async function getTaskNodes(taskId: string): Promise<{ nodes: NodeRun[] }> {
   return request<{ nodes: NodeRun[] }>(`/tasks/${taskId}/nodes`);
 }
 
+/** 任务列表（分页） */
 export async function listTasks(
   page = 1,
   pageSize = 20
@@ -45,11 +79,32 @@ export async function listTasks(
   return request(`/tasks?page=${page}&page_size=${pageSize}`);
 }
 
+/**
+ * getTaskStreamUrl — SSE 流地址
+ *
+ * 【关键设计】SSE 必须直连后端，绕过 Next.js 开发服务器代理
+ *
+ * 问题：Next.js 开发服务器的代理默认会缓冲 HTTP 响应，
+ * 直到完整响应后才发送给客户端。这会导致 SSE 的流式推送
+ * 变成"一次性推送"，无法实现实时效果。
+ *
+ * 解决：在浏览器端直接连接后端端口 8002，
+ * 绕过 Next.js 代理，直接接收 SSE 流。
+ *
+ * 为什么不用生产环境问题？
+ * 生产环境用 Nginx 等反向代理，默认支持 SSE 流式响应。
+ */
 export function getTaskStreamUrl(taskId: string): string {
+  // SSR 时（服务端渲染）返回相对路径
+  if (typeof window !== "undefined") {
+    return `http://${window.location.hostname}:8002${BASE}/tasks/${taskId}/stream`;
+  }
   return `${BASE}/tasks/${taskId}/stream`;
 }
 
-// --- Agents ---
+// =============================================================================
+// 智能体相关 API
+// =============================================================================
 
 export interface AgentInfo {
   agent_id: string;
@@ -65,17 +120,24 @@ export interface AgentInfo {
   retry_config?: Record<string, unknown> | null;
 }
 
+/** 列出所有智能体 */
 export async function listAgents(): Promise<{ agents: AgentInfo[] }> {
   return request<{ agents: AgentInfo[] }>("/agents");
 }
 
+/** 获取单个智能体详情 */
 export async function getAgent(agentId: string): Promise<AgentInfo> {
   return request<AgentInfo>(`/agents/${agentId}`);
 }
 
+/** 更新智能体配置（Prompt / Model / Retry） */
 export async function updateAgentConfig(
   agentId: string,
-  config: { model_config_data?: Record<string, unknown>; prompt_template?: string; retry_config?: Record<string, unknown> }
+  config: {
+    model_config_data?: Record<string, unknown>;
+    prompt_template?: string;
+    retry_config?: Record<string, unknown>;
+  }
 ): Promise<{ agent_id: string; updated_fields: string[] }> {
   return request(`/agents/${agentId}/config`, {
     method: "PUT",
@@ -83,7 +145,9 @@ export async function updateAgentConfig(
   });
 }
 
-// --- Skills ---
+// =============================================================================
+// 技能相关 API
+// =============================================================================
 
 export interface SkillInfo {
   skill_id: string;
@@ -94,10 +158,12 @@ export interface SkillInfo {
   status: string;
 }
 
+/** 列出所有技能 */
 export async function listSkills(): Promise<{ skills: SkillInfo[] }> {
   return request<{ skills: SkillInfo[] }>("/skills");
 }
 
+/** 更新技能配置 */
 export async function updateSkillConfig(
   skillId: string,
   config: { config_data: Record<string, unknown> }
@@ -108,7 +174,9 @@ export async function updateSkillConfig(
   });
 }
 
-// --- LLM Providers ---
+// =============================================================================
+// LLM Provider 相关 API
+// =============================================================================
 
 export interface LLMProviderInfo {
   provider_id: string;
@@ -171,14 +239,17 @@ export interface LLMProviderTestResponse {
   error_message?: string;
 }
 
+/** 列出所有 LLM Provider */
 export async function listLLMProviders(): Promise<LLMProviderInfo[]> {
   return request<LLMProviderInfo[]>("/llm-providers");
 }
 
+/** 获取单个 Provider */
 export async function getLLMProvider(providerId: string): Promise<LLMProviderInfo> {
   return request<LLMProviderInfo>(`/llm-providers/${providerId}`);
 }
 
+/** 创建 Provider */
 export async function createLLMProvider(
   data: LLMProviderCreate
 ): Promise<LLMProviderInfo> {
@@ -188,6 +259,7 @@ export async function createLLMProvider(
   });
 }
 
+/** 更新 Provider */
 export async function updateLLMProvider(
   providerId: string,
   data: LLMProviderUpdate
@@ -198,12 +270,14 @@ export async function updateLLMProvider(
   });
 }
 
+/** 删除 Provider */
 export async function deleteLLMProvider(providerId: string): Promise<void> {
   await request(`/llm-providers/${providerId}`, {
     method: "DELETE",
   });
 }
 
+/** 测试 Provider 连接 */
 export async function testLLMProvider(
   data: LLMProviderTestRequest
 ): Promise<LLMProviderTestResponse> {
@@ -213,6 +287,7 @@ export async function testLLMProvider(
   });
 }
 
+/** 获取当前默认 Provider */
 export async function getDefaultLLMProvider(): Promise<{
   provider_id: string | null;
   name?: string;
@@ -222,6 +297,7 @@ export async function getDefaultLLMProvider(): Promise<{
   return request("/llm-providers/active/default");
 }
 
+/** 设置默认 Provider */
 export async function setDefaultLLMProvider(
   providerId: string
 ): Promise<{ provider_id: string; message: string }> {
@@ -230,7 +306,10 @@ export async function setDefaultLLMProvider(
   });
 }
 
-// 预定义的 Provider 模板
+/**
+ * 预定义的 Provider 模板
+ * 用户创建 Provider 时可以直接选择模板，快速配置
+ */
 export const LLM_PROVIDER_TEMPLATES = [
   {
     provider_id: "openai",

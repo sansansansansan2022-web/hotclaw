@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 
 // 场景区域定义
 const ZONES = {
@@ -13,33 +13,54 @@ const ZONES = {
   lobby:      { x:0,    y:528,  w:1100, h:52  },
 }
 
-// 工位坐标配置
+// 工位坐标配置 - 均匀分布，适配 office_L 和 office_R 区域
 const DESKS = [
-  { agentId:"profile_agent",        x:40,   y:220 },
-  { agentId:"hot_topic_agent",      x:200,  y:220 },
-  { agentId:"topic_planner_agent",  x:360,  y:220 },
-  { agentId:"title_generator_agent",x:580,  y:220 },
-  { agentId:"content_writer_agent", x:740,  y:220 },
-  { agentId:"audit_agent",          x:900,  y:220 },
+  { agentId:"profile_agent",        x:30,   y:220 },
+  { agentId:"hot_topic_agent",      x:170,  y:220 },
+  { agentId:"topic_planner_agent",  x:310,  y:220 },
+  { agentId:"title_generator_agent",x:540,  y:220 },
+  { agentId:"content_writer_agent", x:680,  y:220 },
+  { agentId:"audit_agent",          x:820,  y:220 },
 ]
 
-// 6个智能体定义
-const AGENTS: Array<{id: number, name: string, agentId: string, sprite: string, status: 'working' | 'sync' | 'idle' | 'offline', floor: number, deskCol: number}> = [
-  { id:1, name:"账号定位解析", sprite:"/sprites/chars/char_1.png", agentId:"profile_agent",       status:"working", floor:2, deskCol:0 },
-  { id:2, name:"热点分析",     sprite:"/sprites/chars/char_2.png", agentId:"hot_topic_agent",     status:"sync",    floor:2, deskCol:1 },
-  { id:3, name:"选题策划",     sprite:"/sprites/chars/char_3.png", agentId:"topic_planner_agent", status:"idle",    floor:2, deskCol:2 },
-  { id:4, name:"标题生成",     sprite:"/sprites/chars/char_4.png", agentId:"title_generator_agent",status:"working", floor:3, deskCol:0 },
-  { id:5, name:"正文生成",     sprite:"/sprites/chars/char_5.png", agentId:"content_writer_agent",status:"working", floor:3, deskCol:1 },
-  { id:6, name:"审核",         sprite:"/sprites/chars/char_6.png", agentId:"audit_agent",         status:"offline", floor:3, deskCol:2 },
-]
+// 节点 ID 到 agentId 的映射
+const NODE_TO_AGENT: Record<string, string> = {
+  profile_parsing: "profile_agent",
+  hot_topic_analysis: "hot_topic_agent",
+  topic_planning: "topic_planner_agent",
+  title_generation: "title_generator_agent",
+  content_writing: "content_writer_agent",
+  audit: "audit_agent",
+}
+
+// 精灵体状态
+export type SpriteStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
+
+// 精灵体接口
+export interface SpriteState {
+  node_id: string
+  agent_id: string
+  name: string
+  status: SpriteStatus
+  output_summary?: string
+  error?: string | null
+}
 
 // 状态颜色映射
-const STATUS_COLORS = {
+const STATUS_COLORS: Record<string, string> = {
+  pending: "#6b7280",
+  running: "#22c55e",
+  completed: "#eab308",
+  failed: "#ef4444",
+  skipped: "#9ca3af",
   working: "#22c55e",
-  sync:    "#eab308",
-  idle:    "#6b7280",
+  sync: "#eab308",
+  idle: "#6b7280",
   offline: "#ef4444",
 }
+
+// Canvas 内部状态
+type CanvasStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped'
 
 // 方向映射
 const ROW = { down:0, up:1, side:2 }
@@ -51,13 +72,13 @@ interface Assets {
   chars:  HTMLImageElement[]
 }
 
-// 智能体状态接口
-interface AgentState {
+// 智能体 Canvas 状态接口
+interface AgentCanvasState {
   id: number
   name: string
   agentId: string
   sprite: string
-  status: 'working' | 'sync' | 'idle' | 'offline'
+  status: CanvasStatus
   x: number
   y: number
   targetX: number
@@ -66,26 +87,42 @@ interface AgentState {
   lastFrameTime: number
   direction: 'down' | 'up' | 'side'
   isMoving: boolean
-  floor: number
-  deskCol: number
 }
 
-export default function NewsroomScene() {
+// 默认精灵体
+const DEFAULT_AGENTS: Array<{id: number, name: string, agentId: string, sprite: string, status: CanvasStatus, floor: number, deskCol: number}> = [
+  { id:1, name:"账号定位解析", sprite:"/sprites/chars/char_1.png", agentId:"profile_agent",       status:"pending", floor:2, deskCol:0 },
+  { id:2, name:"热点分析",     sprite:"/sprites/chars/char_2.png", agentId:"hot_topic_agent",     status:"pending", floor:2, deskCol:1 },
+  { id:3, name:"选题策划",     sprite:"/sprites/chars/char_3.png", agentId:"topic_planner_agent", status:"pending", floor:2, deskCol:2 },
+  { id:4, name:"标题生成",     sprite:"/sprites/chars/char_4.png", agentId:"title_generator_agent",status:"pending", floor:3, deskCol:0 },
+  { id:5, name:"正文生成",     sprite:"/sprites/chars/char_5.png", agentId:"content_writer_agent",status:"pending", floor:3, deskCol:1 },
+  { id:6, name:"审核",         sprite:"/sprites/chars/char_6.png", agentId:"audit_agent",         status:"pending", floor:3, deskCol:2 },
+]
+
+// Props 接口
+export interface NewsroomSceneProps {
+  sprites?: SpriteState[]
+  onSpriteClick?: (sprite: SpriteState) => void
+  taskId?: string | null
+  showStatus?: boolean
+}
+
+export default function NewsroomScene({ sprites, onSpriteClick, showStatus = true }: NewsroomSceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationFrameIdRef = useRef<number | null>(null)
   const [assets, setAssets] = useState<Assets | null>(null)
-  const [agents, setAgents] = useState<AgentState[]>(() => 
-    AGENTS.map(agent => {
+  const [agents, setAgents] = useState<AgentCanvasState[]>(() =>
+    DEFAULT_AGENTS.map(agent => {
       const desk = DESKS.find(d => d.agentId === agent.agentId)!
       return {
         ...agent,
-        x: desk.x + 24,  // 角色脚底中心对齐桌子中心
-        y: desk.y + 96,  // 桌子底部
+        x: desk.x + 24,
+        y: desk.y + 96,
         targetX: desk.x + 24,
         targetY: desk.y + 96,
         frameIndex: 0,
         lastFrameTime: 0,
-        direction: 'down',
+        direction: 'down' as const,
         isMoving: false
       }
     })
@@ -96,6 +133,38 @@ export default function NewsroomScene() {
     { x: 300, y: 35, speed: 0.3 },
     { x: 700, y: 25, speed: 0.4 }
   ])
+
+  // 根据 sprites 更新 agents 状态
+  useEffect(() => {
+    if (!sprites || sprites.length === 0) return
+
+    setAgents(prev => prev.map(agent => {
+      // 查找匹配的 sprite 状态
+      const sprite = sprites.find(s => s.agent_id === agent.agentId || NODE_TO_AGENT[s.node_id] === agent.agentId)
+      if (sprite) {
+        // 映射状态
+        let newStatus: CanvasStatus
+        switch (sprite.status) {
+          case 'running':
+            newStatus = 'running'
+            break
+          case 'completed':
+            newStatus = 'completed'
+            break
+          case 'failed':
+            newStatus = 'failed'
+            break
+          case 'skipped':
+            newStatus = 'skipped'
+            break
+          default:
+            newStatus = 'pending'
+        }
+        return { ...agent, status: newStatus, name: sprite.name || agent.name }
+      }
+      return agent
+    }))
+  }, [sprites])
 
   // 图片预加载函数
   const loadImage = (src: string): Promise<HTMLImageElement> =>
@@ -147,21 +216,19 @@ export default function NewsroomScene() {
 
   // 绘制工位
   const drawDesk = (ctx: CanvasRenderingContext2D, assets: Assets, deskX: number, deskY: number) => {
-    // 椅子在桌子正下方
     drawObj(ctx, assets.objs.chair, deskX + 16, deskY + 104)
-    // 桌子
     drawObj(ctx, assets.objs.desk,  deskX, deskY)
-    // 台灯
     drawObj(ctx, assets.objs.lamp,  deskX + 64, deskY + 4)
   }
 
   // 绘制状态标签
   const drawStatusLabel = (ctx: CanvasRenderingContext2D, name: string, status: string, x: number, y: number) => {
-    const label = status.toUpperCase()
+    const statusText = status === 'completed' ? 'DONE' : status === 'running' ? 'WORK' : status === 'failed' ? 'ERR' : 'IDLE'
+    const label = statusText
     ctx.font = "bold 10px monospace"
     const tw = ctx.measureText(label).width
     // 背景
-    ctx.fillStyle = STATUS_COLORS[status as keyof typeof STATUS_COLORS]
+    ctx.fillStyle = STATUS_COLORS[status] || STATUS_COLORS.pending
     ctx.fillRect(x - tw/2 - 4, y - 12, tw + 8, 12)
     // 文字
     ctx.fillStyle = "#ffffff"
@@ -173,11 +240,46 @@ export default function NewsroomScene() {
     ctx.fillText(name, x, y - 16)
   }
 
+  // 获取 Canvas 状态对应的显示状态
+  const getDisplayStatus = (status: CanvasStatus): string => {
+    switch (status) {
+      case 'running':
+        return 'working'
+      case 'completed':
+        return 'sync'
+      case 'failed':
+        return 'offline'
+      default:
+        return 'idle'
+    }
+  }
+
+  // 点击处理
+  const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!canvasRef.current || !onSpriteClick || !sprites) return
+
+    const rect = canvasRef.current.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    // 查找点击的精灵体
+    for (const agent of agents) {
+      const dx = x - agent.x
+      const dy = y - (agent.y - 40) // 精灵体高度大约 40px
+      if (Math.abs(dx) < 30 && Math.abs(dy) < 40) {
+        const sprite = sprites.find(s => s.agent_id === agent.agentId)
+        if (sprite) {
+          onSpriteClick(sprite)
+        }
+        break
+      }
+    }
+  }, [agents, onSpriteClick, sprites])
+
   // 预加载所有素材
   useEffect(() => {
     const loadAssets = async () => {
       try {
-        // 加载瓷砖
         const [wood, white, carpet, wall] = await Promise.all([
           loadImage('/tiles/tile_floor_wood.png'),
           loadImage('/tiles/tile_floor_white.png'),
@@ -185,7 +287,6 @@ export default function NewsroomScene() {
           loadImage('/tiles/tile_wall.png')
         ])
 
-        // 加载家具
         const [desk, chair, shelf, plant, vending, couch, rug, lamp, window] = await Promise.all([
           loadImage('/objs/obj_desk.png'),
           loadImage('/objs/obj_chair.png'),
@@ -198,7 +299,6 @@ export default function NewsroomScene() {
           loadImage('/objs/obj_window.png')
         ])
 
-        // 加载角色精灵
         const chars = await Promise.all(
           Array.from({ length: 6 }, (_, i) => loadImage(`/sprites/chars/char_${i + 1}.png`))
         )
@@ -233,37 +333,32 @@ export default function NewsroomScene() {
       lastTime = time
       frameCount++
 
-      // 更新FPS
       if (time - lastFpsUpdate >= 1000) {
         setFps(Math.round(frameCount * 1000 / (time - lastFpsUpdate)))
         frameCount = 0
         lastFpsUpdate = time
       }
 
-      // 清空画布
       ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-      // 分层渲染
       drawBackground(ctx)
       drawFloor(ctx)
       drawWalls(ctx)
       drawFurniture(ctx)
       updateAgents(deltaTime)
       drawAgents(ctx)
-      drawUI(ctx)
+      if (showStatus) drawUI(ctx)
 
       animationFrameIdRef.current = requestAnimationFrame(render)
     }
 
     const drawBackground = (ctx: CanvasRenderingContext2D) => {
-      // 天空渐变
       const gradient = ctx.createLinearGradient(0, 0, 0, ZONES.sky.h)
       gradient.addColorStop(0, '#87ceeb')
       gradient.addColorStop(1, '#e0f6ff')
       ctx.fillStyle = gradient
       ctx.fillRect(ZONES.sky.x, ZONES.sky.y, ZONES.sky.w, ZONES.sky.h)
 
-      // 云朵
       ctx.fillStyle = 'rgba(255, 255, 255, 0.8)'
       clouds.forEach(cloud => {
         ctx.fillRect(cloud.x, cloud.y, 60, 20)
@@ -272,25 +367,15 @@ export default function NewsroomScene() {
     }
 
     const drawFloor = (ctx: CanvasRenderingContext2D) => {
-      // 办公区木地板
       drawTiled(ctx, assets.tiles.wood, ZONES.office_L.x, ZONES.office_L.y, ZONES.office_L.w, ZONES.office_L.h)
       drawTiled(ctx, assets.tiles.wood, ZONES.office_R.x, ZONES.office_R.y, ZONES.office_R.w, ZONES.office_R.h)
-      
-      // 走廊白砖
       drawTiled(ctx, assets.tiles.white, ZONES.corridor.x, ZONES.corridor.y, ZONES.corridor.w, ZONES.corridor.h)
-      
-      // 大厅白砖
       drawTiled(ctx, assets.tiles.white, ZONES.lobby.x, ZONES.lobby.y, ZONES.lobby.w, ZONES.lobby.h)
-      
-      // 地毯装饰
       drawObj(ctx, assets.objs.rug, 200, 530)
     }
 
     const drawWalls = (ctx: CanvasRenderingContext2D) => {
-      // 外墙瓷砖
       drawTiled(ctx, assets.tiles.wall, ZONES.wall.x, ZONES.wall.y, ZONES.wall.w, ZONES.wall.h)
-      
-      // 窗户（间隔摆放）
       for (let i = 0; i < 6; i++) {
         if (i % 2 === 0) {
           drawObj(ctx, assets.objs.window, 80 + i * 180, 96)
@@ -299,18 +384,13 @@ export default function NewsroomScene() {
     }
 
     const drawFurniture = (ctx: CanvasRenderingContext2D) => {
-      // 绘制所有工位
       DESKS.forEach(desk => {
         drawDesk(ctx, assets, desk.x, desk.y)
       })
-
-      // 大厅家具
       drawObj(ctx, assets.objs.couch, 400, 536)
       drawObj(ctx, assets.objs.vending, 800, 532)
       drawObj(ctx, assets.objs.plant, 50, 540)
       drawObj(ctx, assets.objs.plant, 1000, 540)
-
-      // 书架（贴墙）
       drawObj(ctx, assets.objs.shelf, 50, 210)
       drawObj(ctx, assets.objs.shelf, 1000, 210)
     }
@@ -320,14 +400,14 @@ export default function NewsroomScene() {
         const newAgent = { ...agent }
         const now = Date.now()
 
-        // 更新动画帧
         if (now - agent.lastFrameTime > 150) {
           newAgent.frameIndex = (agent.frameIndex + 1) % 7
           newAgent.lastFrameTime = now
         }
 
-        // 根据状态更新行为
-        switch (agent.status) {
+        const displayStatus = getDisplayStatus(agent.status)
+
+        switch (displayStatus) {
           case 'working':
             newAgent.isMoving = false
             newAgent.direction = 'down'
@@ -346,13 +426,11 @@ export default function NewsroomScene() {
 
           case 'idle':
             if (!agent.isMoving && Math.random() < 0.005) {
-              // 走到大厅再回来
               newAgent.targetX = 600
               newAgent.targetY = 550
               newAgent.isMoving = true
               newAgent.direction = 'side'
             } else if (agent.isMoving && Math.abs(agent.x - agent.targetX) < 10) {
-              // 回到工位
               const homeDesk = DESKS.find(d => d.agentId === agent.agentId)!
               newAgent.targetX = homeDesk.x + 24
               newAgent.targetY = homeDesk.y + 96
@@ -365,7 +443,6 @@ export default function NewsroomScene() {
             break
         }
 
-        // 移动逻辑
         if (agent.isMoving) {
           const dx = agent.targetX - agent.x
           const dy = agent.targetY - agent.y
@@ -391,13 +468,12 @@ export default function NewsroomScene() {
 
         const frameW = charImg.naturalWidth / 7
         const frameH = charImg.naturalHeight / 3
+        const displayStatus = getDisplayStatus(agent.status)
 
-        // 应用透明度（offline状态）
-        if (agent.status === 'offline') {
+        if (displayStatus === 'offline') {
           ctx.globalAlpha = 0.35
         }
 
-        // 绘制角色
         if (agent.direction === 'side' && agent.x > agent.targetX) {
           drawCharacterFlipped(ctx, charImg, frameW, frameH, agent.frameIndex, agent.x, agent.y)
         } else {
@@ -407,11 +483,11 @@ export default function NewsroomScene() {
 
         ctx.globalAlpha = 1.0
 
-        // 绘制状态标签
-        drawStatusLabel(ctx, agent.name, agent.status, agent.x, agent.y - 48)
+        if (showStatus) {
+          drawStatusLabel(ctx, agent.name, displayStatus, agent.x, agent.y - 48)
+        }
 
-        // sync状态下绘制信封
-        if (agent.status === 'sync' && agent.isMoving) {
+        if (displayStatus === 'sync' && agent.isMoving) {
           ctx.fillStyle = '#ffeb3b'
           ctx.fillRect(agent.x - 8, agent.y - 60, 16, 12)
           ctx.fillStyle = '#f44336'
@@ -423,8 +499,7 @@ export default function NewsroomScene() {
           ctx.fill()
         }
 
-        // working状态下显示器光晕效果
-        if (agent.status === 'working') {
+        if (displayStatus === 'working') {
           const desk = DESKS.find(d => d.agentId === agent.agentId)!
           const alpha = 0.3 + 0.2 * Math.sin(Date.now() / 300)
           ctx.fillStyle = `rgba(34, 197, 94, ${alpha})`
@@ -434,13 +509,11 @@ export default function NewsroomScene() {
     }
 
     const drawUI = (ctx: CanvasRenderingContext2D) => {
-      // FPS计数器
       ctx.fillStyle = '#00ff00'
       ctx.font = 'bold 12px monospace'
       ctx.textAlign = 'left'
       ctx.fillText(`FPS: ${fps}`, 10, 20)
 
-      // 时钟
       ctx.fillStyle = '#ff0000'
       ctx.font = 'bold 14px monospace'
       ctx.textAlign = 'right'
@@ -456,7 +529,7 @@ export default function NewsroomScene() {
         cancelAnimationFrame(animationFrameIdRef.current)
       }
     }
-  }, [assets, agents, fps, clouds])
+  }, [assets, agents, fps, clouds, showStatus])
 
   if (!assets) {
     return (
@@ -475,7 +548,8 @@ export default function NewsroomScene() {
         ref={canvasRef}
         width={1100}
         height={580}
-        className="border-2 border-gray-700 bg-black"
+        className="border-2 border-gray-700 bg-black cursor-pointer"
+        onClick={handleClick}
       />
     </div>
   )

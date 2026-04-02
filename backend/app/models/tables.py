@@ -232,6 +232,40 @@ class SystemLogModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
 
 
+class SystemConfigModel(Base):
+    """System configuration key-value store (replaces .env for runtime settings)."""
+    __tablename__ = "system_configs"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    """配置键名，如 database_url, redis_url, app_debug 等"""
+
+    value: Mapped[str] = mapped_column(Text, nullable=True)
+    """配置值"""
+
+    value_type: Mapped[str] = mapped_column(String(20), nullable=False, default="string")
+    """值类型：string, number, boolean, json"""
+
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """配置说明"""
+
+    category: Mapped[str] = mapped_column(String(32), nullable=False, default="general")
+    """分类：database, redis, llm, app, log, timeout"""
+
+    is_sensitive: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    """是否为敏感配置（如 API Key，GET 时应脱敏）"""
+
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    """是否为系统级配置（不可删除）"""
+
+    requires_restart: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    """修改后是否需要重启服务"""
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class LLMProviderModel(Base):
     """LLM Provider configuration (user-defined API keys and settings)."""
     __tablename__ = "llm_providers"

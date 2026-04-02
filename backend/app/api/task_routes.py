@@ -1,13 +1,25 @@
-"""Task API routes.
+"""
+Task API routes.
 
-Per NOTICE.md section 5: api/ only handles request/response, no core business logic.
+【任务 API 路由】
+处理任务相关的 HTTP 请求，包括创建、查询、列表。
+
+设计原则（来自 NOTICE.md）：
+- api/ 层只处理请求/响应，不包含核心业务逻辑
+- 核心逻辑委托给 services/ 层
+
+面试点：
+- FastAPI Depends 依赖注入
+- asyncio.create_task 后台任务
+- 分页查询
+- API 响应格式设计
 """
 
 import asyncio
-from fastapi import APIRouter, Depends, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db, async_session_factory
+from app.db.session import get_db
 from app.schemas.common import ApiResponse
 from app.schemas.task import TaskCreateRequest
 from app.services.task_service import task_service
@@ -15,14 +27,66 @@ from app.core.tracer import get_trace_id, set_task_id
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 
+# Store background tasks for cleanup
+# 【后台任务追踪】
+# 存储 asyncio.Task 引用，防止被垃圾回收
+_background_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _run_task_in_background(tid: str) -> None:
+    """
+    在独立数据库会话中运行任务（后台执行）。
+
+    【关键】为什么需要独立会话？
+    FastAPI 请求的 db 会话会在请求结束后关闭，
+    但任务执行可能持续几分钟，不能依赖请求会话。
+    所以创建独立的 session。
+
+    工作流程：
+    1. 创建独立数据库会话
+    2. 设置 trace_id
+    3. 调用 task_service.run_task() 执行编排引擎
+    4. 捕获所有异常，打印堆栈（防止静默失败）
+    5. 完成后从 _background_tasks 移除引用
+    """
+    from app.db.session import async_session_factory
+    from app.services.task_service import task_service
+    from app.core.tracer import set_task_id
+
+    async with async_session_factory() as bg_db:
+        try:
+            set_task_id(tid)
+            await task_service.run_task(tid, bg_db)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+        finally:
+            _background_tasks.pop(tid, None)
+
 
 @router.post("")
 async def create_task(
     req: TaskCreateRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
-    """Create a new content generation task."""
+    """
+    Create a new content generation task.
+
+    【创建任务 API】
+
+    工作流程：
+    1. 验证输入（positioning 非空，长度符合要求）
+    2. 创建 TaskModel 记录
+    3. 提交到数据库
+    4. 异步启动编排引擎（不阻塞 HTTP 响应）
+
+    Returns:
+        { task_id, status, created_at, workflow_id }
+
+    注意：
+    - 使用 asyncio.create_task 启动后台任务，立即返回响应
+    - 客户端通过 SSE 流监听任务进度
+    """
     task = await task_service.create_task(
         positioning=req.positioning,
         workflow_id=req.workflow_id,
@@ -30,30 +94,36 @@ async def create_task(
     )
     await db.commit()
 
-    # Run orchestrator in background so the HTTP response returns immediately
+    # 提取可序列化字段（ORM 对象不能直接 JSON 序列化）
     task_id = task.id
+    task_status = task.status
+    task_workflow_id = task.workflow_id
+    created_at = task.created_at.isoformat() if task.created_at else None
 
-    async def _run_in_background(tid: str) -> None:
-        async with async_session_factory() as bg_db:
-            try:
-                set_task_id(tid)
-                await task_service.run_task(tid, bg_db)
-            except Exception:
-                pass  # Errors already handled inside run_task
-
-    background_tasks.add_task(_run_in_background, task_id)
+    # 【异步执行】启动后台任务，立即返回响应
+    # 这样用户立即收到 task_id，可以开始 SSE 订阅
+    bg_task = asyncio.create_task(_run_task_in_background(task_id))
+    _background_tasks[task_id] = bg_task
 
     return ApiResponse(data={
-        "task_id": task.id,
-        "status": task.status,
-        "created_at": task.created_at.isoformat() if task.created_at else None,
-        "workflow_id": task.workflow_id,
+        "task_id": task_id,
+        "status": task_status,
+        "created_at": created_at,
+        "workflow_id": task_workflow_id,
     })
 
 
 @router.get("/{task_id}/status")
 async def get_task_status(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
-    """Query task status."""
+    """
+    Query task status.
+
+    【任务状态查询】
+    返回当前执行进度，用于前端轮询或 SSE 补充。
+
+    Returns:
+        { task_id, status, current_node, progress: {total_nodes, completed_nodes, current_node_index}, ... }
+    """
     task = await task_service.get_task(task_id, db)
     node_runs = await task_service.get_node_runs(task_id, db)
 
@@ -89,7 +159,15 @@ async def get_task_status(task_id: str, db: AsyncSession = Depends(get_db)) -> A
 
 @router.get("/{task_id}")
 async def get_task_detail(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
-    """Query full task detail including results."""
+    """
+    Query full task detail including results.
+
+    【任务详情查询】
+    返回完整任务信息和最终产出（result_data）。
+
+    Returns:
+        { task_id, status, input_data, result_data, timestamps, tokens, ... }
+    """
     task = await task_service.get_task(task_id, db)
 
     return ApiResponse(data={
@@ -109,7 +187,12 @@ async def get_task_detail(task_id: str, db: AsyncSession = Depends(get_db)) -> A
 
 @router.get("/{task_id}/nodes")
 async def get_task_nodes(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
-    """Query all node execution records for a task."""
+    """
+    Query all node execution records for a task.
+
+    【节点执行记录查询】
+    返回每个智能体的执行详情，包括耗时、token 使用量、输出数据。
+    """
     node_runs = await task_service.get_node_runs(task_id, db)
 
     nodes_data = []
@@ -140,7 +223,20 @@ async def list_tasks(
     status: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
-    """List tasks with pagination."""
+    """
+    List tasks with pagination.
+
+    【任务列表查询】
+    支持分页和状态过滤。
+
+    Query 参数：
+    - page: 页码（从 1 开始）
+    - page_size: 每页数量（最大 100）
+    - status: 可选，筛选状态（running/completed/failed）
+
+    Returns:
+        { tasks: [...], pagination: { page, page_size, total } }
+    """
     tasks, total = await task_service.list_tasks(db, page=page, page_size=page_size, status=status)
 
     tasks_data = []

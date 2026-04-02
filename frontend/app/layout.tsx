@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import TaskStatusBanner from "@/components/TaskStatusBanner";
 
 export const metadata: Metadata = {
   title: "HotClaw 编辑部",
@@ -9,7 +10,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <TaskStatusBanner />
+        {children}
+      </body>
     </html>
   );
 }
