@@ -2,6 +2,7 @@
   "name": "hotclaw-frontend",
   "version": "0.1.0",
   "private": true,
+  "description": "Multi-Agent Content Production Platform for WeChat Official Accounts",
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
