@@ -7,7 +7,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.exceptions import TaskNotFoundError, TaskAlreadyRunningError
+from app.core.exceptions import TaskNotFoundError, TaskAlreadyRunningError, HotClawError
 from app.core.logger import get_logger
 from app.core.tracer import generate_task_id, set_task_id
 from app.models.tables import TaskModel, TaskNodeRunModel
@@ -39,8 +39,15 @@ class TaskService:
     async def run_task(self, task_id: str, db: AsyncSession) -> None:
         """Run the orchestrator for a task. Called as a background coroutine."""
         task = await self._get_task(task_id, db)
+        # 仅允许 pending 任务进入执行，避免重复跑已完成/失败任务
         if task.status == "running":
             raise TaskAlreadyRunningError(task_id)
+        if task.status != "pending":
+            raise HotClawError(
+                code=2003,
+                message=f"task is not pending: {task_id}",
+                details={"status": task.status},
+            )
 
         try:
             # Run the orchestrator
@@ -56,7 +63,10 @@ class TaskService:
 
             # If this task is bound to an account, refresh the account's next_run_at
             if task.account_id:
+                await self._update_account_run_status(task.account_id, db, "success")
                 await self._refresh_account_next_run(task.account_id, db)
+                # account_service 仅 flush，这里补一次 commit 持久化账号状态
+                await db.commit()
 
         except Exception as e:
             task.status = "failed"
@@ -70,7 +80,9 @@ class TaskService:
 
             # If this task is bound to an account, update the account's run status
             if task.account_id:
-                await self._update_account_run_status_on_failure(task.account_id, db, str(e))
+                await self._update_account_run_status(task.account_id, db, "failed", str(e))
+                # account_service 仅 flush，这里补一次 commit 持久化账号失败状态
+                await db.commit()
 
             await broadcaster.broadcast(task_id, "task_error", {
                 "task_id": task_id,
@@ -172,14 +184,14 @@ class TaskService:
         except Exception as e:
             logger.warning("failed_to_refresh_account_next_run", account_id=account_id, error=str(e))
 
-    async def _update_account_run_status_on_failure(
-        self, account_id: str, db: AsyncSession, error_message: str
+    async def _update_account_run_status(
+        self, account_id: str, db: AsyncSession, status: str, error_message: str | None = None
     ) -> None:
-        """Update account's run status after task failure."""
+        """Update account's run status after task completion/failure."""
         try:
             from app.services.account_service import account_service
-            await account_service.update_account_run_status(account_id, db, "failed", error_message)
-            logger.info("account_run_status_updated_on_failure", account_id=account_id)
+            await account_service.update_account_run_status(account_id, db, status, error_message)
+            logger.info("account_run_status_updated", account_id=account_id, status=status)
         except Exception as e:
             logger.warning("failed_to_update_account_run_status", account_id=account_id, error=str(e))
 

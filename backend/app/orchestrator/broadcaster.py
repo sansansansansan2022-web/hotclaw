@@ -47,6 +47,7 @@ class SSEBroadcaster:
     """
 
     def __init__(self) -> None:
+        self._max_history_per_task = 200
         # task_id -> 订阅者队列列表（可能有多个浏览器标签页同时订阅）
         self._subscribers: dict[str, list[asyncio.Queue]] = {}
         # task_id -> 历史事件（deque，自动淘汰旧事件）
@@ -125,10 +126,14 @@ class SSEBroadcaster:
         """
         message = {"event": event, "data": data}
 
-        # 存入历史（不限长度，简单实现；生产可用 deque(maxlen=100)）
+        # 存入历史（限制每个任务的最大缓存，避免长任务内存增长）
         if task_id not in self._history:
             self._history[task_id] = []
-        self._history[task_id].append(message)
+        history = self._history[task_id]
+        history.append(message)
+        if len(history) > self._max_history_per_task:
+            # 移除最早的事件，保持固定上限
+            del history[0]
 
         # 推送给所有在线订阅者
         subscribers = self._subscribers.get(task_id, [])
