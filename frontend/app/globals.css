@@ -1,50 +1,85 @@
 @import "tailwindcss";
 
 /* ================================================
-   HotClaw — 3D Command Center Design System
-   深空指挥舱设计系统
+   HotClaw — SaaS Console Design System
+   成熟 SaaS 控制台设计系统 V3
    ================================================ */
 
 :root {
-  /* ── Deep Space Background ── */
-  --cc-void: #020509;
-  --cc-deep: #040810;
-  --cc-base: #080d1a;
-  --cc-surface: #0d1525;
-  --cc-elevated: #111e33;
+  /* ── 背景层级 (从深到浅) ── */
+  --bg-void: #060a0f;        /* 最深背景 */
+  --bg-base: #090e17;        /* 主背景 */
+  --bg-surface: #0d1420;     /* 侧边栏、面板背景 */
+  --bg-elevated: #131b2a;    /* 卡片、抬升元素背景 */
+  --bg-card: #0f1723;        /* 内容卡片背景 */
+  --bg-hover: rgba(255, 255, 255, 0.04);
 
-  /* ── Text ── */
-  --cc-text-primary: #e8edf5;
-  --cc-text-secondary: #8ba3c4;
-  --cc-text-muted: #4a6382;
+  /* ── 边框层级 ── */
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --border-accent: rgba(0, 212, 255, 0.3);
 
-  /* ── Cyan (Primary) ── */
-  --cc-cyan: #00e5ff;
-  --cc-cyan-dim: #0097a7;
-  --cc-cyan-glow: rgba(0, 229, 255, 0.15);
-  --cc-cyan-border: rgba(0, 229, 255, 0.25);
+  /* ── 文字层级 ── */
+  --text-primary: #f1f5f9;    /* 主要文字 - 纯白偏暖 */
+  --text-secondary: #94a3b8;  /* 次要文字 - 柔和灰蓝 */
+  --text-muted: #475569;      /* 弱化文字 */
 
-  /* ── Purple (Accent) ── */
-  --cc-purple: #8b5cf6;
-  --cc-purple-dim: #6d28d9;
-  --cc-purple-glow: rgba(139, 92, 246, 0.15);
+  /* ── 强调色 - Cyan ── */
+  --accent: #22d3ee;          /* 主强调色 - 更亮的青色 */
+  --accent-hover: #06b6d4;
+  --accent-dim: #0891b2;
+  --accent-glow: rgba(34, 211, 238, 0.15);
+  --accent-bg: rgba(34, 211, 238, 0.08);
 
-  /* ── Status ── */
-  --cc-pending: #4a6382;
-  --cc-active: #22c55e;
-  --cc-active-glow: rgba(34, 197, 94, 0.2);
-  --cc-done: #00e5ff;
-  --cc-error: #ef4444;
-  --cc-error-glow: rgba(239, 68, 68, 0.2);
+  /* ── 导航激活态 ── */
+  --nav-active-bg: rgba(34, 211, 238, 0.12);
+  --nav-active-border: rgba(34, 211, 238, 0.4);
+  --nav-hover-bg: rgba(255, 255, 255, 0.05);
 
-  /* ── Borders ── */
-  --cc-border: rgba(255, 255, 255, 0.06);
-  --cc-border-light: rgba(0, 229, 255, 0.1);
-  --cc-border-active: rgba(0, 229, 255, 0.35);
+  /* ── 状态色 ── */
+  --stat-cyan: #22d3ee;
+  --stat-cyan-bg: rgba(34, 211, 238, 0.12);
+  --stat-cyan-border: rgba(34, 211, 238, 0.3);
+  --stat-cyan-glow: rgba(34, 211, 238, 0.25);
 
-  /* ── Fonts ── */
-  --cc-font-mono: "JetBrains Mono", "SF Mono", "Fira Code", "Cascadia Code", Consolas, monospace;
-  --cc-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --stat-yellow: #fbbf24;
+  --stat-yellow-bg: rgba(251, 191, 36, 0.12);
+  --stat-yellow-border: rgba(251, 191, 36, 0.3);
+  --stat-yellow-glow: rgba(251, 191, 36, 0.25);
+
+  --stat-green: #34d399;
+  --stat-green-bg: rgba(52, 211, 153, 0.12);
+  --stat-green-border: rgba(52, 211, 153, 0.3);
+  --stat-green-glow: rgba(52, 211, 153, 0.25);
+
+  --stat-red: #f87171;
+  --stat-red-bg: rgba(248, 113, 113, 0.12);
+  --stat-red-border: rgba(248, 113, 113, 0.3);
+  --stat-red-glow: rgba(248, 113, 113, 0.25);
+
+  /* ── 阴影系统 ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-card-hover: 0 4px 16px rgba(0, 0, 0, 0.4), 0 0 1px rgba(255, 255, 255, 0.08);
+  --shadow-glow-cyan: 0 0 20px rgba(34, 211, 238, 0.15);
+
+  /* ── 圆角系统 ── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  /* ── 间距系统 ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
 }
 
 /* ================================================

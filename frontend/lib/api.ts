@@ -55,17 +55,33 @@ const BASE = "/api/v1";
  * 3. 解析响应 JSON
  * 4. 检查 code 字段（非 0 则抛出错误）
  */
+// 统一响应格式（部分API使用）
+interface UnifiedResponse<T> {
+  code: number;
+  message?: string;
+  data: T;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  const body: ApiResponse<T> = await res.json();
-  // 后端返回 code !== 0 表示业务错误
-  if (body.code !== 0) {
-    throw new Error(body.message || "request failed");
+  const body = await res.json();
+  
+  // 兼容两种响应格式：
+  // 1. 统一格式: {code: 0, data: {...}} (部分API使用)
+  // 2. 直接数据: {accounts: [...], pagination: {...}} (部分API直接返回)
+  if ("code" in body) {
+    // 统一格式响应
+    if (body.code !== 0) {
+      throw new Error(body.message || "request failed");
+    }
+    return body.data;
+  } else {
+    // 直接返回数据（无需包装）
+    return body as T;
   }
-  return body.data;
 }
 
 // =============================================================================
@@ -117,7 +133,7 @@ export async function rerunTask(taskId: string): Promise<TaskCreateData> {
  * 直到完整响应后才发送给客户端。这会导致 SSE 的流式推送
  * 变成"一次性推送"，无法实现实时效果。
  *
- * 解决：在浏览器端直接连接后端端口 8002，
+ * 解决：在浏览器端直接连接后端端口 8000，
  * 绕过 Next.js 代理，直接接收 SSE 流。
  *
  * 为什么不用生产环境问题？
@@ -126,7 +142,7 @@ export async function rerunTask(taskId: string): Promise<TaskCreateData> {
 export function getTaskStreamUrl(taskId: string): string {
   // SSR 时（服务端渲染）返回相对路径
   if (typeof window !== "undefined") {
-    return `http://${window.location.hostname}:8002${BASE}/tasks/${taskId}/stream`;
+    return `http://${window.location.hostname}:8000${BASE}/tasks/${taskId}/stream`;
   }
   return `${BASE}/tasks/${taskId}/stream`;
 }
