@@ -9,8 +9,8 @@
 
 检查项：
 A. 系统级开关
-B. 账号级检查
-C. Draft 状态检查
+B. Draft 状态检查
+C. 账号级检查
 D. 审核结果门控
 E. 发布频率限制
 F. 重复内容检查
@@ -131,8 +131,8 @@ class PublishDecisionService:
 
     检查顺序：
     1. 系统级开关（最高优先级）
-    2. 账号级检查
-    3. Draft 状态检查
+    2. Draft 状态检查
+    3. 账号级检查
     4. 审核结果门控
     5. 发布频率限制
     6. 重复内容检查
@@ -183,9 +183,9 @@ class PublishDecisionService:
         # ============================================================
         # A. 系统级开关检查 (最高优先级)
         # ============================================================
-        global_disabled = await self._check_global_publish_enabled(db)
-        checks["global_publish_enabled"] = global_disabled
-        if not global_disabled:
+        global_enabled = await self._check_global_publish_enabled(db)
+        checks["global_publish_enabled"] = global_enabled
+        if not global_enabled:
             return PublishDecisionResult(
                 decision=PublishDecision.BLOCK,
                 reason_code=PublishReasonCode.GLOBAL_PUBLISH_DISABLED,

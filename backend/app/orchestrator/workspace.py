@@ -16,6 +16,7 @@ Workspace: isolated context container for a single task execution.
 - Pipeline 数据依赖管理
 """
 
+from copy import deepcopy
 from typing import Any
 from app.core.logger import get_logger
 
@@ -101,7 +102,7 @@ class Workspace:
 
         为什么复制？避免后续修改影响已存储的结果。
         """
-        return dict(self._data)
+        return deepcopy(self._data)
 
     def extract_for_agent(self, input_mapping: dict[str, str]) -> dict:
         """
