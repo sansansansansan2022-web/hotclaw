@@ -1,3 +1,36 @@
+/**
+ * 编辑账号页
+ *
+ * 【账号编辑表单页面】
+ * 提供完整的账号编辑表单，与新建页类似但预填当前账号数据。
+ *
+ * 联动模块：
+ * - API: frontend/lib/api.ts (getAccount, updateAccount)
+ * - 类型: frontend/types/index.ts (AccountDetail, AccountUpdateRequest)
+ * - 路由: /accounts/[id]/edit (GET)
+ * - 后端 API: GET /api/v1/accounts/{id}, PATCH /api/v1/accounts/{id}
+ *
+ * 与新建页的区别：
+ * - 页面加载时先调用 getAccount 获取当前数据
+ * - 表单预填当前账号信息
+ * - 提交时调用 updateAccount 而非 createAccount
+ *
+ * 表单字段（与新建页相同）：
+ * 1. 基本信息: name(必填), category, positioning(必填)
+ * 2. 受众与风格: audience, tone_style
+ * 3. 发布策略: posting_frequency, posting_time, content_strategy, reference_accounts
+ * 4. 运行模式: operation_mode, auto_run_enabled, auto_publish_enabled, is_active
+ *
+ * 提交后：
+ * - 调用 updateAccount API 更新账号
+ * - 成功时跳转到账号详情页 /accounts/{account_id}
+ * - 失败时显示错误信息
+ *
+ * 调用方：
+ * - 用户访问 /accounts/{id}/edit
+ * - 来自账号详情页的"编辑"按钮
+ */
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -12,21 +45,36 @@ export default function EditAccountPage({
   params: { id: string };
 }) {
   const router = useRouter();
+
+  // 状态管理
+  // account: 原始账号数据（用于显示）
+  // loading: 加载状态
+  // submitting: 提交中状态
+  // error: 错误信息
+  // form: 表单数据
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<AccountUpdateRequest>({});
 
+  // 页面加载时获取账号详情并填充表单
   useEffect(() => {
     loadAccount();
   }, [params.id]);
 
+  /**
+   * loadAccount - 加载账号详情并填充表单
+   *
+   * 调用 API: getAccount(accountId)
+   * 更新状态: account, form
+   */
   async function loadAccount() {
     setLoading(true);
     try {
       const data = await getAccount(params.id);
       setAccount(data);
+      // 填充表单数据（将 null 转为 undefined）
       setForm({
         name: data.name,
         category: data.category ?? undefined,

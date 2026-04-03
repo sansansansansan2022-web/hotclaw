@@ -1,4 +1,38 @@
-"""Account Scheduler - background task for auto-running accounts."""
+"""
+Account Scheduler - background task for auto-running accounts.
+
+【账号定时调度器】
+后台服务，定期扫描满足条件的账号并自动触发任务执行。
+
+联动模块：
+- Service: app.services.account_service (获取待执行账号、更新运行状态)
+- Service: app.services.task_service (运行任务)
+- Orchestrator: app.orchestrator.engine (执行编排引擎)
+- DB: app.db.session (独立数据库会话)
+
+启动方式：
+- 在 app.main.py 的 lifespan 中调用 account_scheduler.start()
+- 应用关闭时自动调用 account_scheduler.stop()
+
+调度逻辑：
+1. 每 60 秒执行一次扫描（SCHEDULER_INTERVAL）
+2. 调用 account_service.get_due_accounts() 获取符合条件的账号
+3. 二次验收账号状态（is_active, auto_run_enabled, operation_mode）
+4. 使用 Semaphore 限制并发数（MAX_CONCURRENT_RUNS=3）
+5. 为每个账号创建独立后台任务执行
+
+账号验收条件：
+- is_active == True (账号已启用)
+- auto_run_enabled == True (定时运行已开启)
+- operation_mode in ("semi_auto", "full_auto") (非 manual 模式)
+- next_run_at <= now (已到执行时间)
+- 当前没有 pending/running 状态的任务 (防重复)
+
+任务完成后：
+- 更新账号运行状态 (last_run_status = "success" / "failed")
+- 记录错误信息 (last_error_message)
+- 重新计算下次执行时间 (next_run_at)
+"""
 
 import asyncio
 from datetime import datetime, timezone
@@ -16,9 +50,11 @@ from app.core.exceptions import (
 logger = get_logger(__name__)
 
 # Scheduler interval in seconds
-SCHEDULER_INTERVAL = 60  # Check every minute
+# 【调度间隔】每 60 秒扫描一次待执行账号
+SCHEDULER_INTERVAL = 60
 
 # Max concurrent account runs to prevent overwhelming the system
+# 【并发限制】最多同时运行 3 个账号任务，防止系统过载
 MAX_CONCURRENT_RUNS = 3
 
 

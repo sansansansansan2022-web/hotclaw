@@ -1,3 +1,31 @@
+/**
+ * 账号详情页
+ *
+ * 【账号信息展示页面】
+ * 展示单个账号的完整信息，包括基本信息、发布策略、运行状态、最近任务。
+ *
+ * 联动模块：
+ * - API: frontend/lib/api.ts (getAccount, runAccount, enableAccount, disableAccount, getPendingDraftCount)
+ * - 类型: frontend/types/index.ts (AccountDetail)
+ * - 路由: /accounts/[id] (GET)
+ * - 后端 API: GET /api/v1/accounts/{id}
+ *
+ * 功能：
+ * 1. 显示账号基本信息（名称、定位、受众、风格）
+ * 2. 显示发布策略（频率、时间、内容策略）
+ * 3. 显示运行状态（上次运行、下次运行、状态）
+ * 4. 显示最近任务列表
+ * 5. 手动触发运行
+ * 6. 启用/禁用账号
+ * 7. 编辑账号
+ * 8. 查看草稿箱入口（semi_auto/full_auto 模式）
+ *
+ * 调用方：
+ * - 用户访问 /accounts/{id}
+ * - 来自账号列表页点击账号
+ * - 来自新建账号页创建成功后跳转
+ */
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -12,16 +40,31 @@ export default function AccountDetailPage({
   params: { id: string };
 }) {
   const router = useRouter();
+
+  // 状态管理
+  // account: 账号详情数据
+  // pendingDraftCount: 待审核草稿数量
+  // loading: 加载状态
+  // error: 错误信息
+  // actionLoading: 操作中状态（run/toggle）
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [pendingDraftCount, setPendingDraftCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
+  // 页面加载时获取账号详情
   useEffect(() => {
     loadAccount();
   }, [params.id]);
 
+  /**
+   * loadAccount - 加载账号详情
+   *
+   * 调用 API: getAccount(accountId)
+   * 更新状态: account
+   * 额外获取待审核草稿数量（仅 semi_auto/full_auto 模式）
+   */
   async function loadAccount() {
     setLoading(true);
     setError(null);
@@ -29,6 +72,7 @@ export default function AccountDetailPage({
       const data = await getAccount(params.id);
       setAccount(data);
       // Fetch pending draft count
+      // 仅 semi_auto/full_auto 模式需要显示草稿入口
       if (data.operation_mode !== "full_auto") {
         try {
           const countData = await getPendingDraftCount(data.account_id);
@@ -44,6 +88,12 @@ export default function AccountDetailPage({
     }
   }
 
+  /**
+   * handleRun - 手动触发账号运行
+   *
+   * 调用 API: runAccount(accountId)
+   * 成功后: 跳转到任务详情页
+   */
   async function handleRun() {
     if (!account) return;
     setActionLoading("run");
@@ -57,6 +107,12 @@ export default function AccountDetailPage({
     }
   }
 
+  /**
+   * handleToggleActive - 切换账号启用/禁用状态
+   *
+   * 调用 API: disableAccount / enableAccount
+   * 成功后: 重新加载账号详情
+   */
   async function handleToggleActive() {
     if (!account) return;
     setActionLoading("toggle");

@@ -394,7 +394,20 @@ export const LLM_PROVIDER_TEMPLATES = [
 // Account 相关 API
 // =============================================================================
 
-/** 创建账号 */
+/**
+ * createAccount - 创建新账号
+ *
+ * 调用后端 API: POST /api/v1/accounts
+ *
+ * 参数:
+ * - data: AccountCreateRequest (包含 name, positioning 等必填字段)
+ *
+ * 返回:
+ * - AccountCreateData (包含 account_id, name, is_active, operation_mode)
+ *
+ * 调用方:
+ * - frontend/app/accounts/new/page.tsx (新建账号页)
+ */
 export async function createAccount(data: AccountCreateRequest): Promise<AccountCreateData> {
   return request<AccountCreateData>("/accounts", {
     method: "POST",
@@ -402,7 +415,21 @@ export async function createAccount(data: AccountCreateRequest): Promise<Account
   });
 }
 
-/** 账号列表（分页） */
+/**
+ * listAccounts - 获取账号列表（分页）
+ *
+ * 调用后端 API: GET /api/v1/accounts
+ *
+ * 参数:
+ * - page: 页码（默认 1）
+ * - pageSize: 每页数量（默认 20）
+ *
+ * 返回:
+ * - AccountListResponse (包含 accounts 列表和 pagination 信息)
+ *
+ * 调用方:
+ * - frontend/app/accounts/page.tsx (账号列表页)
+ */
 export async function listAccounts(
   page = 1,
   pageSize = 20
@@ -411,12 +438,40 @@ export async function listAccounts(
   return request<AccountListResponse>(`/accounts?${qs}`);
 }
 
-/** 获取账号详情 */
+/**
+ * getAccount - 获取账号详情
+ *
+ * 调用后端 API: GET /api/v1/accounts/{accountId}
+ *
+ * 参数:
+ * - accountId: 账号 ID
+ *
+ * 返回:
+ * - AccountDetail (包含完整账号信息和 recent_tasks)
+ *
+ * 调用方:
+ * - frontend/app/accounts/[id]/page.tsx (账号详情页)
+ * - frontend/app/accounts/[id]/edit/page.tsx (编辑页加载数据)
+ */
 export async function getAccount(accountId: string): Promise<AccountDetail> {
   return request<AccountDetail>(`/accounts/${accountId}`);
 }
 
-/** 更新账号 */
+/**
+ * updateAccount - 更新账号
+ *
+ * 调用后端 API: PATCH /api/v1/accounts/{accountId}
+ *
+ * 参数:
+ * - accountId: 账号 ID
+ * - data: AccountUpdateRequest (部分更新，只更新提供的字段)
+ *
+ * 返回:
+ * - AccountSummary (更新后的账号摘要)
+ *
+ * 调用方:
+ * - frontend/app/accounts/[id]/edit/page.tsx (编辑页保存)
+ */
 export async function updateAccount(
   accountId: string,
   data: AccountUpdateRequest
@@ -427,21 +482,73 @@ export async function updateAccount(
   });
 }
 
-/** 手动触发账号运行 */
+/**
+ * runAccount - 手动触发账号运行
+ *
+ * 调用后端 API: POST /api/v1/accounts/{accountId}/run
+ *
+ * 【与 Scheduler 的区别】
+ * - 手动触发: allow_auto=False，强制创建新任务
+ * - 自动触发: allow_auto=True，由 Scheduler 调用
+ *
+ * 参数:
+ * - accountId: 账号 ID
+ *
+ * 返回:
+ * - AccountRunData (包含 account_id, task_id, status, operation_mode)
+ *
+ * 调用方:
+ * - frontend/app/accounts/page.tsx (列表页运行按钮)
+ * - frontend/app/accounts/[id]/page.tsx (详情页运行按钮)
+ *
+ * 异常:
+ * - 409 Conflict: 已有运行中的任务
+ * - 400 Bad Request: 账号已禁用或 positioning 为空
+ */
 export async function runAccount(accountId: string): Promise<AccountRunData> {
   return request<AccountRunData>(`/accounts/${accountId}/run`, {
     method: "POST",
   });
 }
 
-/** 启用账号 */
+/**
+ * enableAccount - 启用账号
+ *
+ * 调用后端 API: POST /api/v1/accounts/{accountId}/enable
+ *
+ * 启用后账号可以被 Scheduler 扫描到（如果 auto_run_enabled=True）。
+ *
+ * 参数:
+ * - accountId: 账号 ID
+ *
+ * 返回:
+ * - AccountSummary (更新后的账号摘要)
+ *
+ * 调用方:
+ * - frontend/app/accounts/[id]/page.tsx (详情页启用按钮)
+ */
 export async function enableAccount(accountId: string): Promise<AccountSummary> {
   return request<AccountSummary>(`/accounts/${accountId}/enable`, {
     method: "POST",
   });
 }
 
-/** 禁用账号 */
+/**
+ * disableAccount - 禁用账号
+ *
+ * 调用后端 API: POST /api/v1/accounts/{accountId}/disable
+ *
+ * 禁用后账号不会被 Scheduler 扫描到，不会出现在定时任务中。
+ *
+ * 参数:
+ * - accountId: 账号 ID
+ *
+ * 返回:
+ * - AccountSummary (更新后的账号摘要)
+ *
+ * 调用方:
+ * - frontend/app/accounts/[id]/page.tsx (详情页禁用按钮)
+ */
 export async function disableAccount(accountId: string): Promise<AccountSummary> {
   return request<AccountSummary>(`/accounts/${accountId}/disable`, {
     method: "POST",

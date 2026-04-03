@@ -1,3 +1,31 @@
+/**
+ * 新建账号页
+ *
+ * 【创建账号表单页面】
+ * 提供完整的账号创建表单，包括基本信息、发布策略、运行模式配置。
+ *
+ * 联动模块：
+ * - API: frontend/lib/api.ts (createAccount)
+ * - 类型: frontend/types/index.ts (AccountCreateRequest)
+ * - 路由: /accounts/new (GET)
+ * - 后端 API: POST /api/v1/accounts
+ *
+ * 表单字段：
+ * 1. 基本信息: name(必填), category, positioning(必填)
+ * 2. 受众与风格: audience, tone_style
+ * 3. 发布策略: posting_frequency, posting_time, content_strategy, reference_accounts
+ * 4. 运行模式: operation_mode(manual/semi_auto/full_auto), auto_run_enabled, auto_publish_enabled
+ *
+ * 提交后：
+ * - 调用 createAccount API 创建账号
+ * - 成功时跳转到账号详情页 /accounts/{account_id}
+ * - 失败时显示错误信息
+ *
+ * 调用方：
+ * - 用户访问 /accounts/new
+ * - 来自账号列表页 /accounts 的"新建账号"按钮
+ */
+
 "use client";
 
 import { useState } from "react";
@@ -8,6 +36,11 @@ import type { AccountCreateRequest } from "@/types";
 
 export default function NewAccountPage() {
   const router = useRouter();
+
+  // 状态管理
+  // submitting: 提交中状态（防止重复提交）
+  // error: 错误信息
+  // form: 表单数据
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<AccountCreateRequest>({
@@ -26,6 +59,17 @@ export default function NewAccountPage() {
     is_active: true,
   });
 
+  /**
+   * handleChange - 表单字段变更处理
+   *
+   * 支持的字段类型：
+   * - text/input: 更新字符串字段
+   * - checkbox: 更新布尔字段
+   * - textarea: 更新字符串字段
+   * - select: 更新字符串字段
+   *
+   * 空字符串自动转为 undefined（后端区分"未填"和"空字符串"）
+   */
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
   ) {
@@ -41,6 +85,17 @@ export default function NewAccountPage() {
     }));
   }
 
+  /**
+   * handleSubmit - 表单提交处理
+   *
+   * 验证规则：
+   * - name: 非空
+   * - positioning: 非空且长度 >= 5
+   *
+   * 调用 API: createAccount(form)
+   * 成功时: 跳转到账号详情页
+   * 失败时: 显示错误信息
+   */
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);

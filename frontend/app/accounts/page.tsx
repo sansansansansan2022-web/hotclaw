@@ -1,3 +1,26 @@
+/**
+ * 账号列表页
+ *
+ * 【账号管理主页面】
+ * 展示所有公众号账号的列表，支持分页、状态筛选、运行操作。
+ *
+ * 联动模块：
+ * - API: frontend/lib/api.ts (listAccounts, runAccount)
+ * - 类型: frontend/types/index.ts (AccountSummary)
+ * - 路由: /accounts (GET)
+ *
+ * 功能：
+ * 1. 分页展示账号列表（每页20条）
+ * 2. 显示账号基本信息（名称、状态、运行模式）
+ * 3. 显示最近运行时间和下次运行时间
+ * 4. 手动触发账号运行
+ * 5. 跳转账号详情页/新建页
+ *
+ * 调用方：
+ * - 用户访问 /accounts
+ * - 来自 /accounts/new 创建成功后跳转
+ */
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -6,6 +29,12 @@ import { listAccounts, runAccount } from "@/lib/api";
 import type { AccountSummary } from "@/types";
 
 export default function AccountsPage() {
+  // 状态管理
+  // accounts: 账号列表
+  // loading: 加载状态
+  // error: 错误信息
+  // page/totalPages: 分页状态
+  // runningId: 当前正在运行的账号ID（防止重复点击）
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -13,10 +42,18 @@ export default function AccountsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [runningId, setRunningId] = useState<string | null>(null);
 
+  // 页面加载时和分页切换时获取数据
   useEffect(() => {
     loadAccounts();
   }, [page]);
 
+  /**
+   * loadAccounts - 加载账号列表
+   *
+   * 调用 API: listAccounts(page, 20)
+   * 更新状态: accounts, totalPages
+   * 异常处理: 设置 error 状态
+   */
   async function loadAccounts() {
     setLoading(true);
     setError(null);
@@ -31,6 +68,16 @@ export default function AccountsPage() {
     }
   }
 
+  /**
+   * handleRun - 手动触发账号运行
+   *
+   * 调用 API: runAccount(accountId)
+   * 参数: accountId - 要运行的账号ID
+   * 成功后: 提示用户查看任务历史
+   * 失败后: 提示错误信息
+   *
+   * 注意: 使用 runningId 防止重复点击
+   */
   async function handleRun(accountId: string) {
     setRunningId(accountId);
     try {
@@ -43,6 +90,12 @@ export default function AccountsPage() {
     }
   }
 
+  /**
+   * formatDate - 格式化日期显示
+   *
+   * @param dateStr - ISO 格式日期字符串
+   * @returns 本地化日期时间字符串
+   */
   function formatDate(dateStr: string | null) {
     if (!dateStr) return "-";
     return new Date(dateStr).toLocaleString("zh-CN");
