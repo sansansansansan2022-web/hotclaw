@@ -38,3 +38,16 @@ def test_workspace_extract_missing_key():
     ws = Workspace(task_id="test_003", input_data={})
     result = ws.extract_for_agent({"missing": "nonexistent_key"})
     assert result["missing"] is None
+
+
+def test_workspace_snapshot_is_deep_copy():
+    """snapshot should be isolated from later nested mutations."""
+    ws = Workspace(task_id="test_004", input_data={"positioning": "growth"})
+    ws.set("profile", {"domain": "tech", "tags": ["ai"]})
+
+    snap = ws.snapshot()
+    ws.get("profile")["domain"] = "finance"
+    ws.get("profile")["tags"].append("ml")
+
+    assert snap["profile"]["domain"] == "tech"
+    assert snap["profile"]["tags"] == ["ai"]
