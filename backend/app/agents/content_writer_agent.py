@@ -1,6 +1,10 @@
 """Content writer agent: generates full article content.
 
 Calls LLM to generate complete article based on topic, title, and hot topics.
+
+【正文生成智能体】
+职责：生成正文
+不负责：审核、发布、调微信
 """
 
 import json
@@ -10,9 +14,51 @@ from app.core.config import settings
 
 
 class ContentWriterAgent(BaseAgent):
+    """
+    正文生成智能体
+
+    Agent Contract:
+    - input: profile, topics, titles, hot_topics, account_context (optional)
+    - output: content_markdown, word_count, structure, tags
+    - supported_skills: []
+    """
+
     agent_id = "content_writer_agent"
     name = "正文生成智能体"
     description = "根据选题、标题和热点素材生成完整公众号文章"
+
+    # Agent Contract
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "profile": {"type": "object", "description": "账号画像"},
+            "topics": {"type": "object", "description": "选题列表 {topics: [...]}"},
+            "titles": {"type": "object", "description": "标题列表 {titles: [...]}"},
+            "hot_topics": {"type": "object", "description": "热点素材 {hot_topics: [...]}"},
+            "account_context": {"type": "object", "description": "账号上下文（可选）"}
+        },
+        "required": ["profile", "topics", "titles", "hot_topics"]
+    }
+
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "content_markdown": {"type": "string", "description": "完整文章内容，Markdown 格式"},
+            "word_count": {"type": "integer", "description": "文章总字数"},
+            "structure": {
+                "type": "object",
+                "properties": {
+                    "sections": {
+                        "type": "array",
+                        "items": {"type": "object", "properties": {"heading": {"type": "string"}, "summary": {"type": "string"}}}
+                    }
+                }
+            },
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "文章标签"}
+        }
+    }
+
+    supported_skills = []
 
     default_system_prompt = """\
 你是一位专业的微信公众号长文写手，能够根据选题和素材创作出兼具深度和可读性的高质量文章。

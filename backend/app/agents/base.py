@@ -11,11 +11,10 @@ Base class for all agents.
 - 可以调用技能（Skills）
 - 单一职责，不应有多重职责
 
-面试点：
-- ABC 抽象基类 + abstractmethod
-- AgentResult 统一返回格式
-- Fallback 降级策略
-- Template Method Pattern（模板方法模式）
+Agent Contract 要求：
+1. 每个 Agent 必须定义 input_schema 和 output_schema
+2. 每个 Agent 的 execute() 必须返回 AgentResult
+3. 每个 Agent 的失败返回必须标准化
 """
 
 from abc import ABC, abstractmethod
@@ -77,12 +76,14 @@ class BaseAgent(ABC):
     【智能体抽象基类】
     所有具体智能体（ProfileAgent、HotTopicAgent 等）都继承此类。
 
-    子类必须实现：
-    - agent_id: 唯一标识（如 "profile_agent"）
-    - name: 中文显示名称
-    - description: 职能描述
-    - default_system_prompt: 默认系统提示词
-    - execute(): 核心执行逻辑
+    Agent Contract 要求：
+    1. agent_id: 唯一标识（如 "profile_agent"）
+    2. name: 中文显示名称
+    3. description: 职能描述
+    4. input_schema: 输入 JSON Schema 描述（dict）
+    5. output_schema: 输出 JSON Schema 描述（dict）
+    6. supported_skills: 该 Agent 支持调用的 Skill ID 列表
+    7. execute(): 核心执行逻辑
 
     可选重写：
     - fallback(): 降级策略（默认返回 None，即不降级）
@@ -92,7 +93,14 @@ class BaseAgent(ABC):
     agent_id: str = ""      # 智能体唯一 ID
     name: str = ""          # 中文名称
     description: str = ""   # 职能说明
-    default_system_prompt: str = ""  # 默认系统提示词
+
+    # Agent Contract：子类必须定义
+    input_schema: dict = {}   # 输入 JSON Schema 描述
+    output_schema: dict = {}  # 输出 JSON Schema 描述
+    supported_skills: list[str] = []  # 支持调用的 Skill ID 列表
+
+    # 可选：系统提示词
+    default_system_prompt: str = ""
 
     def __init__(self, config: dict | None = None):
         """
@@ -107,9 +115,6 @@ class BaseAgent(ABC):
 
         【Prompt 解析】
         优先级：context["system_prompt"] > default_system_prompt
-
-        context["system_prompt"] 来自数据库自定义配置（如果存在）
-        这样管理员可以在不修改代码的情况下调整智能体行为。
         """
         return context.get("system_prompt") or self.default_system_prompt
 
@@ -144,10 +149,7 @@ class BaseAgent(ABC):
         当 execute() 抛出异常或返回失败结果时，编排引擎会调用此方法。
 
         默认返回 None（不降级，直接失败）。
-        子类可重写实现降级逻辑，如：
-        - 使用更简单的 Prompt 重试
-        - 返回预设的默认数据
-        - 切换到备用模型
+        子类可重写实现降级逻辑。
 
         Args:
             error: 抛出的异常对象
@@ -187,3 +189,26 @@ class BaseAgent(ABC):
             error={"code": code, "message": message},
             trace_id=trace_id,
         )
+
+    def get_input_schema(self) -> dict:
+        """获取输入 Schema 描述。"""
+        return self.input_schema
+
+    def get_output_schema(self) -> dict:
+        """获取输出 Schema 描述。"""
+        return self.output_schema
+
+    def get_supported_skills(self) -> list[str]:
+        """获取支持的 Skill ID 列表。"""
+        return self.supported_skills
+
+    def get_contract(self) -> dict:
+        """获取完整的 Agent Contract 描述。"""
+        return {
+            "agent_id": self.agent_id,
+            "name": self.name,
+            "description": self.description,
+            "input_schema": self.input_schema,
+            "output_schema": self.output_schema,
+            "supported_skills": self.supported_skills,
+        }
