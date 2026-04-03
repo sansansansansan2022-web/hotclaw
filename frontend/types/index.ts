@@ -212,6 +212,9 @@ export interface AccountCreateRequest {
   auto_run_enabled?: boolean;
   auto_publish_enabled?: boolean;
   is_active?: boolean;
+  publish_paused?: boolean;
+  max_posts_per_day?: number;
+  min_interval_minutes?: number;
 }
 
 export interface AccountUpdateRequest {
@@ -228,6 +231,9 @@ export interface AccountUpdateRequest {
   auto_run_enabled?: boolean;
   auto_publish_enabled?: boolean;
   is_active?: boolean;
+  publish_paused?: boolean;
+  max_posts_per_day?: number;
+  min_interval_minutes?: number;
 }
 
 export interface AccountSummary {
@@ -264,6 +270,12 @@ export interface AccountDetail extends AccountSummary {
   content_strategy: string | null;
   reference_accounts: string | null;
   auto_publish_enabled: boolean;
+  publish_paused: boolean;
+  max_posts_per_day: number | null;
+  min_interval_minutes: number | null;
+  last_publish_status: string | null;
+  last_publish_error_message: string | null;
+  last_published_at: string | null;
   updated_at: string;
   recent_tasks: AccountTaskSummary[];
 }
@@ -295,7 +307,20 @@ export interface AccountListResponse {
 // --- Draft ---
 
 export type DraftStatus = "draft" | "pending_review" | "approved" | "rejected" | "discarded";
-export type PublishStatus = "not_published" | "pending" | "publishing" | "published" | "failed" | "unknown";
+// --- Publish Decision ---
+
+export type PublishDecision = "ALLOW_PUBLISH" | "SAVE_AS_DRAFT" | "SKIP" | "BLOCK";
+
+export interface PublishDecisionResult {
+  decision: PublishDecision;
+  reason_code: string;
+  reason_message: string;
+  checks: Record<string, unknown>;
+}
+
+// --- Draft ---
+
+export type PublishStatus = "not_published" | "pending" | "publishing" | "published" | "failed" | "skipped" | "unknown";
 export type SourceType = "manual_task" | "semi_auto_task";
 
 export interface DraftSummary {

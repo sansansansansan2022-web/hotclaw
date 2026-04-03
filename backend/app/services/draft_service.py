@@ -319,23 +319,65 @@ class DraftService:
             PublishDecisionError: If validation fails
             WeChatPublishError: If WeChat publish fails
         """
-        from app.services.publish_decision_service import publish_decision_service, PublishDecisionError
+        from app.services.publish_decision_service import (
+            publish_decision_service,
+            PublishDecisionError,
+            PublishDecision,
+            PublishDecisionResult,
+        )
         from app.services.wechat_publish_service import wechat_publish_service, WeChatPublishError
         from app.services.publish_record_service import publish_record_service, PublishRecordError
         from app.services.wechat_token_service import WeChatTokenError
         from app.core.exceptions import DraftPublishError
 
-        # Step 1: Validate publish conditions
-        try:
-            context = await publish_decision_service.validate_for_publish(
-                draft_id, db, source=trigger_type, is_retry=(existing_record_id is not None)
-            )
-        except PublishDecisionError:
-            raise
+        # Step 1: Make publish decision (protection layer)
+        decision_result: PublishDecisionResult = await publish_decision_service.decide_publish(
+            draft_id, db, source=trigger_type, is_retry=(existing_record_id is not None)
+        )
 
-        # Step 2: Get draft
+        # Step 2: Handle decision results
         draft = await self.get_draft(draft_id, db)
 
+        if decision_result.is_block():
+            # BLOCK: raise error
+            raise PublishDecisionError(
+                decision=decision_result.decision.value,
+                reason_code=decision_result.reason_code.value,
+                message=decision_result.reason_message,
+            )
+
+        if decision_result.is_skip():
+            # SKIP: record the skip and return
+            logger.info(
+                "publish_skipped",
+                draft_id=draft_id,
+                reason_code=decision_result.reason_code.value,
+                reason_message=decision_result.reason_message,
+                checks=decision_result.checks,
+            )
+            # Record decision in draft
+            draft.publish_status = "skipped"
+            draft.publish_error_message = f"[{decision_result.reason_code.value}] {decision_result.reason_message}"
+            db.add(draft)
+            await db.flush()
+            return draft, {"decision": decision_result.to_dict()}
+
+        if decision_result.is_save_as_draft():
+            # SAVE_AS_DRAFT: keep draft in pending_review
+            logger.info(
+                "publish_save_as_draft",
+                draft_id=draft_id,
+                reason_code=decision_result.reason_code.value,
+                reason_message=decision_result.reason_message,
+                checks=decision_result.checks,
+            )
+            # Record decision in draft
+            draft.publish_error_message = f"[{decision_result.reason_code.value}] {decision_result.reason_message}"
+            db.add(draft)
+            await db.flush()
+            return draft, {"decision": decision_result.to_dict()}
+
+        # ALLOW_PUBLISH: continue with real publish
         # Step 3: Get WeChat config
         wechat_config = await publish_decision_service.get_wechat_config(
             draft.account_id, db

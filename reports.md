@@ -1,5 +1,61 @@
 # HotClaw 执行报告
 
+## 2026-04-03 — E2E Scheduler 测试补齐
+
+### 任务说明
+基于现有 E2E 测试框架，补齐 scheduler 与 account 状态同步相关的核心场景。
+
+### 完成情况
+
+| 场景 | 测试用例 | 状态 |
+|------|----------|------|
+| semi_auto due 账号自动创建 task 并生成 pending_review draft | test_semi_auto_triggers_and_creates_draft | ✅ |
+| full_auto due 账号自动创建 task 并自动发布 | test_full_auto_triggers_and_auto_publishes | ✅ |
+| manual due 账号不会被调度 | test_manual_account_not_triggered | ✅ |
+| disabled / auto_run_enabled=false 账号不会被调度 | test_disabled_account_not_triggered, test_auto_run_disabled_account_not_triggered | ✅ |
+| 有 pending/running task 的账号不会重复调度 | test_pending_task_prevents_duplicate, test_running_task_prevents_duplicate | ✅ |
+| task 执行失败时 account 状态正确更新 | test_task_failure_syncs_account_status | ✅ |
+| LLM 失败触发 fallback 机制 | test_llm_failure_triggers_fallback | ✅ |
+
+### 核心测试场景
+
+#### 1. semi_auto 自动触发
+- 创建 semi_auto 账号（next_run_at 已过期）
+- 触发 scheduler tick
+- 验证：task 被创建、draft 状态为 pending_review、account.last_run_status=success
+
+#### 2. full_auto 自动发布
+- 创建 full_auto 账号
+- 触发 scheduler tick
+- 验证：draft_status=approved、publish_status=published、confirmed_by=system
+
+#### 3. 调度隔离
+- manual 账号：即使 next_run_at 已过期也不会被调度
+- disabled/is_active=false：不会触发
+- auto_run_enabled=false：不会触发
+- future due：next_run_at 在未来不会触发
+
+#### 4. 防重复调度
+- 已有 pending task 的账号不创建新 task
+- 已有 running task 的账号不创建新 task
+
+#### 5. 任务失败状态同步
+- mock orchestrator_engine.run 抛出异常
+- 验证：task.status=failed、account.last_run_status=failed、last_error_message 有值
+
+### 测试结果
+```
+18 passed, 3 warnings in 18.97s
+```
+
+### 运行方式
+```bash
+cd backend
+python -m pytest tests/e2e/test_scheduler_e2e.py -v
+```
+
+---
+
 ## 2026-03-26 20:15
 
 ### 完成的任务

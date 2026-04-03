@@ -51,6 +51,10 @@ class AccountModel(Base):
     last_publish_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     last_publish_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Publish protection fields
+    publish_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    max_posts_per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    min_interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()

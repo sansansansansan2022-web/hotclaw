@@ -41,6 +41,10 @@ class AccountCreateRequest(BaseModel):
     auto_run_enabled: bool = Field(default=False, description="是否允许定时运行")
     auto_publish_enabled: bool = Field(default=False, description="是否允许自动发布")
     is_active: bool = Field(default=True, description="是否启用")
+    # Publish protection fields
+    publish_paused: bool = Field(default=False, description="是否暂停发布")
+    max_posts_per_day: int | None = Field(default=None, ge=1, le=100, description="每日最大发布数")
+    min_interval_minutes: int | None = Field(default=None, ge=1, le=1440, description="最小发布间隔（分钟）")
 
 
 class AccountUpdateRequest(BaseModel):
@@ -58,6 +62,9 @@ class AccountUpdateRequest(BaseModel):
     auto_run_enabled: bool | None = None
     auto_publish_enabled: bool | None = None
     is_active: bool | None = None
+    publish_paused: bool | None = None
+    max_posts_per_day: int | None = Field(default=None, ge=1, le=100)
+    min_interval_minutes: int | None = Field(default=None, ge=1, le=1440)
 
 
 # =============================================================================
@@ -114,10 +121,16 @@ class AccountDetail(BaseModel):
     auto_run_enabled: bool
     auto_publish_enabled: bool
     is_active: bool
+    publish_paused: bool
+    max_posts_per_day: int | None
+    min_interval_minutes: int | None
     last_run_at: datetime | None
     next_run_at: datetime | None
     last_run_status: str | None
     last_error_message: str | None
+    last_publish_status: str | None
+    last_publish_error_message: str | None
+    last_published_at: datetime | None
     created_at: datetime
     updated_at: datetime
     recent_tasks: list[AccountTaskSummary]

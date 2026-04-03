@@ -113,6 +113,27 @@ DEFAULT_CONFIGS: list[dict] = [
         "is_system": True,
         "requires_restart": False,
     },
+    # Publish Protection
+    {
+        "key": "global_publish_enabled",
+        "value": "true",
+        "value_type": "boolean",
+        "description": "系统发布总开关（关闭后禁止所有自动发布）",
+        "category": "publish",
+        "is_sensitive": False,
+        "is_system": True,
+        "requires_restart": False,
+    },
+    {
+        "key": "global_emergency_stop",
+        "value": "false",
+        "value_type": "boolean",
+        "description": "紧急停止开关（启用后阻断所有发布）",
+        "category": "publish",
+        "is_sensitive": False,
+        "is_system": True,
+        "requires_restart": False,
+    },
 ]
 
 

@@ -41,6 +41,9 @@ test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expi
 @pytest_asyncio.fixture
 async def db_session():
     """Create test database tables and yield a session."""
+    # Register agents before running tests
+    _register_agents()
+
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
@@ -81,10 +84,13 @@ def mock_llm():
     from tests.e2e.mock_llm import get_mock_llm_response
 
     async def mock_completion(*args, **kwargs):
+        # Extract messages from args if positional, or kwargs
+        messages = kwargs.get("messages", [])
+        if args and isinstance(args[0], list):
+            messages = args[0]
         return get_mock_llm_response(
             agent_id=kwargs.get("model", ""),
-            messages=kwargs.get("messages", []),
-            **kwargs
+            messages=messages,
         )
 
     with patch("litellm.acompletion", side_effect=mock_completion) as mock:

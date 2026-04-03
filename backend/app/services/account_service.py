@@ -67,6 +67,10 @@ class AccountService:
             auto_publish_enabled=data.get("auto_publish_enabled", False),
             is_active=data.get("is_active", True),
             last_run_status="never_run",
+            # Publish protection fields
+            publish_paused=data.get("publish_paused", False),
+            max_posts_per_day=data.get("max_posts_per_day"),
+            min_interval_minutes=data.get("min_interval_minutes"),
         )
         db.add(account)
         await db.flush()
@@ -116,10 +120,16 @@ class AccountService:
             "auto_run_enabled": account.auto_run_enabled,
             "auto_publish_enabled": account.auto_publish_enabled,
             "is_active": account.is_active,
+            "publish_paused": getattr(account, "publish_paused", False),
+            "max_posts_per_day": getattr(account, "max_posts_per_day", None),
+            "min_interval_minutes": getattr(account, "min_interval_minutes", None),
             "last_run_at": account.last_run_at.isoformat() if account.last_run_at else None,
             "next_run_at": account.next_run_at.isoformat() if account.next_run_at else None,
             "last_run_status": account.last_run_status,
             "last_error_message": account.last_error_message,
+            "last_publish_status": getattr(account, "last_publish_status", None),
+            "last_publish_error_message": getattr(account, "last_publish_error_message", None),
+            "last_published_at": account.last_published_at.isoformat() if account.last_published_at else None,
             "created_at": account.created_at.isoformat() if account.created_at else None,
             "updated_at": account.updated_at.isoformat() if account.updated_at else None,
             "recent_tasks": [
@@ -330,8 +340,7 @@ class AccountService:
 
         Returns accounts ordered by next_run_at.
         """
-        from sqlalchemy import not_, exists
-        from sqlalchemy.dialects.sqlite import select as sqlite_select
+        from sqlalchemy import select, exists
 
         now = datetime.now(timezone.utc)
 
