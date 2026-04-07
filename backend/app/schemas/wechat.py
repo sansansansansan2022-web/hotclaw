@@ -1,133 +1,150 @@
 """WeChat related Pydantic schemas."""
 
 from datetime import datetime
-from pydantic import BaseModel, Field
 
-
-# =============================================================================
-# WeChat Config Schemas
-# =============================================================================
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WeChatConfigBase(BaseModel):
-    """Base WeChat config schema."""
-    app_id: str = Field(..., description="WeChat App ID")
-    app_secret: str = Field(..., description="WeChat App Secret (will be masked in response)")
-    default_author: str | None = Field(None, description="Default author name")
-    default_thumb_media_id: str | None = Field(None, description="Default cover image media_id")
-    need_open_comment: bool = Field(True, description="Enable comments")
-    only_fans_can_comment: bool = Field(False, description="Only fans can comment")
-    is_enabled: bool = Field(True, description="Enable WeChat publishing")
+    """Shared fields for account-bound WeChat configuration."""
+
+    app_id: str = Field(..., min_length=4, description="WeChat Official Account App ID")
+    app_secret: str = Field(..., min_length=4, description="WeChat Official Account App Secret")
+    default_author: str | None = Field(None, description="Default author name used when publishing")
+    default_thumb_media_id: str | None = Field(None, description="Pre-uploaded WeChat thumb media_id")
+    need_open_comment: bool = Field(True, description="Whether comments are enabled after publish")
+    only_fans_can_comment: bool = Field(False, description="Whether only followers can comment")
+    is_enabled: bool = Field(True, description="Whether this account can publish to WeChat")
 
 
 class WeChatConfigCreate(WeChatConfigBase):
-    """Schema for creating WeChat config."""
-    account_id: str = Field(..., description="Account ID to bind")
+    """Payload for creating account-bound WeChat config."""
+
+    account_id: str | None = Field(None, description="Legacy compatibility field; path parameter is preferred")
 
 
 class WeChatConfigUpdate(BaseModel):
-    """Schema for updating WeChat config."""
-    app_id: str | None = Field(None, description="WeChat App ID")
-    app_secret: str | None = Field(None, description="WeChat App Secret")
-    default_author: str | None = Field(None, description="Default author name")
-    default_thumb_media_id: str | None = Field(None, description="Default cover image media_id")
-    need_open_comment: bool | None = Field(None, description="Enable comments")
-    only_fans_can_comment: bool | None = Field(None, description="Only fans can comment")
-    is_enabled: bool | None = Field(None, description="Enable WeChat publishing")
+    """Payload for updating account-bound WeChat config."""
+
+    app_id: str | None = Field(None, min_length=4)
+    app_secret: str | None = Field(None, min_length=4)
+    default_author: str | None = None
+    default_thumb_media_id: str | None = None
+    need_open_comment: bool | None = None
+    only_fans_can_comment: bool | None = None
+    is_enabled: bool | None = None
 
 
-class WeChatConfigSummary(BaseModel):
-    """Schema for WeChat config summary (sensitive data masked)."""
+class WeChatConfigRead(BaseModel):
+    """Masked WeChat config returned to clients."""
+
+    model_config = ConfigDict(from_attributes=True)
+
     account_id: str
-    app_id_masked: str = Field(..., description="Masked App ID")
-    has_app_secret: bool = Field(..., description="Whether app_secret is set")
-    default_author: str | None
+    app_id_masked: str
+    has_app_secret: bool
+    app_secret_masked: str | None = None
+    default_author: str | None = None
+    default_thumb_media_id: str | None = None
+    need_open_comment: bool
+    only_fans_can_comment: bool
     is_enabled: bool
-    test_status: str | None
-    test_message: str | None
-    last_sync_at: datetime | None
+    access_token_cached: bool = False
+    token_expires_at: datetime | None = None
+    verified_at: datetime | None = None
+    last_test_status: str | None = None
+    last_test_error: str | None = None
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+
+# Backward-compatible aliases used by existing frontend code.
+WeChatConfigSummary = WeChatConfigRead
+WeChatConfigDetail = WeChatConfigRead
 
 
-class WeChatConfigDetail(WeChatConfigSummary):
-    """Schema for full WeChat config detail."""
-    need_open_comment: bool
-    only_fans_can_comment: bool
+class WeChatConnectionTestResponse(BaseModel):
+    """Result of testing WeChat connectivity for one account config."""
 
-
-class WeChatConfigResponse(BaseModel):
-    """Response schema for WeChat config."""
-    code: int = 0
-    message: str = "ok"
-    data: WeChatConfigSummary | None = None
-
-
-# =============================================================================
-# WeChat Test Connection
-# =============================================================================
+    success: bool
+    message: str
+    tested_at: datetime
+    token_expires_at: datetime | None = None
 
 
 class WeChatTestConnectionRequest(BaseModel):
-    """Schema for testing WeChat connection."""
-    app_id: str = Field(..., description="WeChat App ID")
-    app_secret: str = Field(..., description="WeChat App Secret")
+    """Legacy route payload for direct credential testing without persistence."""
+
+    app_id: str = Field(..., min_length=4)
+    app_secret: str = Field(..., min_length=4)
 
 
 class WeChatTestConnectionResponse(BaseModel):
-    """Response schema for connection test."""
+    """Backward-compatible alias for existing frontend API typing."""
+
     success: bool
     message: str
 
 
-# =============================================================================
-# WeChat Publish Record Schemas
-# =============================================================================
+class PublishToWeChatRequest(BaseModel):
+    """Request body for a publish trigger."""
+
+    operator: str = Field("system", description="Human or system operator triggering publish")
+    trigger_type: str | None = Field(
+        None,
+        description="manual_confirm, semi_auto_confirm, full_auto, manual_retry, auto_retry",
+    )
 
 
-class WeChatPublishRecordSummary(BaseModel):
-    """Schema for publish record summary."""
+class PublishRecordRead(BaseModel):
+    """Serialized publish record returned to clients."""
+
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     draft_id: int
     account_id: str
-    wechat_draft_id: str | None
-    media_id: str | None
-    publish_id: str | None
+    task_id: str | None = None
+    wechat_draft_media_id: str | None = None
+    wechat_publish_id: str | None = None
+    wechat_article_url: str | None = None
+    wechat_msg_data_id: str | None = None
     publish_status: str
-    error_code: str | None
-    error_message: str | None
-    source: str
+    source_mode: str
+    trigger_type: str
+    attempt_count: int
+    retry_count: int
+    last_error_code: str | None = None
+    last_error_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    published_at: datetime | None = None
+    last_checked_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
 
+class PublishRecordStatusSyncResponse(BaseModel):
+    """Result returned after a manual status sync with WeChat."""
 
-class WeChatPublishStatusResponse(BaseModel):
-    """Response schema for publish status query."""
-    publish_status: str = Field(..., description="pending, success, failed")
-    article_id: str | None = Field(None, description="WeChat article ID")
-    msg_id: str | None = Field(None, description="WeChat message ID")
-    url: str | None = Field(None, description="Published article URL")
-
-
-# =============================================================================
-# Publish Result
-# =============================================================================
+    record_id: int
+    previous_status: str
+    new_status: str
+    synced_draft: bool
+    message: str
 
 
 class PublishResult(BaseModel):
-    """Result of publishing operation."""
+    """Result of the publish orchestration pipeline."""
+
     success: bool
     draft_id: int
-    wechat_draft_id: str | None = None
-    media_id: str | None = None
-    publish_id: str | None = None
+    publish_record_id: int | None = None
+    wechat_draft_media_id: str | None = None
+    wechat_publish_id: str | None = None
+    wechat_article_url: str | None = None
     publish_status: str = "pending"
     error_code: str | None = None
     error_message: str | None = None
+    decision: dict | None = None
     published_at: datetime | None = None

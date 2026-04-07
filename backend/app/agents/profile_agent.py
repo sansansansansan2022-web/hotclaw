@@ -1,6 +1,10 @@
 """Profile agent: parses account positioning into structured profile.
 
 Calls LLM to analyze account positioning and return structured JSON.
+
+【账号定位解析智能体】
+职责：将用户的账号定位描述解析为结构化画像
+不负责：抓热点、写标题、写正文
 """
 
 import json
@@ -10,9 +14,56 @@ from app.core.config import settings
 
 
 class ProfileAgent(BaseAgent):
+    """
+    账号定位解析智能体
+
+    Agent Contract:
+    - input: positioning, account_context (optional)
+    - output: domain, subdomain, target_audience, tone, content_style, keywords, positioning_raw
+    - supported_skills: []
+    """
+
     agent_id = "profile_agent"
     name = "账号定位解析智能体"
     description = "将用户的账号定位描述解析为结构化画像"
+
+    # Agent Contract
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "positioning": {
+                "type": "string",
+                "description": "用户的自然语言定位描述"
+            },
+            "account_context": {
+                "type": "object",
+                "description": "账号上下文（可选）"
+            }
+        },
+        "required": ["positioning"]
+    }
+
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "domain": {"type": "string", "description": "账号主领域"},
+            "subdomain": {"type": "string", "description": "细分领域"},
+            "target_audience": {
+                "type": "object",
+                "properties": {
+                    "age_range": {"type": "string"},
+                    "occupation": {"type": "string"},
+                    "interests": {"type": "array", "items": {"type": "string"}}
+                }
+            },
+            "tone": {"type": "string", "description": "内容调性"},
+            "content_style": {"type": "string", "description": "内容风格"},
+            "keywords": {"type": "array", "items": {"type": "string"}, "description": "核心关键词"},
+            "positioning_raw": {"type": "string", "description": "原始定位输入"}
+        }
+    }
+
+    supported_skills = []  # 该 Agent 不调用 Skill
 
     default_system_prompt = """\
 你是一位专业的自媒体账号定位分析师，擅长将模糊的自然语言描述转化为精确的结构化画像。
@@ -46,7 +97,6 @@ class ProfileAgent(BaseAgent):
         user_prompt = f"解析以下账号定位：{positioning}"
 
         try:
-            # 阿里云 dashscope 需要用 dashscope 前缀
             model = settings.llm_model_name
             if not model.startswith("dashscope/"):
                 model = f"dashscope/{model}"

@@ -72,15 +72,12 @@ class DraftService:
         # Extract main content
         main_content = content.get("content_markdown", content.get("content", ""))
 
-        # Determine draft status based on operation mode
-        # - full_auto: auto publish, create draft in approved state
-        # - semi_auto: pending_review, requires manual confirmation
-        # - manual/manual_task: draft, saved as draft without immediate review
+        # Determine draft status based on operation mode.
+        # full_auto drafts can auto-publish later, but they are not yet marked as published.
         if operation_mode == "full_auto":
             draft_status = "approved"
             publish_review_required = False
-            source_type = "semi_auto_task"
-            # Auto publish: set published timestamps
+            source_type = "full_auto_task"
         elif operation_mode == "semi_auto":
             draft_status = "pending_review"
             publish_review_required = True
@@ -106,13 +103,13 @@ class DraftService:
             tags=content.get("tags"),
             structure=content.get("structure"),
             draft_status=draft_status,
-            publish_status="published" if operation_mode == "full_auto" else "not_published",
+            publish_status="not_published",
             publish_review_required=publish_review_required,
             source_type=source_type,
-            # Auto-publish for full_auto mode
+            # full_auto 由后续发布流程填充 published_at
             confirmed_at=now if operation_mode == "full_auto" else None,
             confirmed_by="system" if operation_mode == "full_auto" else None,
-            published_at=now if operation_mode == "full_auto" else None,
+            published_at=None,
         )
 
         db.add(draft)
@@ -268,17 +265,19 @@ class DraftService:
         if draft.draft_status not in {"pending_review", "draft"}:
             raise DraftInvalidStatusError(draft_id, draft.draft_status, "confirm-publish")
 
-        # Update draft status
+        # Confirm only moves the draft into the approved state.
+        # Real WeChat publish happens in the dedicated publish pipeline.
         draft.draft_status = "approved"
-        draft.publish_status = "published"
+        if draft.publish_status == "failed":
+            draft.publish_status = "not_published"
         draft.confirmed_at = datetime.now(timezone.utc)
         draft.confirmed_by = confirmed_by
-        draft.published_at = datetime.now(timezone.utc)
+        draft.published_at = None
 
         db.add(draft)
         await db.flush()
         logger.info(
-            "draft_confirmed_published",
+            "draft_confirmed_for_publish",
             draft_id=draft_id,
             confirmed_by=confirmed_by
         )
@@ -294,261 +293,33 @@ class DraftService:
         trigger_type: str = "manual_confirm",
         existing_record_id: int | None = None,
     ) -> tuple[ArticleDraftModel, dict]:
-        """
-        Publish draft to WeChat official account (real publish).
+        """Compatibility wrapper around the dedicated WeChat publish service."""
+        from app.services.publish_decision_service import PublishDecisionError
+        from app.services.wechat_publish_service import wechat_publish_service
 
-        This method:
-        1. Validates publish conditions via PublishDecisionService
-        2. Creates or uses existing publish record via PublishRecordService
-        3. Calls real WeChat API via WeChatPublishService
-        4. Updates draft status and publish record
-        5. Handles failure compensation (token refresh, retry)
-
-        Args:
-            draft_id: The draft ID
-            db: Database session
-            confirmed_by: Who confirmed (default: 'user')
-            source_mode: Source mode (manual/semi_auto/full_auto)
-            trigger_type: Trigger type (manual_confirm/semi_auto_confirm/full_auto/retry)
-            existing_record_id: If provided, use this existing record instead of creating new one
-
-        Returns:
-            Tuple of (updated_draft, publish_result)
-
-        Raises:
-            PublishDecisionError: If validation fails
-            WeChatPublishError: If WeChat publish fails
-        """
-        from app.services.publish_decision_service import (
-            publish_decision_service,
-            PublishDecisionError,
-            PublishDecision,
-            PublishDecisionResult,
-        )
-        from app.services.wechat_publish_service import wechat_publish_service, WeChatPublishError
-        from app.services.publish_record_service import publish_record_service, PublishRecordError
-        from app.services.wechat_token_service import WeChatTokenError
-        from app.core.exceptions import DraftPublishError
-
-        # Step 1: Make publish decision (protection layer)
-        decision_result: PublishDecisionResult = await publish_decision_service.decide_publish(
-            draft_id, db, source=trigger_type, is_retry=(existing_record_id is not None)
-        )
-
-        # Step 2: Handle decision results
-        draft = await self.get_draft(draft_id, db)
-
-        if decision_result.is_block():
-            # BLOCK: raise error
-            raise PublishDecisionError(
-                decision=decision_result.decision.value,
-                reason_code=decision_result.reason_code.value,
-                message=decision_result.reason_message,
-            )
-
-        if decision_result.is_skip():
-            # SKIP: record the skip and return
-            logger.info(
-                "publish_skipped",
-                draft_id=draft_id,
-                reason_code=decision_result.reason_code.value,
-                reason_message=decision_result.reason_message,
-                checks=decision_result.checks,
-            )
-            # Record decision in draft
-            draft.publish_status = "skipped"
-            draft.publish_error_message = f"[{decision_result.reason_code.value}] {decision_result.reason_message}"
-            db.add(draft)
-            await db.flush()
-            return draft, {"decision": decision_result.to_dict()}
-
-        if decision_result.is_save_as_draft():
-            # SAVE_AS_DRAFT: keep draft in pending_review
-            logger.info(
-                "publish_save_as_draft",
-                draft_id=draft_id,
-                reason_code=decision_result.reason_code.value,
-                reason_message=decision_result.reason_message,
-                checks=decision_result.checks,
-            )
-            # Record decision in draft
-            draft.publish_error_message = f"[{decision_result.reason_code.value}] {decision_result.reason_message}"
-            db.add(draft)
-            await db.flush()
-            return draft, {"decision": decision_result.to_dict()}
-
-        # ALLOW_PUBLISH: continue with real publish
-        # Step 3: Get WeChat config
-        wechat_config = await publish_decision_service.get_wechat_config(
-            draft.account_id, db
-        )
-
-        # Step 4: Create or use existing publish record
-        if existing_record_id:
-            # Use existing record (for retry)
-            record_id = existing_record_id
-            # Update record status to pending
-            await publish_record_service.update_status(
-                record_id=record_id,
+        try:
+            result = await wechat_publish_service.publish_draft_to_wechat(
+                draft_id,
+                operator=confirmed_by,
+                source_mode=source_mode,
+                trigger_type=trigger_type,
+                existing_record_id=existing_record_id,
                 db=db,
-                status="pending",
             )
-        else:
-            # Create new record
-            request_snapshot = f"title={draft.title[:50]}..."
-            try:
-                publish_record = await publish_record_service.create_record(
-                    draft_id=draft_id,
-                    account_id=draft.account_id,
-                    task_id=draft.task_id,
-                    db=db,
-                    source_mode=source_mode,
-                    trigger_type=trigger_type,
-                    request_snapshot=request_snapshot,
-                )
-            except PublishRecordError as e:
-                logger.error("publish_record_create_failed", draft_id=draft_id, error=str(e))
-                raise DraftPublishError(draft_id, f"Failed to create publish record: {e}")
-            record_id = publish_record.id
-
-        # Step 5: Update draft status to publishing
-        draft.publish_status = "publishing"
-        draft.publish_error_message = None
-        db.add(draft)
-        await db.flush()
-
-        # Step 6: Call real WeChat publish API with failure compensation
-        retry_count = 0
-        max_retries = 2  # Token refresh + one network retry
-
-        while retry_count <= max_retries:
-            try:
-                result = await wechat_publish_service.publish_article(
-                    app_id=wechat_config.app_id,
-                    app_secret=wechat_config.app_secret,
-                    title=draft.title,
-                    author=wechat_config.default_author,
-                    digest=draft.summary,
-                    content_html=draft.content_html or self._markdown_to_html(draft.content_markdown),
-                    thumb_media_id=wechat_config.default_thumb_media_id,
-                    need_open_comment=wechat_config.need_open_comment,
-                    only_fans_can_comment=wechat_config.only_fans_can_comment
-                )
-
-                # Step 7: Update publish record on success
-                await publish_record_service.update_success(
-                    record_id=record_id,
-                    db=db,
-                    wechat_draft_id=result.get("media_id"),
-                    media_id=result.get("media_id"),
-                    publish_id=result.get("publish_id"),
-                    article_id=result.get("article_id"),
-                    url=result.get("url"),
-                    response_snapshot=f"success, media_id={result.get('media_id')}",
-                )
-
-                # Step 8: Update draft status
-                draft.draft_status = "published"
-                draft.publish_status = "published"
-                draft.confirmed_at = datetime.now(timezone.utc)
-                draft.confirmed_by = confirmed_by
-                draft.published_at = datetime.now(timezone.utc)
-                draft.publish_error_message = None
-                db.add(draft)
-                await db.flush()
-
-                # Step 9: Sync account publish status
-                await self._sync_account_publish_status(draft.account_id, db, "published")
-
-                logger.info(
-                    "draft_published_to_wechat",
-                    draft_id=draft_id,
-                    record_id=record_id,
-                    media_id=result.get("media_id"),
-                    publish_id=result.get("publish_id"),
-                    retry_count=retry_count
-                )
-
-                return draft, result
-
-            except WeChatTokenError as e:
-                # Token error - try to refresh and retry (once)
-                retry_count += 1
-                if retry_count <= 1:  # Only retry once for token error
-                    logger.warning(
-                        "wechat_publish_token_error_retry",
-                        draft_id=draft_id,
-                        record_id=record_id,
-                        error=str(e),
-                        retry_count=retry_count
-                    )
-                    # Clear cached token to force refresh
-                    from app.services.wechat_token_service import wechat_token_service
-                    await wechat_token_service.clear_cache(wechat_config.app_id)
-                    continue
-                else:
-                    # Token refresh retry exhausted
-                    await self._handle_publish_failure(
-                        record_id=record_id,
-                        draft=draft,
-                        db=db,
-                        error_code="TOKEN_ERROR",
-                        error_message=f"Token error after retry: {e}",
-                    )
-                    raise DraftPublishError(draft_id, f"Token error after retry: {e}")
-
-            except WeChatPublishError as e:
-                # Non-token error - determine if retryable
-                error_str = str(e).lower()
-                is_retryable = any(x in error_str for x in ["timeout", "network", "connection", "503", "502"])
-
-                retry_count += 1
-                if is_retryable and retry_count <= max_retries:
-                    logger.warning(
-                        "wechat_publish_retryable_error",
-                        draft_id=draft_id,
-                        record_id=record_id,
-                        error=str(e),
-                        retry_count=retry_count
-                    )
-                    continue
-                else:
-                    # Non-retryable error or retry exhausted
-                    await self._handle_publish_failure(
-                        record_id=record_id,
-                        draft=draft,
-                        db=db,
-                        error_code="PUBLISH_ERROR",
-                        error_message=str(e),
-                    )
-                    raise DraftPublishError(draft_id, str(e))
-
-            except Exception as e:
-                # Unexpected error
-                logger.error(
-                    "wechat_publish_unexpected_error",
-                    draft_id=draft_id,
-                    record_id=record_id,
-                    error=str(e)
-                )
-                await self._handle_publish_failure(
-                    record_id=record_id,
-                    draft=draft,
-                    db=db,
-                    error_code="INTERNAL_ERROR",
-                    error_message=str(e),
-                )
-                raise DraftPublishError(draft_id, f"Unexpected error: {e}")
-
-        # Should not reach here, but handle edge case
-        await self._handle_publish_failure(
-            record_id=record_id,
-            draft=draft,
-            db=db,
-            error_code="MAX_RETRIES",
-            error_message="Max retries exhausted",
-        )
-        raise DraftPublishError(draft_id, "Max retries exhausted")
+        except PublishDecisionError as exc:
+            raise DraftPublishError(draft_id, exc.message) from exc
+        draft = await self.get_draft(draft_id, db)
+        return draft, {
+            "success": result.success,
+            "publish_record_id": result.publish_record_id,
+            "media_id": result.wechat_draft_media_id,
+            "publish_id": result.wechat_publish_id,
+            "url": result.wechat_article_url,
+            "publish_status": result.publish_status,
+            "decision": result.decision,
+            "error_code": result.error_code,
+            "error_message": result.error_message,
+        }
 
     async def _handle_publish_failure(
         self,

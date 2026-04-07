@@ -1,18 +1,17 @@
 import type { Metadata } from "next";
+import { AppProvider } from "@/components/providers/app-provider";
 import "./globals.css";
-import TaskStatusBanner from "@/components/TaskStatusBanner";
 
 export const metadata: Metadata = {
-  title: "HotClaw 编辑部",
-  description: "多智能体公众号内容生产平台",
+  title: "HotClaw",
+  description: "Multi-agent content production platform for WeChat official accounts",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN">
-      <body className="antialiased">
-        <TaskStatusBanner />
-        {children}
+    <html lang="en" suppressHydrationWarning>
+      <body>
+        <AppProvider>{children}</AppProvider>
       </body>
     </html>
   );

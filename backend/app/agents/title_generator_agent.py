@@ -1,6 +1,10 @@
 """Title generator agent: generates candidate titles for each topic.
 
 Calls LLM to generate and score title proposals.
+
+【标题生成智能体】
+职责：生成标题候选
+不负责：审核、发布
 """
 
 import json
@@ -10,9 +14,59 @@ from app.core.config import settings
 
 
 class TitleGeneratorAgent(BaseAgent):
+    """
+    标题生成智能体
+
+    Agent Contract:
+    - input: profile, topics, account_context (optional)
+    - output: selected_topic, titles: list[{text, style, score, reasoning}]
+    - supported_skills: []
+    """
+
     agent_id = "title_generator_agent"
     name = "标题生成智能体"
     description = "为选题生成多个候选标题并评分"
+
+    # Agent Contract
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "profile": {
+                "type": "object",
+                "description": "账号画像"
+            },
+            "topics": {
+                "type": "object",
+                "description": "候选选题列表 {topics: [...]}"
+            },
+            "account_context": {
+                "type": "object",
+                "description": "账号上下文（可选）"
+            }
+        },
+        "required": ["profile", "topics"]
+    }
+
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "selected_topic": {"type": "string", "description": "选中的选题标题"},
+            "titles": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "style": {"type": "string"},
+                        "score": {"type": "number"},
+                        "reasoning": {"type": "string"}
+                    }
+                }
+            }
+        }
+    }
+
+    supported_skills = []
 
     default_system_prompt = """\
 你是一位精通微信公众号爆款标题的写作专家，深谙读者点击心理和平台推荐机制。

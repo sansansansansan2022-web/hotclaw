@@ -34,13 +34,13 @@ export default function TaskStatusBanner() {
       >
         <span>✅ 任务已完成</span>
         <Link
-          href={`/newsroom?taskId=${activeTaskId}`}
+          href={`/task/${activeTaskId}`}
           style={{
             color: "white",
             textDecoration: "underline",
           }}
         >
-          返回编辑部查看
+          返回任务详情查看
         </Link>
       </div>
     );
@@ -95,7 +95,7 @@ export default function TaskStatusBanner() {
           />
         </div>
         <Link
-          href={`/newsroom?taskId=${activeTaskId}`}
+          href={`/workspace`}
           style={{
             color: "white",
             textDecoration: "underline",

@@ -71,6 +71,16 @@ DEFAULT_CONFIGS: list[dict] = [
         "is_system": True,
         "requires_restart": True,
     },
+    {
+        "key": "ui_language",
+        "value": "en",
+        "value_type": "string",
+        "description": "Global console UI language (en / zh-CN)",
+        "category": "app",
+        "is_sensitive": False,
+        "is_system": False,
+        "requires_restart": False,
+    },
     # Log
     {
         "key": "log_level",

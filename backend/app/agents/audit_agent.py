@@ -1,6 +1,10 @@
 """Audit agent: reviews content for risks and compliance.
 
 Calls LLM to audit article content for compliance and quality.
+
+【内容审核智能体】
+职责：输出风险判断与问题列表
+不负责：直接修改状态、不直接发文
 """
 
 import json
@@ -10,9 +14,53 @@ from app.core.config import settings
 
 
 class AuditAgent(BaseAgent):
+    """
+    内容审核智能体
+
+    Agent Contract:
+    - input: titles, content, profile, account_context (optional)
+    - output: passed, risk_level, issues, overall_comment
+    - supported_skills: []
+    """
+
     agent_id = "audit_agent"
     name = "审核智能体"
     description = "对生成的文章进行风险检测和合规性审核"
+
+    # Agent Contract
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "titles": {"type": "object", "description": "候选标题列表 {titles: [...]}"},
+            "content": {"type": "object", "description": "文章正文数据 {content_markdown: ...}"},
+            "profile": {"type": "object", "description": "账号画像"},
+            "account_context": {"type": "object", "description": "账号上下文（可选）"}
+        },
+        "required": ["titles", "content", "profile"]
+    }
+
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "passed": {"type": "boolean", "description": "是否通过审核"},
+            "risk_level": {"type": "string", "enum": ["low", "medium", "high"], "description": "风险等级"},
+            "issues": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string"},
+                        "description": {"type": "string"},
+                        "severity": {"type": "string"},
+                        "location": {"type": "string"}
+                    }
+                }
+            },
+            "overall_comment": {"type": "string", "description": "综合评价"}
+        }
+    }
+
+    supported_skills = []
 
     default_system_prompt = """\
 你是一位内容合规审核专家，负责对自动生成的公众号文章进行全面的风险检测和质量评估。

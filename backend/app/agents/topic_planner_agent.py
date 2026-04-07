@@ -1,6 +1,10 @@
 """Topic planner agent: generates candidate topics from profile and hot topics.
 
 Calls LLM to create topic proposals based on account profile and hot topics.
+
+【选题策划智能体】
+职责：从候选热点形成选题方案
+不负责：写正文、决定是否发布
 """
 
 import json
@@ -10,9 +14,64 @@ from app.core.config import settings
 
 
 class TopicPlannerAgent(BaseAgent):
+    """
+    选题策划智能体
+
+    Agent Contract:
+    - input: profile, hot_topics, account_context (optional), recent_post_history (optional)
+    - output: topics: list[{title, angle, hook, target_emotion, estimated_appeal, reasoning}]
+    - supported_skills: []
+    """
+
     agent_id = "topic_planner_agent"
     name = "选题策划智能体"
     description = "根据账号画像和热点生成候选选题"
+
+    # Agent Contract
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "profile": {
+                "type": "object",
+                "description": "账号画像"
+            },
+            "hot_topics": {
+                "type": "object",
+                "description": "热点列表 {hot_topics: [...]}"
+            },
+            "account_context": {
+                "type": "object",
+                "description": "账号上下文（可选）"
+            },
+            "recent_post_history": {
+                "type": "string",
+                "description": "近期发布历史摘要（可选）"
+            }
+        },
+        "required": ["profile", "hot_topics"]
+    }
+
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "topics": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "angle": {"type": "string"},
+                        "hook": {"type": "string"},
+                        "target_emotion": {"type": "string"},
+                        "estimated_appeal": {"type": "number"},
+                        "reasoning": {"type": "string"}
+                    }
+                }
+            }
+        }
+    }
+
+    supported_skills = []
 
     default_system_prompt = """\
 你是一位资深自媒体选题策划专家，擅长结合账号定位和热点趋势，策划出兼具传播力和用户价值的选题方案。

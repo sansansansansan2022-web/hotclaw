@@ -17,6 +17,12 @@
 - [frontend/components/command-center/CommandCenter.tsx](file://frontend/components/command-center/CommandCenter.tsx)
 </cite>
 
+## 更新摘要
+**所做更改**
+- 更新了草稿异常处理章节，反映了DraftAlreadyPublishedError异常的HTTP状态码映射修复
+- 补充了草稿错误状态码分类的详细说明
+- 增强了异常处理一致性的分析
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -55,6 +61,7 @@ subgraph "业务异常处理"
 BUS1[task_service.py<br/>任务异常]
 BUS2[orchestrator/engine.py<br/>智能体异常]
 BUS3[llm/gateway.py<br/>LLM异常转换]
+BUS4[draft_service.py<br/>草稿异常]
 end
 subgraph "前端异常处理系统"
 FE1[lib/api.ts<br/>API客户端错误处理]
@@ -63,6 +70,7 @@ FE3[CommandCenter.tsx<br/>UI错误展示]
 end
 BE1 --> BUS1
 BE1 --> BUS2
+BE1 --> BUS4
 BE2 --> BUS3
 BE3 --> FE1
 BE4 --> BE3
@@ -72,12 +80,12 @@ FE2 --> FE3
 ```
 
 **图表来源**
-- [backend/app/core/exceptions.py:1-223](file://backend/app/core/exceptions.py#L1-L223)
-- [backend/app/main.py:135-189](file://backend/app/main.py#L135-L189)
+- [backend/app/core/exceptions.py:1-366](file://backend/app/core/exceptions.py#L1-L366)
+- [backend/app/main.py:135-200](file://backend/app/main.py#L135-L200)
 - [frontend/lib/api.ts:39-50](file://frontend/lib/api.ts#L39-L50)
 
 **章节来源**
-- [backend/app/core/exceptions.py:1-223](file://backend/app/core/exceptions.py#L1-L223)
+- [backend/app/core/exceptions.py:1-366](file://backend/app/core/exceptions.py#L1-L366)
 - [frontend/lib/api.ts:1-363](file://frontend/lib/api.ts#L1-L363)
 
 ## 核心组件
@@ -115,6 +123,9 @@ class AgentTimeoutError {
 class InternalError {
 +__init__(message, details)
 }
+class DraftAlreadyPublishedError {
++__init__(draft_id)
+}
 HotClawError <|-- ValidationError
 HotClawError <|-- TaskNotFoundError
 HotClawError <|-- AgentNotFoundError
@@ -122,10 +133,11 @@ HotClawError <|-- TaskAlreadyRunningError
 HotClawError <|-- LLMCallError
 HotClawError <|-- AgentTimeoutError
 HotClawError <|-- InternalError
+HotClawError <|-- DraftAlreadyPublishedError
 ```
 
 **图表来源**
-- [backend/app/core/exceptions.py:19-223](file://backend/app/core/exceptions.py#L19-L223)
+- [backend/app/core/exceptions.py:19-366](file://backend/app/core/exceptions.py#L19-L366)
 
 ### 错误码分类系统
 
@@ -138,10 +150,17 @@ HotClawError <|-- InternalError
 | 3xxx | 502 | 外部/执行错误 | LLM调用失败 |
 | 4xxx | 400 | 配置错误 | 配置验证失败 |
 | 5xxx | 500 | 系统错误 | 未预期异常 |
+| 6xxx | 400 | 账号错误 | 账号相关错误 |
+| 7xxx | 500 | 调度器错误 | 调度器相关错误 |
+| 8xxx | 409 | 任务冲突错误 | 任务状态冲突 |
+| 9xxx | 400/404/409 | 草稿错误 | 草稿状态相关错误 |
+
+**更新** 新增了草稿错误的详细分类说明，包括400、404、409三种状态码的支持
 
 **章节来源**
 - [backend/app/core/exceptions.py:8-16](file://backend/app/core/exceptions.py#L8-L16)
-- [backend/app/core/exceptions.py:40-223](file://backend/app/core/exceptions.py#L40-L223)
+- [backend/app/core/exceptions.py:312-313](file://backend/app/core/exceptions.py#L312-L313)
+- [backend/app/core/exceptions.py:335-343](file://backend/app/core/exceptions.py#L335-L343)
 
 ## 架构概览
 
@@ -165,6 +184,12 @@ Engine-->>Service : 返回成功结果
 Service-->>Handler : 返回业务数据
 Handler-->>API : 返回JSON响应
 API-->>Client : 200 OK
+else 草稿异常(DraftAlreadyPublishedError)
+Engine-->>Service : 抛出草稿异常
+Service-->>Handler : 重新抛出异常
+Handler-->>API : 触发全局异常处理器
+API->>Logger : 记录错误日志
+API-->>Client : 返回409冲突状态
 else 业务异常
 Engine-->>Service : 抛出HotClawError
 Service-->>Handler : 重新抛出异常
@@ -183,7 +208,7 @@ Frontend-->>Client : 展示错误信息
 ```
 
 **图表来源**
-- [backend/app/main.py:135-189](file://backend/app/main.py#L135-L189)
+- [backend/app/main.py:142-200](file://backend/app/main.py#L142-L200)
 - [backend/app/core/logger.py:19-97](file://backend/app/core/logger.py#L19-L97)
 
 ## 详细组件分析
@@ -204,17 +229,21 @@ ExtractCode --> MapStatus[映射HTTP状态码]
 MapStatus --> SpecialCases{特殊状态处理}
 SpecialCases --> |404资源不存在| Set404[设置404]
 SpecialCases --> |504超时| Set504[设置504]
+SpecialCases --> |草稿冲突| Set409[设置409]
 SpecialCases --> |普通情况| NormalStatus[常规状态]
 Set404 --> BuildResponse[构建响应]
 Set504 --> BuildResponse
+Set409 --> BuildResponse
 NormalStatus --> BuildResponse
 BuildResponse --> ReturnResponse[返回JSON响应]
 UnhandledHandler --> LogError[记录错误日志]
 LogError --> Return500[返回500错误]
 ```
 
+**更新** 新增了草稿冲突状态的特殊处理逻辑
+
 **图表来源**
-- [backend/app/main.py:135-189](file://backend/app/main.py#L135-L189)
+- [backend/app/main.py:142-200](file://backend/app/main.py#L142-L200)
 
 #### LLM异常处理
 
@@ -254,7 +283,7 @@ LLMCallError <|-- LLMRateLimitError
 - [backend/app/llm/exceptions.py:9-153](file://backend/app/llm/exceptions.py#L9-L153)
 
 **章节来源**
-- [backend/app/main.py:135-189](file://backend/app/main.py#L135-L189)
+- [backend/app/main.py:142-200](file://backend/app/main.py#L142-L200)
 - [backend/app/llm/exceptions.py:1-153](file://backend/app/llm/exceptions.py#L1-L153)
 
 ### 业务异常处理
@@ -319,9 +348,39 @@ RaiseError --> EndNode
 **图表来源**
 - [backend/app/orchestrator/engine.py:213-296](file://backend/app/orchestrator/engine.py#L213-L296)
 
+#### 草稿异常处理
+
+**更新** 新增了草稿异常处理的详细分析
+
+草稿服务层实现了完整的草稿生命周期异常处理，特别针对DraftAlreadyPublishedError进行了优化：
+
+```mermaid
+flowchart TD
+ConfirmPublish[确认发布] --> CheckDraft[检查草稿状态]
+CheckDraft --> CheckPublished{是否已发布?}
+CheckPublished --> |是| AlreadyPublishedError[抛出已发布错误]
+CheckPublished --> |否| CheckStatus{状态是否有效?}
+CheckStatus --> |否| InvalidStatusError[抛出状态错误]
+CheckStatus --> |是| UpdateStatus[更新状态为已发布]
+UpdateStatus --> LogSuccess[记录成功日志]
+AlreadyPublishedError --> HandleConflict[处理冲突状态]
+HandleConflict --> ReturnConflict[返回409冲突]
+InvalidStatusError --> ReturnError[返回错误]
+RerunFromDraft[从草稿重试] --> CheckTerminal{是否为终止状态?}
+CheckTerminal --> |是| TerminalError[抛出终端状态错误]
+CheckTerminal --> |否| CreateTask[创建新任务]
+TerminalError --> HandleConflict
+CreateTask --> ReturnResult[返回结果]
+```
+
+**图表来源**
+- [backend/app/services/draft_service.py:260-285](file://backend/app/services/draft_service.py#L260-L285)
+- [backend/app/services/draft_service.py:350-409](file://backend/app/services/draft_service.py#L350-L409)
+
 **章节来源**
 - [backend/app/services/task_service.py:1-126](file://backend/app/services/task_service.py#L1-L126)
 - [backend/app/orchestrator/engine.py:131-415](file://backend/app/orchestrator/engine.py#L131-L415)
+- [backend/app/services/draft_service.py:260-409](file://backend/app/services/draft_service.py#L260-L409)
 
 ### 前端异常处理组件
 
@@ -341,6 +400,9 @@ Backend-->>API : 返回响应
 alt 响应成功
 API->>API : 检查code字段
 API-->>UI : 返回数据
+else 草稿冲突(409)
+API->>API : 处理草稿冲突
+API-->>UI : 显示冲突提示
 else 响应错误
 API->>API : 抛出JavaScript错误
 API-->>UI : 错误信息
@@ -352,6 +414,8 @@ UI->>UI : 处理SSE错误
 UI-->>UI : 显示错误状态
 end
 ```
+
+**更新** 新增了草稿冲突状态的前端处理逻辑
 
 **图表来源**
 - [frontend/lib/api.ts:39-50](file://frontend/lib/api.ts#L39-L50)
@@ -407,6 +471,7 @@ TaskService[services/task_service.py]
 Orchestrator[orchestrator/engine.py]
 LLMGateway[llm/gateway.py]
 LLMExceptions[llm/exceptions.py]
+DraftService[services/draft_service.py]
 end
 subgraph "接口层"
 Main[main.py]
@@ -420,11 +485,13 @@ UI[CommandCenter.tsx]
 end
 Exceptions --> TaskService
 Exceptions --> Orchestrator
+Exceptions --> DraftService
 LLMExceptions --> LLMGateway
 Logger --> Main
 Tracer --> Main
 TaskService --> Orchestrator
 Orchestrator --> LLMGateway
+DraftService --> Main
 Main --> APIClient
 APIClient --> SSEHook
 SSEHook --> UI
@@ -432,13 +499,15 @@ Schemas --> Main
 Tables --> TaskService
 ```
 
+**更新** 新增了DraftService到Main的直接依赖关系
+
 **图表来源**
-- [backend/app/core/exceptions.py:19-223](file://backend/app/core/exceptions.py#L19-L223)
-- [backend/app/main.py:135-189](file://backend/app/main.py#L135-L189)
+- [backend/app/core/exceptions.py:19-366](file://backend/app/core/exceptions.py#L19-L366)
+- [backend/app/main.py:142-200](file://backend/app/main.py#L142-L200)
 
 **章节来源**
-- [backend/app/core/exceptions.py:1-223](file://backend/app/core/exceptions.py#L1-L223)
-- [backend/app/main.py:1-205](file://backend/app/main.py#L1-L205)
+- [backend/app/core/exceptions.py:1-366](file://backend/app/core/exceptions.py#L1-L366)
+- [backend/app/main.py:1-218](file://backend/app/main.py#L1-L218)
 
 ## 性能考虑
 
@@ -494,6 +563,31 @@ CheckFallback --> |是| Degraded[降级执行]
 CheckFallback --> |否| CriticalError[严重错误]
 ```
 
+#### 草稿状态异常
+
+**更新** 新增了草稿状态异常的专门诊断流程
+
+草稿状态异常的排查流程，特别针对DraftAlreadyPublishedError：
+
+```mermaid
+flowchart TD
+DraftError[草稿状态异常] --> CheckDraft[检查草稿状态]
+CheckDraft --> CheckPublishStatus{发布状态检查}
+CheckPublishStatus --> Published{已发布?}
+Published --> |是| AlreadyPublishedError[已发布错误]
+AlreadyPublishedError --> CheckOperation{检查操作类型}
+CheckOperation --> ConfirmPublish[确认发布操作]
+CheckOperation --> RerunFromDraft[从草稿重试操作]
+ConfirmPublish --> ConflictError[返回409冲突]
+RerunFromDraft --> ConflictError
+Published --> |否| CheckDraftStatus{检查草稿状态}
+CheckDraftStatus --> ValidStatus{状态有效?}
+ValidStatus --> |否| InvalidStatusError[状态无效错误]
+ValidStatus --> |是| ProcessOperation[处理操作]
+InvalidStatusError --> ProcessOperation
+ProcessOperation --> Success[操作成功]
+```
+
 #### 前端错误处理
 
 前端错误处理的最佳实践：
@@ -506,6 +600,7 @@ CheckFallback --> |否| CriticalError[严重错误]
 **章节来源**
 - [backend/app/core/logger.py:19-97](file://backend/app/core/logger.py#L19-L97)
 - [frontend/hooks/useTaskSSE.ts:198-213](file://frontend/hooks/useTaskSSE.ts#L198-L213)
+- [backend/app/services/draft_service.py:260-409](file://backend/app/services/draft_service.py#L260-L409)
 
 ## 结论
 
@@ -517,6 +612,14 @@ HotClaw 异常处理系统通过统一的异常层次结构、完善的错误码
 2. **可维护性**：清晰的异常层次结构便于代码维护和扩展
 3. **可观测性**：结构化日志和追踪ID提供了强大的问题诊断能力
 4. **用户体验**：前后端协同的错误处理提升了整体用户体验
+
+### 改进亮点
+
+**更新** 新增了草稿异常处理的改进分析
+
+1. **草稿冲突处理优化**：DraftAlreadyPublishedError现在正确映射到409冲突状态，提高了API错误处理的一致性
+2. **状态码分类完善**：草稿错误支持400、404、409三种状态码，满足了不同的业务场景需求
+3. **异常处理一致性增强**：通过统一的状态码映射规则，确保了前后端对异常状态的正确理解
 
 ### 改进建议
 
