@@ -177,6 +177,7 @@ export default function CommandCenter() {
 
   // 已完成节点数
   const completedCount = nodes.filter((n) => n.status === "completed").length;
+  const runningNodeId = nodes.find((n) => n.status === "running")?.node_id ?? null;
 
   // ===== 节点位置（用于 HoloLines）=====
   // 转换为 SVG 视口坐标百分比（50 + x 是为了让 0 为中心）
@@ -227,6 +228,8 @@ export default function CommandCenter() {
             position={NODE_ORBIT[i] || { x: 0, y: 0 }}
             onExpand={setSelectedAgent}
             delay={i * 80}  // 依次延迟出现
+            isPrimary={runningNodeId === agent.node_id}
+            isDimmed={runningNodeId !== null && runningNodeId !== agent.node_id}
           />
         ))}
 

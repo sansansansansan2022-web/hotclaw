@@ -35,16 +35,14 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { getAccount, updateAccount } from "@/lib/api";
 import type { AccountDetail, AccountUpdateRequest } from "@/types";
 
-export default function EditAccountPage({
-  params,
-}: {
-  params: { id: string };
-}) {
+export default function EditAccountPage() {
+  const params = useParams<{ id: string }>();
   const router = useRouter();
+  const accountId = params?.id;
 
   // 状态管理
   // account: 原始账号数据（用于显示）
@@ -60,8 +58,9 @@ export default function EditAccountPage({
 
   // 页面加载时获取账号详情并填充表单
   useEffect(() => {
+    if (!accountId) return;
     loadAccount();
-  }, [params.id]);
+  }, [accountId]);
 
   /**
    * loadAccount - 加载账号详情并填充表单
@@ -72,7 +71,8 @@ export default function EditAccountPage({
   async function loadAccount() {
     setLoading(true);
     try {
-      const data = await getAccount(params.id);
+      if (!accountId) return;
+      const data = await getAccount(accountId);
       setAccount(data);
       // 填充表单数据（将 null 转为 undefined）
       setForm({
@@ -127,7 +127,8 @@ export default function EditAccountPage({
 
     setSubmitting(true);
     try {
-      await updateAccount(params.id, form);
+      if (!accountId) return;
+      await updateAccount(accountId, form);
       router.push(`/accounts/${params.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "更新失败");

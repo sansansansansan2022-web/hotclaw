@@ -489,40 +489,42 @@ export default function ShellLayout({
       const recentEvents: RecentEvent[] = [];
 
       tasksRes.tasks.slice(0, 10).forEach((task) => {
+        const createdAt = new Date(task.created_at);
         recentEvents.push({
           id: `task-${task.task_id}`,
           type: "task",
           action: task.status === "completed" ? "任务完成" : task.status === "failed" ? "任务失败" : "任务进行中",
           title: task.positioning_summary || "内容创作任务",
-          time: new Date(task.created_at).toLocaleString("zh-CN", {
+          time: createdAt.toLocaleString("zh-CN", {
             month: "numeric",
             day: "numeric",
             hour: "2-digit",
             minute: "2-digit",
           }),
+          timestamp: createdAt.getTime(),
           status: task.status === "completed" ? "success" : task.status === "failed" ? "failed" : "pending",
         });
       });
 
       draftsRes.drafts.slice(0, 10).forEach((draft) => {
+        const createdAt = new Date(draft.created_at);
         recentEvents.push({
           id: `draft-${draft.id}`,
           type: "draft",
           action: draft.draft_status === "pending_review" ? "新草稿待确认" : "草稿已更新",
           title: draft.title,
-          time: new Date(draft.created_at).toLocaleString("zh-CN", {
+          time: createdAt.toLocaleString("zh-CN", {
             month: "numeric",
             day: "numeric",
             hour: "2-digit",
             minute: "2-digit",
           }),
+          timestamp: createdAt.getTime(),
           status: draft.draft_status === "pending_review" ? "pending" : "info",
         });
       });
 
-      recentEvents.sort(
-        (a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()
-      );
+      recentEvents.sort((a, b) => b.timestamp - a.timestamp);
 
       setEvents(recentEvents.slice(0, 15));
     } catch (e) {

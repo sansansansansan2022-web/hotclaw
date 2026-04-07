@@ -30,16 +30,14 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { getAccount, runAccount, enableAccount, disableAccount, getPendingDraftCount } from "@/lib/api";
 import type { AccountDetail } from "@/types";
 
-export default function AccountDetailPage({
-  params,
-}: {
-  params: { id: string };
-}) {
+export default function AccountDetailPage() {
+  const params = useParams<{ id: string }>();
   const router = useRouter();
+  const accountId = params?.id;
 
   // 状态管理
   // account: 账号详情数据
@@ -55,8 +53,9 @@ export default function AccountDetailPage({
 
   // 页面加载时获取账号详情
   useEffect(() => {
+    if (!accountId) return;
     loadAccount();
-  }, [params.id]);
+  }, [accountId]);
 
   /**
    * loadAccount - 加载账号详情
@@ -69,7 +68,8 @@ export default function AccountDetailPage({
     setLoading(true);
     setError(null);
     try {
-      const data = await getAccount(params.id);
+      if (!accountId) return;
+      const data = await getAccount(accountId);
       setAccount(data);
       // Fetch pending draft count
       // 仅 semi_auto/full_auto 模式需要显示草稿入口

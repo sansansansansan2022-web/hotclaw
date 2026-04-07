@@ -116,9 +116,9 @@ export default function CentralConsole({
 
         {/* 标签文案：三种状态不同显示 */}
         {isRunning
-          ? "任务执行中"      // 执行中状态
+          ? "执行中"          // 执行中状态
           : taskDone
-            ? "任务完成"      // 已完成状态
+            ? "已完成"        // 已完成状态
             : "主控台"        // 空闲状态
         }
       </div>
@@ -128,9 +128,9 @@ export default function CentralConsole({
       {/* ------------------------------------------------ */}
       <div className="cc-console-title">
         {isRunning
-          ? "链路执行中"       // 执行中
+          ? "执行中"           // 执行中
           : taskDone
-            ? "执行完毕"       // 已完成
+            ? "已完成"         // 已完成
             : "发起创作任务"   // 空闲
         }
       </div>

@@ -28,7 +28,7 @@ class WeChatPublishService:
     1. Replace external images with WeChat CDN URLs
     2. Upload thumb/cover image
     3. Create draft in WeChat
-    4. Publish draft
+    4. Publish draft (freepublish/submit)
     """
 
     WECHAT_API_BASE = "https://api.weixin.qq.com/cgi-bin"
@@ -104,14 +104,14 @@ class WeChatPublishService:
                 only_fans_can_comment=only_fans_can_comment
             )
 
-            # Step 4: Publish the draft
+            # Step 4: Publish the draft (official free publish API)
             logger.info("wechat_publish_submit", app_id=app_id)
-            publish_result = await self._submit_draft(app_id, app_secret, media_id)
+            publish_result = await self.free_publish(app_id, app_secret, media_id)
 
             result = {
                 "success": True,
                 "media_id": media_id,
-                "publish_id": publish_result.get("msg_id", media_id),
+                "publish_id": publish_result.get("publish_id"),
                 "msg_id": publish_result.get("msg_id"),
                 "url": publish_result.get("url"),
                 "article_id": publish_result.get("articleidx"),
@@ -121,7 +121,7 @@ class WeChatPublishService:
                 "wechat_publish_success",
                 app_id=app_id,
                 media_id=media_id,
-                publish_id=publish_result.get("msg_id")
+                publish_id=publish_result.get("publish_id")
             )
 
             return result
