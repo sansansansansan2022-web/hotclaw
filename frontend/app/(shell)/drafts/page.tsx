@@ -17,25 +17,37 @@ import { useShellContext } from "../layout";
 import { listDrafts, confirmPublishDraft, discardDraft, rerunFromDraft } from "@/lib/api";
 import type { DraftSummary } from "@/types";
 
-type FilterTab = "all" | "pending_review" | "published" | "discarded";
+type FilterTab = "all" | "pending_review" | "published" | "failed" | "discarded";
+
+function resolveTabByQuery(draftStatus: string | null, publishStatus: string | null): FilterTab {
+  if (draftStatus === "pending_review") return "pending_review";
+  if (draftStatus === "published" || publishStatus === "published") return "published";
+  if (publishStatus === "failed") return "failed";
+  if (draftStatus === "discarded") return "discarded";
+  return "all";
+}
 
 function DraftsContent() {
   const searchParams = useSearchParams();
   const { refreshData } = useShellContext();
   const accountIdFromUrl = searchParams.get("account_id");
   const draftStatusFromUrl = searchParams.get("draft_status");
+  const publishStatusFromUrl = searchParams.get("publish_status");
 
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
-  const [activeTab, setActiveTab] = useState<FilterTab>(
-    draftStatusFromUrl === "pending_review" ? "pending_review" :
-    draftStatusFromUrl === "published" ? "published" :
-    draftStatusFromUrl === "discarded" ? "discarded" : "all"
+  const [activeTab, setActiveTab] = useState<FilterTab>(() =>
+    resolveTabByQuery(draftStatusFromUrl, publishStatusFromUrl)
   );
   const [actionLoading, setActionLoading] = useState<number | null>(null);
+
+  useEffect(() => {
+    setActiveTab(resolveTabByQuery(draftStatusFromUrl, publishStatusFromUrl));
+    setPage(1);
+  }, [draftStatusFromUrl, publishStatusFromUrl]);
 
   const loadDrafts = useCallback(async () => {
     setLoading(true);
@@ -45,6 +57,8 @@ function DraftsContent() {
         filters.draft_status = "pending_review";
       } else if (activeTab === "published") {
         filters.publish_status = "published";
+      } else if (activeTab === "failed") {
+        filters.publish_status = "failed";
       } else if (activeTab === "discarded") {
         filters.draft_status = "discarded";
       }
@@ -191,6 +205,7 @@ function DraftsContent() {
     { key: "all", label: "全部", icon: "📋" },
     { key: "pending_review", label: "待确认", icon: "⏳" },
     { key: "published", label: "已发布", icon: "🚀" },
+    { key: "failed", label: "发布失败", icon: "❌" },
     { key: "discarded", label: "已废弃", icon: "🗑️" },
   ];
 
@@ -238,7 +253,7 @@ function DraftsContent() {
           <div className="flex flex-col items-center justify-center text-center max-w-md mx-auto">
             {/* 空状态图标 - 增加视觉重量 */}
             <div className="w-24 h-24 rounded-2xl bg-[var(--bg-elevated)] border-2 border-[var(--border-default)] flex items-center justify-center text-5xl mb-6 shadow-inner">
-              {activeTab === "pending_review" ? "📭" : activeTab === "published" ? "📤" : activeTab === "discarded" ? "🗑️" : "📝"}
+              {activeTab === "pending_review" ? "📭" : activeTab === "published" ? "📤" : activeTab === "failed" ? "❌" : activeTab === "discarded" ? "🗑️" : "📝"}
             </div>
 
             {/* 文案 */}
@@ -247,6 +262,8 @@ function DraftsContent() {
                 ? "暂无待确认草稿"
                 : activeTab === "published"
                 ? "暂无已发布草稿"
+                : activeTab === "failed"
+                ? "暂无发布失败草稿"
                 : activeTab === "discarded"
                 ? "暂无已废弃草稿"
                 : "暂无草稿"}
@@ -256,6 +273,8 @@ function DraftsContent() {
                 ? "所有生成的内容都已确认发布或处理完毕，继续保持！"
                 : activeTab === "published"
                 ? "发布的内容将显示在这里，让你的成果有迹可循"
+                : activeTab === "failed"
+                ? "发布失败的草稿会显示在这里，方便你快速重试处理"
                 : activeTab === "discarded"
                 ? "被废弃的草稿将显示在这里"
                 : "开始创作内容后，草稿将出现在这里，等待你的审核"}

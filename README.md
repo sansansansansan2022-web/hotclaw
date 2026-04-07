@@ -6,7 +6,7 @@
   **Multi-Agent Content Production Platform for WeChat Official Accounts**
 
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-  [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
+  [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
   [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
   [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
 
@@ -46,10 +46,21 @@
 - 账号运行状态实时跟踪
 - 失败自动降级与错误记录
 
-### 🧪 端到端测试
-- 完整的 E2E 测试覆盖
-- Mock LLM Provider，保证测试稳定性
-- 16+ 核心业务场景测试用例
+### 🧪 测试能力
+- 后端 pytest 测试（单元 + 集成 + e2e 目录）
+- 覆盖草稿流转、发布决策、调度器、任务执行等核心链路
+- 前端构建与类型生成检查（Next.js 16）
+
+---
+
+## 🆕 最近更新（2026-04）
+
+- `full_auto` 模式下：任务生成草稿后会自动尝试触发微信发布，不再在草稿创建阶段提前写入 `published_at`。
+- 微信发布链路统一到 `freepublish/submit`，避免误用预览接口。
+- 草稿页支持 `publish_status=failed` 的筛选入口，并与 Dashboard 跳转对齐。
+- Shell 最近事件流使用时间戳排序，减少本地化字符串排序导致的时序问题。
+- Dashboard 信息结构重排为：指标卡 / 待处理中心 / 流转看板 / 最近账号运行。
+- Next.js 动态路由页面统一使用 `useParams`（如账号详情、账号编辑、微信配置页）。
 
 ---
 
@@ -85,7 +96,7 @@
 ## 🏃 快速启动
 
 ### 前置要求
-- Python 3.12+
+- Python 3.11+
 - Node.js 18+
 - MySQL 5.7+ 或 SQLite
 
@@ -103,8 +114,8 @@ cd backend
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 安装依赖
-pip install -r requirements.txt
+# 安装依赖（推荐可编辑安装）
+pip install -e .
 
 # 配置环境变量
 cp .env.example .env
@@ -166,14 +177,27 @@ hotclaw/
 ```bash
 cd backend
 
+# 安装测试依赖
+pip install -e ".[dev]"
+
 # 运行所有测试
 pytest -v
 
-# 运行 E2E 测试
-pytest tests/e2e/ -v
-
 # 运行单元测试
 pytest tests/ -v --ignore=tests/e2e/
+
+# 运行 E2E 测试
+pytest tests/e2e/ -v
+```
+
+```bash
+cd frontend
+
+# 类型与路由类型生成（项目 lint 脚本）
+npm run lint
+
+# 生产构建检查
+npm run build
 ```
 
 ---

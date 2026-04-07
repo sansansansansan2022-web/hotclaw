@@ -1,382 +1,226 @@
-/**
- * Dashboard — 账号运营总览视图 (V5)
- *
- * 【字体系统统一 V5】
- * - 页面主标题: text-3xl font-semibold tracking-tight
- * - 区块标题: text-lg font-semibold
- * - 指标数字: text-3xl font-bold leading-none
- * - 正文说明: text-sm leading-6
- * - 辅助说明: text-xs text-white/60
- * - 统一 padding: p-5 或 p-6
- */
-
 "use client";
 
 import Link from "next/link";
 import { useShellContext } from "./context";
 
-// =============================================================================
-// 布局常量
-// =============================================================================
+const PAGE_CONTAINER = "max-w-[1320px] mx-auto px-6 lg:px-8 py-6 space-y-5";
+const PANEL = "rounded-xl bg-[#111827] border border-white/10";
 
-const CONTENT_CONTAINER_CLASS = "max-w-[1400px] mx-auto px-6 lg:px-8";
-
-// =============================================================================
-// 统计卡片组件 (V5)
-// =============================================================================
-
-interface StatCardProps {
+function MetricCard({
+  label,
+  value,
+  icon,
+  tone,
+  href,
+}: {
   label: string;
   value: number;
   icon: string;
-  color: "cyan" | "yellow" | "green" | "red";
+  tone: "cyan" | "yellow" | "green" | "red";
   href: string;
-}
-
-function StatCard({ label, value, icon, color, href }: StatCardProps) {
-  const colorMap = {
-    cyan: {
-      bg: "bg-[var(--stat-cyan-bg)]",
-      border: "border-[var(--stat-cyan-border)]",
-      text: "text-[var(--stat-cyan)]",
-      hover: "hover:shadow-[0_0_20px_var(--stat-cyan-glow)]",
-    },
-    yellow: {
-      bg: "bg-[var(--stat-yellow-bg)]",
-      border: "border-[var(--stat-yellow-border)]",
-      text: "text-[var(--stat-yellow)]",
-      hover: "hover:shadow-[0_0_20px_var(--stat-yellow-glow)]",
-    },
-    green: {
-      bg: "bg-[var(--stat-green-bg)]",
-      border: "border-[var(--stat-green-border)]",
-      text: "text-[var(--stat-green)]",
-      hover: "hover:shadow-[0_0_20px_var(--stat-green-glow)]",
-    },
-    red: {
-      bg: "bg-[var(--stat-red-bg)]",
-      border: "border-[var(--stat-red-border)]",
-      text: "text-[var(--stat-red)]",
-      hover: "hover:shadow-[0_0_20px_var(--stat-red-glow)]",
-    },
+}) {
+  const toneMap = {
+    cyan: "text-cyan-400",
+    yellow: "text-amber-400",
+    green: "text-emerald-400",
+    red: "text-rose-400",
   };
-
-  const c = colorMap[color];
 
   return (
     <Link
       href={href}
-      className={`
-        h-full min-h-[120px] flex flex-col items-center justify-center p-5 rounded-xl gap-3
-        ${c.bg} border ${c.border}
-        shadow-[var(--shadow-card)]
-        hover:shadow-[var(--shadow-card-hover)] ${c.hover}
-        hover:scale-[1.02]
-        transition-all duration-200
-        group cursor-pointer
-      `}
+      className={`${PANEL} p-4 hover:border-cyan-400/35 transition-colors`}
     >
-      {/* 图标 */}
-      <span className="text-2xl">{icon}</span>
-
-      {/* 数字 */}
-      <span className={`text-3xl font-bold leading-none ${c.text}`}>
-        {value}
-      </span>
-
-      {/* 标题 */}
-      <span className="text-sm text-white/60">{label}</span>
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="text-[12px] text-white/55">{label}</div>
+          <div className={`text-[30px] font-semibold leading-none mt-2 ${toneMap[tone]}`}>
+            {value}
+          </div>
+        </div>
+        <span className="text-lg opacity-80">{icon}</span>
+      </div>
     </Link>
   );
 }
 
-// =============================================================================
-// 概览卡片 (V5)
-// =============================================================================
-
-function OverviewCards() {
-  const { stats } = useShellContext();
-
-  const cards = [
-    { label: "今日任务", value: stats.todayTasks, icon: "📋", color: "cyan" as const, href: "/history" },
-    { label: "待确认草稿", value: stats.pendingDrafts, icon: "📝", color: "yellow" as const, href: "/drafts?draft_status=pending_review" },
-    { label: "今日发布", value: stats.publishedToday, icon: "✅", color: "green" as const, href: "/drafts?publish_status=published" },
-    { label: "发布失败", value: stats.publishFailed, icon: "❌", color: "red" as const, href: "/drafts?publish_status=failed" },
-  ];
-
-  return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      {cards.map((card) => (
-        <StatCard key={card.label} {...card} />
-      ))}
-    </div>
-  );
+function StatusDot({ status }: { status: "success" | "pending" | "failed" | "idle" }) {
+  const cls = {
+    success: "bg-emerald-400",
+    pending: "bg-amber-400",
+    failed: "bg-rose-400",
+    idle: "bg-white/30",
+  };
+  return <span className={`inline-block w-2 h-2 rounded-full ${cls[status]}`} />;
 }
-
-// =============================================================================
-// 待处理中心 (V5)
-// =============================================================================
 
 function PendingCenter() {
   const { drafts } = useShellContext();
 
-  const pendingDrafts = drafts.filter((d) => d.draft_status === "pending_review");
-  const failedDrafts = drafts.filter((d) => d.publish_status === "failed");
-  const total = pendingDrafts.length + failedDrafts.length;
+  const pending = drafts.filter((d) => d.draft_status === "pending_review");
+  const failed = drafts.filter((d) => d.publish_status === "failed");
+  const items = [
+    ...pending.map((d) => ({ id: d.id, title: d.title, kind: "待确认" as const, href: `/drafts/${d.id}` })),
+    ...failed.map((d) => ({ id: d.id, title: d.title, kind: "发布失败" as const, href: `/drafts/${d.id}` })),
+  ].slice(0, 6);
 
-  if (total === 0) {
+  if (items.length === 0) {
     return (
-      <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-default)] shadow-[var(--shadow-card)] p-6">
-        <div className="flex flex-col items-center text-center py-8">
-          {/* 图标 */}
-          <div className="w-16 h-16 rounded-xl bg-[var(--stat-green-bg)] border border-[var(--stat-green-border)] flex items-center justify-center text-3xl mb-5">
-            🎉
-          </div>
-
-          {/* 标题 */}
-          <h3 className="text-lg font-semibold text-white mb-2">
-            太棒了，没有待处理事项
-          </h3>
-
-          {/* 说明 */}
-          <p className="text-sm text-white/60 leading-6 mb-6 max-w-xs">
-            所有内容创作和审核流程都已处理完毕
-          </p>
-
-          {/* 按钮组 */}
-          <div className="flex gap-3">
-            <Link
-              href="/workspace"
-              className="px-5 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg-void)] font-medium text-sm hover:bg-[var(--accent-hover)] transition-colors"
-            >
-              🚀 创建新任务
-            </Link>
-            <Link
-              href="/accounts/new"
-              className="px-5 py-2.5 rounded-lg bg-[var(--bg-elevated)] text-white/60 text-sm hover:bg-[var(--bg-hover)] hover:text-white transition-colors border border-[var(--border-default)]"
-            >
-              📋 添加账号
-            </Link>
+      <section className={`${PANEL} p-6`}>
+        <div className="text-sm text-white/80 font-medium">待处理中心</div>
+        <div className="mt-6 rounded-lg bg-[#0F172A] border border-white/10 p-8 text-center">
+          <div className="text-3xl mb-3">🎉</div>
+          <div className="text-white font-medium">没有待处理事项</div>
+          <div className="text-xs text-white/50 mt-2">当前内容流程运行正常</div>
+          <div className="flex items-center justify-center gap-3 mt-5">
+            <Link href="/workspace" className="px-4 py-2 rounded-md bg-cyan-500 text-slate-950 text-sm font-medium">创建任务</Link>
+            <Link href="/drafts" className="px-4 py-2 rounded-md border border-white/15 text-white/75 text-sm hover:text-white">查看草稿</Link>
           </div>
         </div>
-      </div>
+      </section>
     );
   }
 
   return (
-    <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-default)] shadow-[var(--shadow-card)] overflow-hidden">
-      {/* 标题栏 */}
-      <div className="px-5 py-4 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-[var(--stat-yellow-bg)] border border-[var(--stat-yellow-border)] flex items-center justify-center text-base">
-            ⏳
-          </div>
-          <h3 className="text-lg font-semibold text-white">待处理中心</h3>
-        </div>
-        <span className="text-xs text-[var(--stat-yellow)] px-2.5 py-1 rounded-full bg-[var(--stat-yellow-bg)] border border-[var(--stat-yellow-border)] font-medium">
-          {total} 项
-        </span>
+    <section className={`${PANEL} overflow-hidden`}>
+      <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+        <div className="text-sm text-white/85 font-medium">待处理中心</div>
+        <Link href="/drafts" className="text-xs text-cyan-300 hover:text-cyan-200">前往处理 →</Link>
       </div>
-
-      {/* 内容列表 */}
-      <div className="divide-y divide-[var(--border-subtle)]">
-        {pendingDrafts.length > 0 && (
-          <div className="p-5">
-            <div className="text-xs text-white/40 uppercase tracking-wider mb-3">待确认发布</div>
-            <div className="space-y-2">
-              {pendingDrafts.slice(0, 3).map((draft) => (
-                <Link
-                  key={`pending-${draft.id}`}
-                  href={`/drafts/${draft.id}`}
-                  className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-elevated)]/50 border border-[var(--border-subtle)] hover:bg-[var(--bg-hover)] hover:border-[var(--border-accent)] transition-all"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-[var(--stat-yellow-bg)] border border-[var(--stat-yellow-border)] flex items-center justify-center text-sm flex-shrink-0">
-                      📝
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-sm text-white truncate max-w-[180px]">{draft.title}</div>
-                      <div className="text-xs text-white/40 mt-0.5">{draft.word_count} 字 · {new Date(draft.created_at).toLocaleDateString('zh-CN')}</div>
-                    </div>
-                  </div>
-                  <span className="text-xs text-white/40 ml-2 flex-shrink-0">→</span>
-                </Link>
-              ))}
+      <div className="divide-y divide-white/10">
+        {items.map((item) => (
+          <Link
+            key={`${item.kind}-${item.id}`}
+            href={item.href}
+            className="px-5 py-3 flex items-center justify-between hover:bg-white/[0.03] transition-colors"
+          >
+            <div className="min-w-0">
+              <div className="text-sm text-white truncate">{item.title}</div>
+              <div className="mt-1 text-xs text-white/45">{item.kind}</div>
             </div>
-            {pendingDrafts.length > 3 && (
-              <Link href="/drafts?draft_status=pending_review" className="block text-center text-xs text-[var(--accent)] mt-3 py-1">
-                查看全部 {pendingDrafts.length} 项 →
-              </Link>
-            )}
-          </div>
-        )}
-
-        {failedDrafts.length > 0 && (
-          <div className="p-5">
-            <div className="text-xs text-white/40 uppercase tracking-wider mb-3">发布失败</div>
-            <div className="space-y-2">
-              {failedDrafts.slice(0, 3).map((draft) => (
-                <Link
-                  key={`failed-${draft.id}`}
-                  href={`/drafts/${draft.id}`}
-                  className="flex items-center justify-between p-3 rounded-lg bg-[var(--bg-elevated)]/50 border border-[var(--border-subtle)] hover:bg-[var(--bg-hover)] transition-all"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-[var(--stat-red-bg)] border border-[var(--stat-red-border)] flex items-center justify-center text-sm flex-shrink-0">
-                      ❌
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-sm text-white truncate max-w-[180px]">{draft.title}</div>
-                      <div className="text-xs text-[var(--stat-red)] mt-0.5">需要处理</div>
-                    </div>
-                  </div>
-                  <span className="text-xs text-white/40 ml-2 flex-shrink-0">→</span>
-                </Link>
-              ))}
-            </div>
-            {failedDrafts.length > 3 && (
-              <Link href="/drafts?publish_status=failed" className="block text-center text-xs text-[var(--stat-red)] mt-3 py-1">
-                查看全部 {failedDrafts.length} 项 →
-              </Link>
-            )}
-          </div>
-        )}
+            <span
+              className={`text-[11px] px-2 py-1 rounded-md border ${
+                item.kind === "待确认"
+                  ? "text-amber-300 border-amber-300/35"
+                  : "text-rose-300 border-rose-300/35"
+              }`}
+            >
+              {item.kind}
+            </span>
+          </Link>
+        ))}
       </div>
-    </div>
+    </section>
   );
 }
 
-// =============================================================================
-// 内容流转看板 (V5)
-// =============================================================================
-
-function ContentFlow() {
+function FlowBoard() {
   const { drafts } = useShellContext();
+  const counts = {
+    generating: drafts.filter((d) => d.draft_status === "draft").length,
+    pending: drafts.filter((d) => d.draft_status === "pending_review").length,
+    published: drafts.filter((d) => d.publish_status === "published").length,
+    failed: drafts.filter((d) => d.publish_status === "failed").length,
+  };
 
-  const columns = [
-    { key: "draft", label: "生成中", icon: "⚙️", color: "cyan" as const },
-    { key: "pending_review", label: "待确认", icon: "⏳", color: "yellow" as const },
-    { key: "approved", label: "已批准", icon: "✅", color: "blue" as const },
-    { key: "published", label: "已发布", icon: "🚀", color: "green" as const },
+  const cards = [
+    { label: "生成中", value: counts.generating, tone: "text-cyan-300" },
+    { label: "待确认", value: counts.pending, tone: "text-amber-300" },
+    { label: "已发布", value: counts.published, tone: "text-emerald-300" },
+    { label: "失败", value: counts.failed, tone: "text-rose-300" },
   ];
 
-  const getCount = (key: string) => {
-    if (key === "published") return drafts.filter((d) => d.publish_status === "published").length;
-    return drafts.filter((d) => d.draft_status === key).length;
-  };
-
-  const colorMap = {
-    cyan: { bg: "bg-[var(--stat-cyan-bg)]", border: "border-[var(--stat-cyan-border)]", text: "text-[var(--stat-cyan)]" },
-    yellow: { bg: "bg-[var(--stat-yellow-bg)]", border: "border-[var(--stat-yellow-border)]", text: "text-[var(--stat-yellow)]" },
-    blue: { bg: "bg-blue-900/20", border: "border-blue-700/30", text: "text-blue-400" },
-    green: { bg: "bg-[var(--stat-green-bg)]", border: "border-[var(--stat-green-border)]", text: "text-[var(--stat-green)]" },
-  };
-
   return (
-    <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-default)] shadow-[var(--shadow-card)] overflow-hidden">
-      {/* 标题栏 */}
-      <div className="px-5 py-4 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] flex items-center gap-3">
-        <div className="w-9 h-9 rounded-lg bg-[var(--accent-bg)] border border-[var(--border-accent)] flex items-center justify-center text-base">
-          📊
-        </div>
-        <h3 className="text-lg font-semibold text-white">内容流转看板</h3>
+    <section className={`${PANEL} p-5`}>
+      <div className="text-sm text-white/85 font-medium mb-4">内容流转看板</div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {cards.map((c) => (
+          <div key={c.label} className="rounded-lg bg-[#0F172A] border border-white/10 px-4 py-3">
+            <div className="text-xs text-white/50">{c.label}</div>
+            <div className={`text-2xl font-semibold mt-1 ${c.tone}`}>{c.value}</div>
+          </div>
+        ))}
       </div>
-
-      {/* 数字看板 */}
-      <div className="grid grid-cols-4 divide-x divide-[var(--border-subtle)]">
-        {columns.map((col) => {
-          const c = colorMap[col.color];
-          return (
-            <div key={col.key} className="p-5 text-center">
-              <div className={`w-10 h-10 rounded-lg ${c.bg} border ${c.border} flex items-center justify-center text-xl mx-auto mb-3`}>
-                {col.icon}
-              </div>
-              <div className={`text-3xl font-bold leading-none ${c.text} mb-1`}>
-                {getCount(col.key)}
-              </div>
-              <div className="text-sm text-white/60">{col.label}</div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+    </section>
   );
 }
 
-// =============================================================================
-// 快速开始区 (V5)
-// =============================================================================
+function RecentAccountsPanel() {
+  const { accounts } = useShellContext();
 
-function QuickStart() {
+  const top = accounts.slice(0, 6);
+
   return (
-    <div className="rounded-xl bg-[var(--bg-card)] border border-[var(--border-default)] shadow-[var(--shadow-card)] p-5 relative overflow-hidden">
-      {/* 装饰 */}
-      <div className="absolute top-0 right-0 w-32 h-32 bg-[var(--accent)]/5 rounded-full blur-2xl -translate-y-1/2 translate-x-1/2" />
-
-      <div className="relative flex items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-[var(--accent-bg)] border border-[var(--border-accent)] flex items-center justify-center text-2xl">
-            🚀
-          </div>
-          <div>
-            <h3 className="text-lg font-semibold text-white mb-1">快速开始创作</h3>
-            <p className="text-sm text-white/60 leading-6">输入公众号定位，AI智能体协作完成内容创作</p>
-          </div>
-        </div>
-        <Link
-          href="/workspace"
-          className="px-5 py-2.5 rounded-lg bg-[var(--accent)] text-[var(--bg-void)] font-medium text-sm hover:bg-[var(--accent-hover)] transition-colors whitespace-nowrap"
-        >
-          开始创作 →
-        </Link>
+    <section className={`${PANEL} overflow-hidden`}>
+      <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+        <div className="text-sm text-white/85 font-medium">最近账号运行</div>
+        <Link href="/accounts" className="text-xs text-cyan-300 hover:text-cyan-200">管理账号 →</Link>
       </div>
-    </div>
+      {top.length === 0 ? (
+        <div className="px-5 py-8 text-sm text-white/45">暂无账号，先创建一个账号开始运行。</div>
+      ) : (
+        <div className="divide-y divide-white/10">
+          {top.map((account) => {
+            const runStatus = account.last_run_status === "success"
+              ? "success"
+              : account.last_run_status === "failed"
+              ? "failed"
+              : account.last_run_status === "running"
+              ? "pending"
+              : "idle";
+
+            return (
+              <Link
+                key={account.account_id}
+                href={`/accounts/${account.account_id}`}
+                className="px-5 py-3 flex items-center justify-between hover:bg-white/[0.03] transition-colors"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm text-white truncate">{account.name}</div>
+                  <div className="mt-1 text-xs text-white/45">
+                    上次运行：{account.last_run_at ? new Date(account.last_run_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-white/70">
+                  <StatusDot status={runStatus} />
+                  <span>
+                    {runStatus === "success" ? "正常运行" : runStatus === "failed" ? "运行失败" : runStatus === "pending" ? "执行中" : "未运行"}
+                  </span>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
-
-// =============================================================================
-// 主组件 (V5)
-// =============================================================================
 
 export default function DashboardView() {
   const { stats } = useShellContext();
 
   return (
-    <div className="py-6">
-      {/* 居中容器 */}
-      <div className={CONTENT_CONTAINER_CLASS}>
-        {/* 页面标题 */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-semibold tracking-tight text-white mb-2">
-            运营总览
-          </h1>
-          <p className="text-sm text-white/60 leading-6">
-            <span className="text-[var(--stat-cyan)] font-medium">{stats.todayTasks}</span> 个任务 ·
-            <span className="text-[var(--stat-yellow)] font-medium ml-2">{stats.pendingDrafts}</span> 个待确认 ·
-            <span className="text-[var(--stat-green)] font-medium ml-2">{stats.publishedToday}</span> 个已发布
-          </p>
-        </div>
+    <div className={PAGE_CONTAINER}>
+      <section className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight text-white">运营总览</h1>
+        <p className="text-sm text-white/55">
+          {stats.todayTasks} 个任务 · {stats.pendingDrafts} 待确认 · {stats.publishedToday} 已发布
+        </p>
+      </section>
 
-        {/* 统计卡片 */}
-        <section className="mb-5">
-          <OverviewCards />
-        </section>
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <MetricCard label="今日任务" value={stats.todayTasks} icon="📘" tone="cyan" href="/history" />
+        <MetricCard label="待确认草稿" value={stats.pendingDrafts} icon="📒" tone="yellow" href="/drafts?draft_status=pending_review" />
+        <MetricCard label="今日发布" value={stats.publishedToday} icon="✅" tone="green" href="/drafts?publish_status=published" />
+        <MetricCard label="发布失败" value={stats.publishFailed} icon="❌" tone="red" href="/drafts?publish_status=failed" />
+      </section>
 
-        {/* 快速开始 */}
-        <section className="mb-5">
-          <QuickStart />
-        </section>
+      <section className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-4">
+        <PendingCenter />
+        <FlowBoard />
+      </section>
 
-        {/* 双栏布局 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <section>
-            <PendingCenter />
-          </section>
-          <section>
-            <ContentFlow />
-          </section>
-        </div>
-      </div>
+      <RecentAccountsPanel />
     </div>
   );
 }

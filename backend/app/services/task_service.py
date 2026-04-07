@@ -231,6 +231,31 @@ class TaskService:
                 draft_id=draft.id,
                 draft_status=draft.draft_status
             )
+
+            # full_auto: 尝试自动发布到微信（不影响任务主流程）
+            if task.account_id and operation_mode == "full_auto":
+                try:
+                    published_draft, _ = await draft_service.publish_to_wechat(
+                        draft_id=draft.id,
+                        db=db,
+                        confirmed_by="system",
+                        source_mode="full_auto",
+                        trigger_type="full_auto",
+                    )
+                    logger.info(
+                        "full_auto_publish_completed",
+                        task_id=task.id,
+                        draft_id=published_draft.id,
+                        publish_status=published_draft.publish_status,
+                    )
+                except Exception as e:
+                    # 自动发布失败不应影响任务已完成状态，保留草稿供后续人工处理
+                    logger.error(
+                        "full_auto_publish_failed",
+                        task_id=task.id,
+                        draft_id=draft.id,
+                        error=str(e),
+                    )
         except Exception as e:
             # Draft creation failure should not fail the task
             logger.error("draft_creation_failed", task_id=task.id, error=str(e))

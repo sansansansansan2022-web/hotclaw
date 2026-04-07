@@ -2,14 +2,12 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { getWeChatConfig, createWeChatConfig, updateWeChatConfig, testWeChatConnection } from "@/lib/api";
 
-interface Props {
-  params: Promise<{ id: string }>;
-}
-
-export default function WeChatSettingsPage({ params }: Props) {
-  const [accountId, setAccountId] = useState<string>("");
+export default function WeChatSettingsPage() {
+  const params = useParams<{ id: string }>();
+  const accountId = params?.id ?? "";
   const [config, setConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -26,11 +24,9 @@ export default function WeChatSettingsPage({ params }: Props) {
   const [onlyFansCanComment, setOnlyFansCanComment] = useState(false);
 
   useEffect(() => {
-    params.then(p => {
-      setAccountId(p.id);
-      loadConfig(p.id);
-    });
-  }, []);
+    if (!accountId) return;
+    loadConfig(accountId);
+  }, [accountId]);
 
   async function loadConfig(id: string) {
     try {
