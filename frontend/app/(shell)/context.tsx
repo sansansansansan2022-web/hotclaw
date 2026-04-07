@@ -24,7 +24,6 @@ export interface RecentEvent {
   title: string;
   accountName?: string;
   time: string;
-  timestamp: number;
   status: "success" | "failed" | "pending" | "info";
 }
 

@@ -1,11 +1,13 @@
 /** Shared type definitions for HotClaw frontend. */
 
-// --- Agent / Task status ---
-
 export type TaskStatus = "pending" | "running" | "completed" | "failed";
 export type NodeStatus = "pending" | "running" | "completed" | "failed" | "skipped";
-
-// --- API response ---
+export type OperationMode = "manual" | "semi_auto" | "full_auto";
+export type PostingFrequency = "daily" | "weekly" | "biweekly" | "monthly";
+export type DraftStatus = "draft" | "pending_review" | "approved" | "rejected" | "discarded" | "published";
+export type PublishStatus = "not_published" | "pending" | "publishing" | "published" | "failed" | "skipped" | "unknown";
+export type SourceType = "manual_task" | "semi_auto_task";
+export type ToastTone = "brand" | "success" | "warning" | "danger" | "info";
 
 export interface ApiResponse<T = unknown> {
   code: number;
@@ -14,7 +16,12 @@ export interface ApiResponse<T = unknown> {
   details?: Record<string, unknown> | null;
 }
 
-// --- Task ---
+export interface PaginationMeta {
+  page: number;
+  page_size: number;
+  total: number;
+  total_pages?: number;
+}
 
 export interface TaskCreateRequest {
   positioning: string;
@@ -31,10 +38,10 @@ export interface TaskCreateData {
 export interface TaskDetail {
   task_id: string;
   status: TaskStatus;
-  input_data: { positioning: string } | null;
+  input_data: { positioning?: string; [key: string]: unknown } | null;
   workflow_id: string;
   result_data: TaskResultData | null;
-  error_message: string | null;
+  error_message?: string | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
@@ -42,7 +49,20 @@ export interface TaskDetail {
   total_tokens: number | null;
 }
 
-// --- Task Result Data (from result_data snapshot) ---
+export interface TaskProgressData {
+  total_nodes: number;
+  completed_nodes: number;
+  current_node_index: number;
+}
+
+export interface TaskStatusResponse {
+  task_id: string;
+  status: TaskStatus;
+  current_node?: string | null;
+  progress?: TaskProgressData | null;
+  started_at?: string | null;
+  elapsed_seconds?: number | null;
+}
 
 export interface TaskResultData {
   input?: { positioning: string };
@@ -56,61 +76,65 @@ export interface TaskResultData {
 }
 
 export interface AccountProfile {
-  domain: string;
-  subdomain: string;
-  target_audience: {
-    age_range: string;
-    occupation: string;
-    interests: string[];
+  domain?: string;
+  subdomain?: string;
+  target_audience?: {
+    age_range?: string;
+    occupation?: string;
+    interests?: string[];
   };
-  tone: string;
-  content_style: string;
-  keywords: string[];
-  positioning_raw: string;
+  tone?: string;
+  content_style?: string;
+  keywords?: string[];
+  positioning_raw?: string;
 }
 
 export interface HotTopic {
   title: string;
-  source: string;
-  heat_score: number;
-  summary: string;
-  relevance_score: number;
+  source?: string;
+  heat_score?: number;
+  summary?: string;
+  relevance_score?: number;
 }
 
 export interface TopicCandidate {
   title: string;
-  angle: string;
-  hook: string;
-  target_emotion: string;
-  estimated_appeal: number;
-  reasoning: string;
+  angle?: string;
+  hook?: string;
+  target_emotion?: string;
+  estimated_appeal?: number;
+  reasoning?: string;
 }
 
 export interface TitleCandidate {
   text: string;
-  style: string;
-  score: number;
-  reasoning: string;
+  style?: string;
+  score?: number;
+  reasoning?: string;
 }
 
 export interface ArticleContent {
   content_markdown: string;
-  word_count: number;
-  structure: {
-    sections: { heading: string; summary: string }[];
+  word_count?: number;
+  structure?: {
+    sections?: { heading: string; summary: string }[];
   };
-  tags: string[];
+  tags?: string[];
 }
 
 export interface NodeRun {
   node_id: string;
   agent_id: string;
+  name?: string;
   status: NodeStatus;
   input_data: Record<string, unknown> | null;
   output_data: Record<string, unknown> | null;
   started_at: string | null;
   completed_at: string | null;
   elapsed_seconds: number | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  model_used?: string | null;
   degraded: boolean;
   error_message: string | null;
 }
@@ -125,9 +149,18 @@ export interface TaskSummary {
   audit_result: AuditResult | null;
 }
 
+export interface TaskListResponse {
+  tasks: TaskSummary[];
+  pagination: PaginationMeta;
+}
+
+export interface TaskNodeListResponse {
+  nodes: NodeRun[];
+}
+
 export interface AuditResult {
   passed: boolean;
-  risk_level: "low" | "medium" | "high" | "unknown";
+  risk_level: "low" | "medium" | "high" | "unknown" | string;
   issues: AuditIssue[];
   overall_comment: string;
 }
@@ -135,11 +168,9 @@ export interface AuditResult {
 export interface AuditIssue {
   type: string;
   description: string;
-  severity: "low" | "medium" | "high";
+  severity: "low" | "medium" | "high" | string;
   location?: string;
 }
-
-// --- SSE events ---
 
 export interface SSENodeStart {
   node_id: string;
@@ -169,20 +200,16 @@ export interface SSETaskComplete {
   elapsed_seconds: number;
 }
 
-// --- Agent characters ---
-
 export interface AgentCharacter {
   agent_id: string;
   name: string;
   role: string;
-  color: string;       // Primary pixel color
-  accent: string;      // Secondary pixel color
-  deskX: number;       // Position in office grid
+  color: string;
+  accent: string;
+  deskX: number;
   deskY: number;
   idleFrames: number;
 }
-
-// --- Dashboard ---
 
 export interface DashboardStats {
   account_name: string;
@@ -192,11 +219,6 @@ export interface DashboardStats {
   articles_count: number;
   weekly_growth: number;
 }
-
-// --- Account ---
-
-export type OperationMode = "manual" | "semi_auto" | "full_auto";
-export type PostingFrequency = "daily" | "weekly" | "biweekly" | "monthly";
 
 export interface AccountCreateRequest {
   name: string;
@@ -213,28 +235,11 @@ export interface AccountCreateRequest {
   auto_publish_enabled?: boolean;
   is_active?: boolean;
   publish_paused?: boolean;
-  max_posts_per_day?: number;
-  min_interval_minutes?: number;
+  max_posts_per_day?: number | null;
+  min_interval_minutes?: number | null;
 }
 
-export interface AccountUpdateRequest {
-  name?: string;
-  category?: string;
-  positioning?: string;
-  audience?: string;
-  tone_style?: string;
-  posting_frequency?: PostingFrequency;
-  posting_time?: string;
-  content_strategy?: string;
-  reference_accounts?: string;
-  operation_mode?: OperationMode;
-  auto_run_enabled?: boolean;
-  auto_publish_enabled?: boolean;
-  is_active?: boolean;
-  publish_paused?: boolean;
-  max_posts_per_day?: number;
-  min_interval_minutes?: number;
-}
+export interface AccountUpdateRequest extends Partial<AccountCreateRequest> {}
 
 export interface AccountSummary {
   account_id: string;
@@ -249,10 +254,9 @@ export interface AccountSummary {
   next_run_at: string | null;
   last_run_status: string | null;
   last_error_message: string | null;
-  // Publish tracking fields
-  last_publish_status: string | null;
-  last_publish_error_message: string | null;
-  last_published_at: string | null;
+  last_publish_status?: string | null;
+  last_publish_error_message?: string | null;
+  last_published_at?: string | null;
   created_at: string;
 }
 
@@ -296,18 +300,8 @@ export interface AccountRunData {
 
 export interface AccountListResponse {
   accounts: AccountSummary[];
-  pagination: {
-    page: number;
-    page_size: number;
-    total: number;
-    total_pages: number;
-  };
+  pagination: PaginationMeta;
 }
-
-// --- Draft ---
-
-export type DraftStatus = "draft" | "pending_review" | "approved" | "rejected" | "discarded";
-// --- Publish Decision ---
 
 export type PublishDecision = "ALLOW_PUBLISH" | "SAVE_AS_DRAFT" | "SKIP" | "BLOCK";
 
@@ -317,11 +311,6 @@ export interface PublishDecisionResult {
   reason_message: string;
   checks: Record<string, unknown>;
 }
-
-// --- Draft ---
-
-export type PublishStatus = "not_published" | "pending" | "publishing" | "published" | "failed" | "skipped" | "unknown";
-export type SourceType = "manual_task" | "semi_auto_task";
 
 export interface DraftSummary {
   id: number;
@@ -351,7 +340,7 @@ export interface DraftDetail {
   account_id: string | null;
   account_name: string | null;
   title: string;
-  title_candidates: unknown[] | null;
+  title_candidates: Array<string | Record<string, unknown>> | null;
   selected_topic: string | null;
   summary: string | null;
   content_markdown: string;
@@ -373,12 +362,7 @@ export interface DraftDetail {
 
 export interface DraftListResponse {
   drafts: DraftSummary[];
-  pagination: {
-    page: number;
-    page_size: number;
-    total: number;
-    total_pages: number;
-  };
+  pagination: PaginationMeta;
 }
 
 export interface DraftConfirmData {
@@ -405,19 +389,25 @@ export interface DraftRerunData {
   status: TaskStatus;
 }
 
-// --- WeChat Config ---
-
 export interface WeChatConfigSummary {
   account_id: string;
   app_id_masked: string;
   has_app_secret: boolean;
   default_author: string | null;
+  default_thumb_media_id?: string | null;
+  need_open_comment?: boolean;
+  only_fans_can_comment?: boolean;
   is_enabled: boolean;
   test_status: string | null;
   test_message: string | null;
   last_sync_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface WeChatConfigDetail extends WeChatConfigSummary {
+  need_open_comment: boolean;
+  only_fans_can_comment: boolean;
 }
 
 export interface WeChatConfigCreate {
@@ -451,8 +441,6 @@ export interface WeChatTestConnectionResponse {
   message: string;
 }
 
-// --- WeChat Publish ---
-
 export interface WeChatPublishStatus {
   has_record: boolean;
   record_id?: number;
@@ -485,9 +473,16 @@ export interface WeChatPublishResult {
   error?: string;
 }
 
-// Publish Record
 export interface PublishRecord {
   id: number;
+  draft_id?: number;
+  account_id?: string;
+  task_id?: string | null;
+  wechat_draft_id?: string | null;
+  media_id?: string | null;
+  publish_id?: string | null;
+  article_id?: string | null;
+  url?: string | null;
   publish_status: string;
   source_mode: string;
   trigger_type: string;
@@ -495,10 +490,10 @@ export interface PublishRecord {
   retry_count: number;
   error_code?: string;
   error_message?: string;
-  url?: string;
   started_at?: string;
   published_at?: string;
   finished_at?: string;
+  last_checked_at?: string;
   created_at: string;
 }
 
@@ -508,11 +503,62 @@ export interface PublishRecordListResponse {
   records: PublishRecord[];
 }
 
-// Refresh Status Response
 export interface RefreshStatusResponse {
   record_id: number;
   previous_status: string;
   new_status: string;
   synced_draft: boolean;
   message: string;
+}
+
+export interface AgentInfo {
+  agent_id: string;
+  name: string;
+  description: string;
+  version: string;
+  status: string;
+  model_config_data?: Record<string, unknown> | null;
+  prompt_template?: string | null;
+  prompt_source?: string | null;
+  default_system_prompt?: string | null;
+  has_custom_prompt?: boolean;
+  retry_config?: Record<string, unknown> | null;
+}
+
+export interface SkillInfo {
+  skill_id: string;
+  name: string;
+  description: string;
+  version: string;
+  config_data: Record<string, unknown> | null;
+  status: string;
+}
+
+export interface LLMProviderInfo {
+  provider_id: string;
+  name: string;
+  description: string | null;
+  api_key: string | null;
+  base_url: string | null;
+  default_model: string | null;
+  supported_models: string[] | null;
+  is_enabled: boolean;
+  is_default: boolean;
+  timeout: number;
+  extra_config: Record<string, unknown> | null;
+  status: string;
+  test_status: string | null;
+  test_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SystemConfigValue = string | number | boolean | Record<string, unknown> | Array<unknown> | null;
+export type SystemConfigMap = Record<string, SystemConfigValue>;
+export type AppLocale = "en" | "zh-CN";
+
+export interface AppSession {
+  email: string;
+  displayName: string;
+  provider: "local_adapter";
 }
