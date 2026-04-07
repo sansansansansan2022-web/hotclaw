@@ -7,7 +7,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next typegen"
+    "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.2.2",

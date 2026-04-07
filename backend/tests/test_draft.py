@@ -135,20 +135,20 @@ class TestDraftService:
             db=db_session
         )
         assert draft.draft_status == "approved"
-        assert draft.publish_status == "published"
+        assert draft.publish_status == "not_published"
         assert draft.confirmed_by == "system"
 
     @pytest.mark.asyncio
     async def test_confirm_publish_state_machine(self, db_session, pending_draft):
         result = await draft_service.confirm_publish(pending_draft.id, db_session)
         assert result.draft_status == "approved"
-        assert result.publish_status == "published"
+        assert result.publish_status == "not_published"
 
     @pytest.mark.asyncio
     async def test_cannot_confirm_twice(self, db_session, pending_draft):
         await draft_service.confirm_publish(pending_draft.id, db_session)
         await db_session.refresh(pending_draft)
-        with pytest.raises(DraftAlreadyPublishedError):
+        with pytest.raises(DraftInvalidStatusError):
             await draft_service.confirm_publish(pending_draft.id, db_session)
 
     @pytest.mark.asyncio
@@ -173,11 +173,12 @@ class TestDraftService:
             await draft_service.confirm_publish(pending_draft.id, db_session)
 
     @pytest.mark.asyncio
-    async def test_published_cannot_rerun(self, db_session, pending_draft):
+    async def test_approved_draft_can_rerun(self, db_session, pending_draft):
         await draft_service.confirm_publish(pending_draft.id, db_session)
         await db_session.refresh(pending_draft)
-        with pytest.raises(DraftAlreadyPublishedError):
-            await draft_service.rerun_from_draft(pending_draft.id, db_session)
+        original_draft, new_task = await draft_service.rerun_from_draft(pending_draft.id, db_session)
+        assert original_draft.id == pending_draft.id
+        assert new_task.account_id == pending_draft.account_id
 
     @pytest.mark.asyncio
     async def test_pending_count(self, db_session, pending_draft):

@@ -234,10 +234,20 @@ async def fake_publish_service():
     class FakePublishService:
         def success(self):
             """Mock successful publish."""
+            async def _side_effect(draft_id, db, **kwargs):
+                from app.services.draft_service import draft_service
+
+                draft = await draft_service.get_draft(draft_id, db)
+                draft.publish_status = "pending"
+                draft.confirmed_by = "system"
+                db.add(draft)
+                await db.flush()
+                return draft, {"media_id": "fake_media_id", "url": "https://fake.url", "publish_status": "pending"}
+
             return patch(
                 "app.services.draft_service.draft_service.publish_to_wechat",
                 new_callable=AsyncMock,
-                return_value=(None, {"media_id": "fake_media_id", "url": "https://fake.url"})
+                side_effect=_side_effect,
             )
 
         def failure(self, error_message="Fake publish failure"):
@@ -392,13 +402,12 @@ class TestFullAutoSchedulerTrigger:
         result = await db_session.execute(stmt)
         draft = result.scalar_one_or_none()
 
-        # Note: full_auto creates draft_status="approved" (not "published")
-        # The draft is auto-approved but actual publish to WeChat requires separate call
+        # full_auto creates an approved draft and then submits publish asynchronously.
         assert draft is not None, "Draft should be created"
         assert draft.draft_status == "approved", \
             f"Expected approved (auto-approved), got {draft.draft_status}"
-        assert draft.publish_status == "published", \
-            f"Expected published, got {draft.publish_status}"
+        assert draft.publish_status == "pending", \
+            f"Expected pending, got {draft.publish_status}"
         assert draft.confirmed_by == "system"
 
         # Verify account status

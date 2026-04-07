@@ -68,7 +68,7 @@ class TestDraftCreation:
 
     @pytest.mark.asyncio
     async def test_full_auto_creates_approved_draft(self, db_session):
-        """Test that full_auto mode creates approved draft (auto publish)."""
+        """Test that full_auto mode creates an approved draft before publish submission."""
         account = AccountModel(
             id="test-full-auto",
             name="Full-Auto Test",
@@ -106,9 +106,9 @@ class TestDraftCreation:
         await db_session.commit()
 
         assert draft.draft_status == "approved"
-        assert draft.publish_status == "published"
+        assert draft.publish_status == "not_published"
         assert draft.confirmed_by == "system"
-        assert draft.published_at is not None
+        assert draft.published_at is None
 
     @pytest.mark.asyncio
     async def test_manual_creates_draft_status(self, db_session):
@@ -155,7 +155,7 @@ class TestDraftConfirmation:
 
     @pytest.mark.asyncio
     async def test_confirm_publish_updates_status(self, db_session):
-        """Test that confirming publish updates draft status correctly."""
+        """Test that confirming publish only approves the draft."""
         account = AccountModel(
             id="test-confirm",
             name="Confirm Test",
@@ -182,7 +182,7 @@ class TestDraftConfirmation:
         result = await draft_service.confirm_publish(draft.id, db_session)
 
         assert result.draft_status == "approved"
-        assert result.publish_status == "published"
+        assert result.publish_status == "not_published"
         assert result.confirmed_at is not None
         assert result.confirmed_by == "user"
 
@@ -218,7 +218,7 @@ class TestDraftConfirmation:
         assert response.status_code == 200
         data = response.json()
         assert data["draft_status"] == "approved"
-        assert data["publish_status"] == "published"
+        assert data["publish_status"] == "not_published"
 
 
 class TestTerminalStateProtection:

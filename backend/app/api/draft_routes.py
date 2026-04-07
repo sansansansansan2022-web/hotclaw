@@ -1,6 +1,6 @@
 """Draft API endpoints."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -22,6 +22,7 @@ from app.schemas.draft import (
     DraftRerunData,
     AuditResultInfo,
 )
+from app.schemas.wechat import PublishToWeChatRequest
 from app.services.draft_service import draft_service
 from app.services.publish_record_service import publish_record_service, PublishRecordError
 
@@ -107,7 +108,7 @@ async def confirm_publish_draft(
     """
     Confirm draft publish.
 
-    State transition: pending_review -> approved -> published
+    State transition: pending_review/draft -> approved
     """
     try:
         draft = await draft_service.confirm_publish(draft_id, db)
@@ -239,6 +240,7 @@ async def get_pending_review_count(
 @router.post("/{draft_id}/publish-to-wechat")
 async def publish_draft_to_wechat(
     draft_id: int,
+    payload: PublishToWeChatRequest | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -253,12 +255,19 @@ async def publish_draft_to_wechat(
     If publish fails, draft status is updated with error message.
     """
     try:
-        draft, result = await draft_service.publish_to_wechat(draft_id, db)
+        request = payload or PublishToWeChatRequest()
+        draft, result = await draft_service.publish_to_wechat(
+            draft_id,
+            db,
+            confirmed_by=request.operator,
+            source_mode="manual",
+            trigger_type=request.trigger_type or "manual_confirm",
+        )
         await db.commit()
 
         return {
             "code": 0,
-            "message": "Published to WeChat successfully",
+            "message": "WeChat publish submitted",
             "data": {
                 "draft_id": draft.id,
                 "draft_status": draft.draft_status,
@@ -266,6 +275,8 @@ async def publish_draft_to_wechat(
                 "published_at": draft.published_at.isoformat() if draft.published_at else None,
                 "wechat_media_id": result.get("media_id"),
                 "wechat_publish_id": result.get("publish_id"),
+                "publish_record_id": result.get("publish_record_id"),
+                "decision": result.get("decision"),
             }
         }
     except DraftPublishError as e:

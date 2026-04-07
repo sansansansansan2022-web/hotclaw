@@ -116,11 +116,11 @@ export default function MissionStatusBar({
             fontFamily: "var(--cc-font-mono)"
           }}>
             {isConnected
-              ? "执行中"       // SSE已连接，数据流动中
+              ? "链路传输中"   // SSE已连接，数据流动中
               : taskDone
-                ? "已完成"     // 任务执行完毕
+                ? "任务完成"   // 任务执行完毕
                 : taskError
-                  ? "异常"      // 执行出错
+                  ? "执行异常"  // 执行出错
                   : "待命"     // 空闲等待
             }
           </span>
