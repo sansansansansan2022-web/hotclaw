@@ -84,45 +84,85 @@ export default function ShellLayout({ children }: { children: React.ReactNode })
   const [events, setEvents] = useState<RecentEvent[]>([]);
 
   const loadData = useCallback(async () => {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    try {
+      const [accountsRes, draftsRes, tasksRes] = await Promise.all([
+        listAccounts(1, 50),
+        listDrafts(1, 100),
+        listTasks(1, 50),
+      ]);
 
-    const [accountsRes, draftsRes, tasksRes] = await Promise.all([listAccounts(1, 50), listDrafts(1, 100), listTasks(1, 50)]);
-    setAccounts(accountsRes.accounts);
-    setDrafts(draftsRes.drafts);
-    setTasks(tasksRes.tasks);
+      setAccounts(accountsRes.accounts);
+      setDrafts(draftsRes.drafts);
+      setTasks(tasksRes.tasks);
 
-    setStats({
-      todayTasks: tasksRes.tasks.filter((t) => new Date(t.created_at) >= todayStart).length,
-      pendingDrafts: draftsRes.drafts.filter((d) => d.draft_status === "pending_review").length,
-      publishedToday: draftsRes.drafts.filter((d) => d.publish_status === "published" && new Date(d.updated_at) >= todayStart).length,
-      publishFailed: draftsRes.drafts.filter((d) => d.publish_status === "failed").length,
-    });
+      // 统计
+      const todayTasks = tasksRes.tasks.filter(
+        (t) => new Date(t.created_at) >= todayStart
+      ).length;
 
-    const taskEvents: RecentEvent[] = tasksRes.tasks.slice(0, 10).map((task) => {
-      const status = task.status === "completed" ? "success" : task.status === "failed" ? "failed" : "pending";
-      return {
-        id: `task-${task.task_id}`,
-        type: "task",
-        action: task.status === "completed" ? "任务完成" : task.status === "failed" ? "任务失败" : "任务进行中",
-        title: task.positioning_summary,
-        time: formatDateTime(task.created_at),
-        timestamp: new Date(task.created_at).getTime(),
-        status,
-      };
-    });
+      const pendingDrafts = draftsRes.drafts.filter(
+        (d) => d.draft_status === "pending_review"
+      ).length;
 
-    const draftEvents: RecentEvent[] = draftsRes.drafts.slice(0, 10).map((draft) => ({
-      id: `draft-${draft.id}`,
-      type: "draft",
-      action: draft.publish_status === "failed" ? "发布失败" : draft.draft_status === "pending_review" ? "草稿待确认" : "草稿更新",
-      title: draft.title,
-      time: formatDateTime(draft.updated_at),
-      timestamp: new Date(draft.updated_at).getTime(),
-      status: draft.publish_status === "failed" ? "failed" : draft.draft_status === "pending_review" ? "pending" : "info",
-    }));
+      const publishedToday = draftsRes.drafts.filter(
+        (d) =>
+          d.publish_status === "published" &&
+          new Date(d.updated_at) >= todayStart
+      ).length;
 
-    setEvents([...taskEvents, ...draftEvents].sort((a, b) => b.timestamp - a.timestamp));
+      const publishFailed = draftsRes.drafts.filter(
+        (d) => d.publish_status === "failed"
+      ).length;
+
+      setStats({ todayTasks, pendingDrafts, publishedToday, publishFailed });
+
+      // 生成事件列表
+      const recentEvents: RecentEvent[] = [];
+
+      tasksRes.tasks.slice(0, 10).forEach((task) => {
+        const createdAt = new Date(task.created_at);
+        recentEvents.push({
+          id: `task-${task.task_id}`,
+          type: "task",
+          action: task.status === "completed" ? "任务完成" : task.status === "failed" ? "任务失败" : "任务进行中",
+          title: task.positioning_summary || "内容创作任务",
+          time: createdAt.toLocaleString("zh-CN", {
+            month: "numeric",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          timestamp: createdAt.getTime(),
+          status: task.status === "completed" ? "success" : task.status === "failed" ? "failed" : "pending",
+        });
+      });
+
+      draftsRes.drafts.slice(0, 10).forEach((draft) => {
+        const createdAt = new Date(draft.created_at);
+        recentEvents.push({
+          id: `draft-${draft.id}`,
+          type: "draft",
+          action: draft.draft_status === "pending_review" ? "新草稿待确认" : "草稿已更新",
+          title: draft.title,
+          time: createdAt.toLocaleString("zh-CN", {
+            month: "numeric",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          timestamp: createdAt.getTime(),
+          status: draft.draft_status === "pending_review" ? "pending" : "info",
+        });
+      });
+
+      recentEvents.sort((a, b) => b.timestamp - a.timestamp);
+
+      setEvents(recentEvents.slice(0, 15));
+    } catch (e) {
+      console.error("Failed to load shell data:", e);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {

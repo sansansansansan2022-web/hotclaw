@@ -9,9 +9,17 @@ import { AccountForm } from "@/components/console-ui/AccountForm";
 import { PageHeader } from "@/components/console-ui";
 
 export default function EditAccountPage() {
-  const router = useRouter();
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const accountId = params?.id;
+
+  // 状态管理
+  // account: 原始账号数据（用于显示）
+  // loading: 加载状态
+  // submitting: 提交中状态
+  // error: 错误信息
+  // form: 表单数据
+  const [account, setAccount] = useState<AccountDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,32 +27,47 @@ export default function EditAccountPage() {
 
   useEffect(() => {
     if (!accountId) return;
-    getAccount(accountId)
-      .then((a) =>
-        setForm({
-          name: a.name,
-          category: a.category ?? undefined,
-          positioning: a.positioning,
-          audience: a.audience ?? undefined,
-          tone_style: a.tone_style ?? undefined,
-          posting_frequency: a.posting_frequency ?? undefined,
-          posting_time: a.posting_time ?? undefined,
-          content_strategy: a.content_strategy ?? undefined,
-          reference_accounts: a.reference_accounts ?? undefined,
-          operation_mode: a.operation_mode,
-          auto_run_enabled: a.auto_run_enabled,
-          auto_publish_enabled: a.auto_publish_enabled,
-          is_active: a.is_active,
-          publish_paused: a.publish_paused,
-          max_posts_per_day: a.max_posts_per_day ?? undefined,
-          min_interval_minutes: a.min_interval_minutes ?? undefined,
-        })
-      )
-      .catch((e) => setError(e instanceof Error ? e.message : "加载失败"))
-      .finally(() => setLoading(false));
+    loadAccount();
   }, [accountId]);
 
-  function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) {
+  /**
+   * loadAccount - 加载账号详情并填充表单
+   *
+   * 调用 API: getAccount(accountId)
+   * 更新状态: account, form
+   */
+  async function loadAccount() {
+    setLoading(true);
+    try {
+      if (!accountId) return;
+      const data = await getAccount(accountId);
+      setAccount(data);
+      // 填充表单数据（将 null 转为 undefined）
+      setForm({
+        name: data.name,
+        category: data.category ?? undefined,
+        positioning: data.positioning,
+        audience: data.audience ?? undefined,
+        tone_style: data.tone_style ?? undefined,
+        posting_frequency: data.posting_frequency ?? undefined,
+        posting_time: data.posting_time ?? undefined,
+        content_strategy: data.content_strategy ?? undefined,
+        reference_accounts: data.reference_accounts ?? undefined,
+        operation_mode: data.operation_mode,
+        auto_run_enabled: data.auto_run_enabled,
+        auto_publish_enabled: data.auto_publish_enabled,
+        is_active: data.is_active,
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleChange(
+    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
+  ) {
     const { name, value, type } = e.target;
     setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? (e.target as HTMLInputElement).checked : value || undefined }));
   }
@@ -55,10 +78,11 @@ export default function EditAccountPage() {
     setSubmitting(true);
     setError(null);
     try {
+      if (!accountId) return;
       await updateAccount(accountId, form);
-      router.push(`/accounts/${accountId}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "保存失败");
+      router.push(`/accounts/${params.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "更新失败");
       setSubmitting(false);
     }
   }

@@ -3,14 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { createWeChatConfig, getWeChatConfig, testWeChatConnection, updateWeChatConfig } from "@/lib/api";
-import { PageHeader, SectionCard, StatusBadge } from "@/components/console-ui";
-import type { WeChatConfigSummary } from "@/types";
+import { getWeChatConfig, createWeChatConfig, updateWeChatConfig, testWeChatConnection } from "@/lib/api";
 
 export default function WeChatSettingsPage() {
   const params = useParams<{ id: string }>();
   const accountId = params?.id ?? "";
-  const [config, setConfig] = useState<WeChatConfigSummary | null>(null);
+  const [config, setConfig] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -22,17 +20,27 @@ export default function WeChatSettingsPage() {
 
   useEffect(() => {
     if (!accountId) return;
-    getWeChatConfig(accountId)
-      .then((data) => {
-        setConfig(data);
-        setDefaultAuthor(data.default_author ?? "");
-        setIsEnabled(data.is_enabled);
-      })
-      .catch(() => setConfig(null))
-      .finally(() => setLoading(false));
+    loadConfig(accountId);
   }, [accountId]);
 
-  async function save() {
+  async function loadConfig(id: string) {
+    try {
+      const data = await getWeChatConfig(id);
+      setConfig(data as any);
+      if (data) {
+        setDefaultAuthor((data as any).default_author || "");
+        setIsEnabled((data as any).is_enabled ?? true);
+      }
+    } catch (e) {
+      // No config exists yet
+      setConfig(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true);
     setError(null);
     setMessage(null);
     try {

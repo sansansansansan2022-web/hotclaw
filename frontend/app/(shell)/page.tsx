@@ -4,102 +4,224 @@ import Link from "next/link";
 import { EmptyState, PageHeader, SectionCard, StatCard, StatusBadge, formatDateTime } from "@/components/console-ui";
 import { useShellContext } from "./context";
 
-export default function DashboardPage() {
-  const { stats, accounts, drafts } = useShellContext();
+const PAGE_CONTAINER = "max-w-[1320px] mx-auto px-6 lg:px-8 py-6 space-y-5";
+const PANEL = "rounded-xl bg-[#111827] border border-white/10";
 
-  const mainAccount = accounts[0];
-  const pendingDrafts = drafts.filter((d) => d.draft_status === "pending_review").slice(0, 5);
-  const failedDrafts = drafts.filter((d) => d.publish_status === "failed").slice(0, 5);
-
-  const flow = {
-    idea: drafts.filter((d) => d.draft_status === "draft").length,
-    review: drafts.filter((d) => d.draft_status === "pending_review").length,
-    approved: drafts.filter((d) => d.draft_status === "approved").length,
-    published: drafts.filter((d) => d.publish_status === "published").length,
-    blocked: drafts.filter((d) => ["failed", "rejected", "discarded"].includes(d.publish_status) || ["rejected", "discarded"].includes(d.draft_status)).length,
+function MetricCard({
+  label,
+  value,
+  icon,
+  tone,
+  href,
+}: {
+  label: string;
+  value: number;
+  icon: string;
+  tone: "cyan" | "yellow" | "green" | "red";
+  href: string;
+}) {
+  const toneMap = {
+    cyan: "text-cyan-400",
+    yellow: "text-amber-400",
+    green: "text-emerald-400",
+    red: "text-rose-400",
   };
 
   return (
-    <div className="space-y-5">
-      <PageHeader title="运营总览" subtitle={`${stats.todayTasks} 个任务 · ${stats.pendingDrafts} 待确认 · ${stats.publishedToday} 已发布`} />
-
-      <section className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
-        <SectionCard title="默认账号摘要" extra={<Link href="/accounts" className="text-xs text-emerald-600">切换账号</Link>}>
-          {mainAccount ? (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-lg font-semibold text-slate-800">{mainAccount.name}</p>
-                  <p className="text-sm text-slate-500">{mainAccount.positioning}</p>
-                </div>
-                <div className="flex gap-2">
-                  <StatusBadge status={mainAccount.is_active ? "success" : "discarded"} />
-                  <StatusBadge status={mainAccount.operation_mode} />
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link href={`/accounts/${mainAccount.account_id}`} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600">查看详情</Link>
-                <Link href={`/accounts/${mainAccount.account_id}/edit`} className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600">编辑账号</Link>
-                <Link href={`/settings/wechat/${mainAccount.account_id}`} className="rounded-lg bg-emerald-500 px-3 py-1.5 text-sm text-white">连接公众号</Link>
-              </div>
-            </div>
-          ) : (
-            <EmptyState title="尚未创建账号" description="先创建运营账号，再开始任务调度与发布。" action={<Link className="rounded-lg bg-emerald-500 px-3 py-2 text-sm text-white" href="/accounts/new">新建账号</Link>} />
-          )}
-        </SectionCard>
-
-        <SectionCard title="快捷创作">
-          <p className="text-sm text-slate-500">当前工作台支持输入定位并创建任务，适合运营快速发起创作。</p>
-          <div className="mt-3 flex gap-2">
-            <Link href="/workspace" className="rounded-lg bg-emerald-500 px-3 py-2 text-sm text-white">进入工作台</Link>
-            <Link href="/history" className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600">查看任务历史</Link>
+    <Link
+      href={href}
+      className={`${PANEL} p-4 hover:border-cyan-400/35 transition-colors`}
+    >
+      <div className="flex items-start justify-between">
+        <div>
+          <div className="text-[12px] text-white/55">{label}</div>
+          <div className={`text-[30px] font-semibold leading-none mt-2 ${toneMap[tone]}`}>
+            {value}
           </div>
-        </SectionCard>
-      </section>
+        </div>
+        <span className="text-lg opacity-80">{icon}</span>
+      </div>
+    </Link>
+  );
+}
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatCard label="今日任务" value={stats.todayTasks} href="/history" />
-        <StatCard label="待确认草稿" value={stats.pendingDrafts} tone="warning" href="/drafts?draft_status=pending_review" />
-        <StatCard label="已发布" value={stats.publishedToday} tone="success" href="/drafts?publish_status=published" />
-        <StatCard label="发布失败" value={stats.publishFailed} tone="danger" href="/drafts?publish_status=failed" />
-      </section>
+function StatusDot({ status }: { status: "success" | "pending" | "failed" | "idle" }) {
+  const cls = {
+    success: "bg-emerald-400",
+    pending: "bg-amber-400",
+    failed: "bg-rose-400",
+    idle: "bg-white/30",
+  };
+  return <span className={`inline-block w-2 h-2 rounded-full ${cls[status]}`} />;
+}
 
-      <section className="grid gap-4 xl:grid-cols-2">
-        <SectionCard title="待处理中心">
-          {[...pendingDrafts, ...failedDrafts].length === 0 ? (
-            <EmptyState title="暂无待处理事项" description="当前审核与发布队列为空。" action={<Link href="/workspace" className="rounded-lg bg-emerald-500 px-3 py-2 text-sm text-white">创建任务</Link>} />
-          ) : (
-            <div className="space-y-2">
-              {[...pendingDrafts, ...failedDrafts].slice(0, 6).map((d) => (
-                <Link key={d.id} href={`/drafts/${d.id}`} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2 hover:bg-slate-50">
-                  <div>
-                    <p className="text-sm font-medium text-slate-700">{d.title}</p>
-                    <p className="text-xs text-slate-500">更新时间：{formatDateTime(d.updated_at)}</p>
+function PendingCenter() {
+  const { drafts } = useShellContext();
+
+  const pending = drafts.filter((d) => d.draft_status === "pending_review");
+  const failed = drafts.filter((d) => d.publish_status === "failed");
+  const items = [
+    ...pending.map((d) => ({ id: d.id, title: d.title, kind: "待确认" as const, href: `/drafts/${d.id}` })),
+    ...failed.map((d) => ({ id: d.id, title: d.title, kind: "发布失败" as const, href: `/drafts/${d.id}` })),
+  ].slice(0, 6);
+
+  if (items.length === 0) {
+    return (
+      <section className={`${PANEL} p-6`}>
+        <div className="text-sm text-white/80 font-medium">待处理中心</div>
+        <div className="mt-6 rounded-lg bg-[#0F172A] border border-white/10 p-8 text-center">
+          <div className="text-3xl mb-3">🎉</div>
+          <div className="text-white font-medium">没有待处理事项</div>
+          <div className="text-xs text-white/50 mt-2">当前内容流程运行正常</div>
+          <div className="flex items-center justify-center gap-3 mt-5">
+            <Link href="/workspace" className="px-4 py-2 rounded-md bg-cyan-500 text-slate-950 text-sm font-medium">创建任务</Link>
+            <Link href="/drafts" className="px-4 py-2 rounded-md border border-white/15 text-white/75 text-sm hover:text-white">查看草稿</Link>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className={`${PANEL} overflow-hidden`}>
+      <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+        <div className="text-sm text-white/85 font-medium">待处理中心</div>
+        <Link href="/drafts" className="text-xs text-cyan-300 hover:text-cyan-200">前往处理 →</Link>
+      </div>
+      <div className="divide-y divide-white/10">
+        {items.map((item) => (
+          <Link
+            key={`${item.kind}-${item.id}`}
+            href={item.href}
+            className="px-5 py-3 flex items-center justify-between hover:bg-white/[0.03] transition-colors"
+          >
+            <div className="min-w-0">
+              <div className="text-sm text-white truncate">{item.title}</div>
+              <div className="mt-1 text-xs text-white/45">{item.kind}</div>
+            </div>
+            <span
+              className={`text-[11px] px-2 py-1 rounded-md border ${
+                item.kind === "待确认"
+                  ? "text-amber-300 border-amber-300/35"
+                  : "text-rose-300 border-rose-300/35"
+              }`}
+            >
+              {item.kind}
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function FlowBoard() {
+  const { drafts } = useShellContext();
+  const counts = {
+    generating: drafts.filter((d) => d.draft_status === "draft").length,
+    pending: drafts.filter((d) => d.draft_status === "pending_review").length,
+    published: drafts.filter((d) => d.publish_status === "published").length,
+    failed: drafts.filter((d) => d.publish_status === "failed").length,
+  };
+
+  const cards = [
+    { label: "生成中", value: counts.generating, tone: "text-cyan-300" },
+    { label: "待确认", value: counts.pending, tone: "text-amber-300" },
+    { label: "已发布", value: counts.published, tone: "text-emerald-300" },
+    { label: "失败", value: counts.failed, tone: "text-rose-300" },
+  ];
+
+  return (
+    <section className={`${PANEL} p-5`}>
+      <div className="text-sm text-white/85 font-medium mb-4">内容流转看板</div>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {cards.map((c) => (
+          <div key={c.label} className="rounded-lg bg-[#0F172A] border border-white/10 px-4 py-3">
+            <div className="text-xs text-white/50">{c.label}</div>
+            <div className={`text-2xl font-semibold mt-1 ${c.tone}`}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function RecentAccountsPanel() {
+  const { accounts } = useShellContext();
+
+  const top = accounts.slice(0, 6);
+
+  return (
+    <section className={`${PANEL} overflow-hidden`}>
+      <div className="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+        <div className="text-sm text-white/85 font-medium">最近账号运行</div>
+        <Link href="/accounts" className="text-xs text-cyan-300 hover:text-cyan-200">管理账号 →</Link>
+      </div>
+      {top.length === 0 ? (
+        <div className="px-5 py-8 text-sm text-white/45">暂无账号，先创建一个账号开始运行。</div>
+      ) : (
+        <div className="divide-y divide-white/10">
+          {top.map((account) => {
+            const runStatus = account.last_run_status === "success"
+              ? "success"
+              : account.last_run_status === "failed"
+              ? "failed"
+              : account.last_run_status === "running"
+              ? "pending"
+              : "idle";
+
+            return (
+              <Link
+                key={account.account_id}
+                href={`/accounts/${account.account_id}`}
+                className="px-5 py-3 flex items-center justify-between hover:bg-white/[0.03] transition-colors"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm text-white truncate">{account.name}</div>
+                  <div className="mt-1 text-xs text-white/45">
+                    上次运行：{account.last_run_at ? new Date(account.last_run_at).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}
                   </div>
-                  <StatusBadge status={d.publish_status === "failed" ? "failed" : d.draft_status} />
-                </Link>
-              ))}
-            </div>
-          )}
-        </SectionCard>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-white/70">
+                  <StatusDot status={runStatus} />
+                  <span>
+                    {runStatus === "success" ? "正常运行" : runStatus === "failed" ? "运行失败" : runStatus === "pending" ? "执行中" : "未运行"}
+                  </span>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
 
-        <SectionCard title="内容流转">
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              ["选题池", flow.idea],
-              ["待审核", flow.review],
-              ["可发布", flow.approved],
-              ["已发布", flow.published],
-              ["阻断/失败", flow.blocked],
-            ].map(([label, count]) => (
-              <div key={String(label)} className="rounded-lg bg-slate-50 px-3 py-3">
-                <p className="text-xs text-slate-500">{label}</p>
-                <p className="mt-1 text-2xl font-semibold text-slate-700">{count}</p>
-              </div>
-            ))}
-          </div>
-        </SectionCard>
+export default function DashboardView() {
+  const { stats } = useShellContext();
+
+  return (
+    <div className={PAGE_CONTAINER}>
+      <section className="space-y-1">
+        <h1 className="text-2xl font-semibold tracking-tight text-white">运营总览</h1>
+        <p className="text-sm text-white/55">
+          {stats.todayTasks} 个任务 · {stats.pendingDrafts} 待确认 · {stats.publishedToday} 已发布
+        </p>
       </section>
+
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <MetricCard label="今日任务" value={stats.todayTasks} icon="📘" tone="cyan" href="/history" />
+        <MetricCard label="待确认草稿" value={stats.pendingDrafts} icon="📒" tone="yellow" href="/drafts?draft_status=pending_review" />
+        <MetricCard label="今日发布" value={stats.publishedToday} icon="✅" tone="green" href="/drafts?publish_status=published" />
+        <MetricCard label="发布失败" value={stats.publishFailed} icon="❌" tone="red" href="/drafts?publish_status=failed" />
+      </section>
+
+      <section className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-4">
+        <PendingCenter />
+        <FlowBoard />
+      </section>
+
+      <RecentAccountsPanel />
     </div>
   );
 }

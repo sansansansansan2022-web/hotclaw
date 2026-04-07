@@ -1,26 +1,127 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { disableAccount, enableAccount, getAccount, listDrafts, runAccount } from "@/lib/api";
-import type { AccountDetail, DraftSummary } from "@/types";
-import { PageHeader, SectionCard, StatusBadge, formatDateTime } from "@/components/console-ui";
+import { useParams, useRouter } from "next/navigation";
+import { getAccount, runAccount, enableAccount, disableAccount, getPendingDraftCount } from "@/lib/api";
+import type { AccountDetail } from "@/types";
 
 export default function AccountDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const accountId = params?.id;
+
+  // 状态管理
+  // account: 账号详情数据
+  // pendingDraftCount: 待审核草稿数量
+  // loading: 加载状态
+  // error: 错误信息
+  // actionLoading: 操作中状态（run/toggle）
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [drafts, setDrafts] = useState<DraftSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+
+  // 页面加载时获取账号详情
+  useEffect(() => {
+    if (!accountId) return;
+    loadAccount();
+  }, [accountId]);
 
   async function load() {
     if (!accountId) return;
     setLoading(true);
-    const [a, d] = await Promise.all([getAccount(accountId), listDrafts(1, 20, { account_id: accountId })]);
-    setAccount(a);
-    setDrafts(d.drafts);
-    setLoading(false);
+    setError(null);
+    try {
+      if (!accountId) return;
+      const data = await getAccount(accountId);
+      setAccount(data);
+      // Fetch pending draft count
+      // 仅 semi_auto/full_auto 模式需要显示草稿入口
+      if (data.operation_mode !== "full_auto") {
+        try {
+          const countData = await getPendingDraftCount(data.account_id);
+          setPendingDraftCount(countData.count);
+        } catch {
+          // Ignore error, count is optional
+        }
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "加载失败");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /**
+   * handleRun - 手动触发账号运行
+   *
+   * 调用 API: runAccount(accountId)
+   * 成功后: 跳转到任务详情页
+   */
+  async function handleRun() {
+    if (!account) return;
+    setActionLoading("run");
+    try {
+      const result = await runAccount(account.account_id);
+      router.push(`/task/${result.task_id}`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "启动失败");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  /**
+   * handleToggleActive - 切换账号启用/禁用状态
+   *
+   * 调用 API: disableAccount / enableAccount
+   * 成功后: 重新加载账号详情
+   */
+  async function handleToggleActive() {
+    if (!account) return;
+    setActionLoading("toggle");
+    try {
+      if (account.is_active) {
+        await disableAccount(account.account_id);
+      } else {
+        await enableAccount(account.account_id);
+      }
+      await loadAccount();
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "操作失败");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
+  function formatDate(dateStr: string | null) {
+    if (!dateStr) return "-";
+    return new Date(dateStr).toLocaleString("zh-CN");
+  }
+
+  function getRunStatusBadge(status: string | null) {
+    switch (status) {
+      case "success":
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-green-900/30 text-green-400">成功</span>;
+      case "failed":
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-red-900/30 text-red-400">失败</span>;
+      case "running":
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-cyan-900/30 text-cyan-400">运行中</span>;
+      case "never_run":
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-400">未运行</span>;
+      default:
+        return status ? <span className="px-2 py-0.5 text-xs rounded-full bg-slate-700 text-slate-400">{status}</span> : null;
+    }
+  }
+
+  function getModeLabel(mode: string) {
+    switch (mode) {
+      case "manual": return "手动";
+      case "semi_auto": return "半自动";
+      case "full_auto": return "全自动";
+      default: return mode;
+    }
   }
 
   useEffect(() => { load().catch(console.error); }, [accountId]);
