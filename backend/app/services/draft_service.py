@@ -80,7 +80,6 @@ class DraftService:
             draft_status = "approved"
             publish_review_required = False
             source_type = "semi_auto_task"
-            # Auto publish: set published timestamps
         elif operation_mode == "semi_auto":
             draft_status = "pending_review"
             publish_review_required = True
@@ -106,13 +105,13 @@ class DraftService:
             tags=content.get("tags"),
             structure=content.get("structure"),
             draft_status=draft_status,
-            publish_status="published" if operation_mode == "full_auto" else "not_published",
+            publish_status="not_published",
             publish_review_required=publish_review_required,
             source_type=source_type,
-            # Auto-publish for full_auto mode
+            # full_auto 由后续发布流程填充 published_at
             confirmed_at=now if operation_mode == "full_auto" else None,
             confirmed_by="system" if operation_mode == "full_auto" else None,
-            published_at=now if operation_mode == "full_auto" else None,
+            published_at=None,
         )
 
         db.add(draft)

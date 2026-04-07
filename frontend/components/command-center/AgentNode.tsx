@@ -46,6 +46,8 @@ interface AgentNodeProps {
   position: { x: number; y: number };  // 相对视口中心的百分比偏移
   onExpand: (agent: AgentNodeData) => void;  // 展开详情回调
   delay?: number;  // 动画延迟（毫秒）
+  isPrimary?: boolean; // 是否当前主关注节点（通常是 running）
+  isDimmed?: boolean; // 是否降噪显示
 }
 
 /** 状态中文标签 */
@@ -57,7 +59,14 @@ const STATUS_LABEL: Record<NodeStatus, string> = {
   skipped: "跳过",
 };
 
-export default function AgentNode({ agent, position, onExpand, delay = 0 }: AgentNodeProps) {
+export default function AgentNode({
+  agent,
+  position,
+  onExpand,
+  delay = 0,
+  isPrimary = false,
+  isDimmed = false,
+}: AgentNodeProps) {
   const { x, y } = position;
   const isActive = agent.status === "running";
   const isDone = agent.status === "completed";
@@ -74,7 +83,10 @@ export default function AgentNode({ agent, position, onExpand, delay = 0 }: Agen
         // 【布局】以视口中心为原点
         left: `calc(50% + ${x}%)`,
         top: `calc(50% + ${y}%)`,
-        transform: "translate(-50%, -50%)",
+        transform: `translate(-50%, -50%) scale(${isPrimary ? 1.12 : 1})`,
+        opacity: isDimmed ? 0.62 : 1,
+        filter: isDimmed ? "saturate(0.75)" : "none",
+        transition: "transform .22s ease, opacity .22s ease, filter .22s ease",
         // 依次延迟出现（制造"展开"效果）
         animationDelay: `${delay}ms`,
       }}
