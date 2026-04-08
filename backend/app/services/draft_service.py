@@ -210,7 +210,7 @@ class DraftService:
     ) -> tuple[list[ArticleDraftModel], int]:
         """List drafts with pagination and filters."""
         stmt = select(ArticleDraftModel)
-        count_stmt = select(ArticleDraftModel)
+        count_stmt = select(ArticleDraftModel.id)
 
         # Apply filters
         if account_id:
@@ -230,11 +230,22 @@ class DraftService:
         total = count_result.scalar() or 0
 
         # Paginate
-        stmt = stmt.order_by(desc(ArticleDraftModel.updated_at))
+        stmt = stmt.order_by(desc(ArticleDraftModel.updated_at), desc(ArticleDraftModel.id))
         offset = (page - 1) * page_size
         stmt = stmt.offset(offset).limit(page_size)
         result = await db.execute(stmt)
         drafts = list(result.scalars().all())
+
+        logger.info(
+            "draft_list_loaded",
+            account_id=account_id,
+            draft_status=draft_status,
+            publish_status=publish_status,
+            page=page,
+            page_size=page_size,
+            returned=len(drafts),
+            total=total,
+        )
 
         return drafts, total
 
@@ -628,7 +639,9 @@ class DraftService:
         if account_id:
             stmt = stmt.where(ArticleDraftModel.account_id == account_id)
         result = await db.execute(stmt)
-        return result.scalar() or 0
+        count = result.scalar() or 0
+        logger.info("draft_pending_review_count_loaded", account_id=account_id, count=count)
+        return count
 
 
 draft_service = DraftService()

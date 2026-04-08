@@ -12,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logger import get_logger
-from app.models.tables import AccountModel, ArticleDraftModel, AuditResultModel
+from app.models.tables import AccountModel, ArticleDraftModel, AuditResultModel, TaskModel
 from app.models.wechat_config import WeChatConfigModel
+from app.services.account_harness_service import account_harness_service
 from app.services.publish_record_service import publish_record_service
 
 logger = get_logger(__name__)
@@ -181,10 +182,24 @@ class PublishDecisionService:
                 checks,
             )
 
+        from app.services.automation_plan_service import automation_plan_service
+        effective_plan = await automation_plan_service.get_effective_summary(account, db)
+        effective_mode = effective_plan["plan_type"]
+        auto_publish_enabled = effective_plan["auto_publish_enabled"]
+        if draft.task_id:
+            task_result = await db.execute(select(TaskModel).where(TaskModel.id == draft.task_id))
+            task = task_result.scalar_one_or_none()
+            if task is not None:
+                run_strategy = account_harness_service.extract_run_strategy(task.input_data, task.result_data)
+                if run_strategy.get("effective_mode"):
+                    effective_mode = str(run_strategy["effective_mode"])
+                if "allow_auto_publish" in run_strategy:
+                    auto_publish_enabled = bool(run_strategy["allow_auto_publish"])
+
         checks["account_id"] = account.id
         checks["account_name"] = account.name
-        checks["operation_mode"] = account.operation_mode
-        checks["auto_publish_enabled"] = account.auto_publish_enabled
+        checks["operation_mode"] = effective_mode
+        checks["auto_publish_enabled"] = auto_publish_enabled
         checks["publish_paused"] = account.publish_paused
 
         if account.publish_paused:
@@ -195,7 +210,11 @@ class PublishDecisionService:
                 checks,
             )
 
-        source_check = self._validate_source(account.operation_mode, source, account.auto_publish_enabled)
+        source_check = self._validate_source(
+            effective_mode,
+            source,
+            bool(auto_publish_enabled),
+        )
         if source_check:
             checks.update(source_check["checks"])
             return PublishDecisionResult(
@@ -227,7 +246,7 @@ class PublishDecisionService:
                         checks,
                     )
 
-        frequency_check = await self._check_frequency_limit(account.id, db)
+        frequency_check = await self._check_frequency_limit(account.id, db, effective_plan)
         checks["frequency_check"] = frequency_check
         if not frequency_check["allowed"]:
             decision = PublishDecision.SKIP if source == "full_auto" else PublishDecision.SAVE_AS_DRAFT
@@ -363,13 +382,26 @@ class PublishDecisionService:
         result = await db.execute(select(WeChatConfigModel).where(WeChatConfigModel.account_id == account_id))
         return result.scalar_one_or_none()
 
-    async def _check_frequency_limit(self, account_id: str, db: AsyncSession) -> dict[str, Any]:
+    async def _check_frequency_limit(
+        self,
+        account_id: str,
+        db: AsyncSession,
+        effective_plan: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         account = await self._get_account(account_id, db)
         if not account:
             return {"allowed": True, "daily_exceeded": False, "interval_exceeded": False, "reason": ""}
 
-        max_posts = account.max_posts_per_day
-        min_interval = account.min_interval_minutes
+        max_posts = (
+            effective_plan.get("max_posts_per_day")
+            if effective_plan is not None
+            else account.max_posts_per_day
+        )
+        min_interval = (
+            effective_plan.get("min_interval_minutes")
+            if effective_plan is not None
+            else account.min_interval_minutes
+        )
         result = {
             "allowed": True,
             "daily_exceeded": False,

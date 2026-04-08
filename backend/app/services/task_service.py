@@ -1,9 +1,8 @@
 """Task service: business logic for task lifecycle management."""
 
-import asyncio
 from datetime import datetime, timezone
 
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,6 +12,7 @@ from app.core.tracer import generate_task_id, set_task_id
 from app.models.tables import TaskModel, TaskNodeRunModel
 from app.orchestrator.engine import orchestrator_engine
 from app.orchestrator.broadcaster import broadcaster
+from app.services.account_harness_service import account_harness_service
 
 logger = get_logger(__name__)
 
@@ -52,6 +52,9 @@ class TaskService:
         try:
             # Run the orchestrator
             result_data = await orchestrator_engine.run(task, db)
+            if isinstance(result_data, dict) and isinstance(task.input_data, dict):
+                if "ops_context" not in result_data and isinstance(task.input_data.get("ops_context"), dict):
+                    result_data["ops_context"] = task.input_data.get("ops_context")
 
             # Create draft from task result BEFORE commit to ensure atomicity
             # Draft creation failure should not fail the task
@@ -106,18 +109,30 @@ class TaskService:
         return task
 
     async def list_tasks(
-        self, db: AsyncSession, page: int = 1, page_size: int = 20, status: str | None = None
+        self,
+        db: AsyncSession,
+        page: int = 1,
+        page_size: int = 20,
+        status: str | None = None,
+        account_id: str | None = None,
     ) -> tuple[list[TaskModel], int]:
         """List tasks with pagination."""
-        stmt = select(TaskModel).order_by(desc(TaskModel.created_at))
-        count_stmt = select(TaskModel)
+        stmt = (
+            select(TaskModel)
+            .options(selectinload(TaskModel.account))
+            .order_by(desc(TaskModel.created_at), desc(TaskModel.id))
+        )
+        count_stmt = select(TaskModel.id)
 
         if status:
             stmt = stmt.where(TaskModel.status == status)
             count_stmt = count_stmt.where(TaskModel.status == status)
 
+        if account_id:
+            stmt = stmt.where(TaskModel.account_id == account_id)
+            count_stmt = count_stmt.where(TaskModel.account_id == account_id)
+
         # Count
-        from sqlalchemy import func as sa_func
         count_result = await db.execute(select(sa_func.count()).select_from(count_stmt.subquery()))
         total = count_result.scalar() or 0
 
@@ -126,6 +141,16 @@ class TaskService:
         stmt = stmt.offset(offset).limit(page_size)
         result = await db.execute(stmt)
         tasks = list(result.scalars().all())
+
+        logger.info(
+            "task_list_loaded",
+            account_id=account_id,
+            status=status,
+            page=page,
+            page_size=page_size,
+            returned=len(tasks),
+            total=total,
+        )
 
         return tasks, total
 
@@ -168,7 +193,11 @@ class TaskService:
         return task
 
     async def _get_task(self, task_id: str, db: AsyncSession) -> TaskModel:
-        stmt = select(TaskModel).where(TaskModel.id == task_id)
+        stmt = (
+            select(TaskModel)
+            .where(TaskModel.id == task_id)
+            .options(selectinload(TaskModel.account))
+        )
         result = await db.execute(stmt)
         task = result.scalar_one_or_none()
         if task is None:
@@ -208,15 +237,33 @@ class TaskService:
         """
         try:
             from app.services.draft_service import draft_service
+            from app.services.automation_plan_service import automation_plan_service
 
             # Get account operation mode if account_id exists
             operation_mode = None
+            auto_publish_enabled = False
+            ops_context = account_harness_service.extract_ops_context(task.input_data, result_data)
+            run_strategy = ops_context.get("run_strategy") if isinstance(ops_context, dict) else {}
             if task.account_id:
-                from sqlalchemy import select
                 from app.models.tables import AccountModel
-                stmt = select(AccountModel.operation_mode).where(AccountModel.id == task.account_id)
+                stmt = select(AccountModel).where(AccountModel.id == task.account_id)
                 result = await db.execute(stmt)
-                operation_mode = result.scalar_one_or_none()
+                account = result.scalar_one_or_none()
+                if account is not None:
+                    summary = await automation_plan_service.get_effective_summary(account, db)
+                    operation_mode = (
+                        run_strategy.get("effective_mode")
+                        if isinstance(run_strategy, dict) and run_strategy.get("effective_mode")
+                        else summary.get("plan_type")
+                    )
+                    auto_publish_enabled = (
+                        bool(run_strategy.get("allow_auto_publish"))
+                        if isinstance(run_strategy, dict) and "allow_auto_publish" in run_strategy
+                        else bool(summary.get("auto_publish_enabled"))
+                    )
+            elif isinstance(run_strategy, dict):
+                operation_mode = run_strategy.get("effective_mode")
+                auto_publish_enabled = bool(run_strategy.get("allow_auto_publish"))
 
             draft = await draft_service.create_draft_from_task(
                 task_id=task.id,
@@ -229,11 +276,13 @@ class TaskService:
                 "draft_created_from_task",
                 task_id=task.id,
                 draft_id=draft.id,
-                draft_status=draft.draft_status
+                draft_status=draft.draft_status,
+                effective_mode=operation_mode,
+                allow_auto_publish=auto_publish_enabled,
             )
 
             # full_auto: 尝试自动发布到微信（不影响任务主流程）
-            if task.account_id and operation_mode == "full_auto":
+            if task.account_id and operation_mode == "full_auto" and auto_publish_enabled:
                 try:
                     published_draft, _ = await draft_service.publish_to_wechat(
                         draft_id=draft.id,

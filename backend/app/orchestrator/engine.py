@@ -178,6 +178,20 @@ class OrchestratorEngine:
             workspace.set("account_context", account_context)
             logger.info("account_context_injected", account_id=task.account_id)
 
+        ops_context = None
+        if isinstance(task.input_data, dict):
+            candidate = task.input_data.get("ops_context")
+            if isinstance(candidate, dict):
+                ops_context = candidate
+        if ops_context:
+            workspace.set("ops_context", ops_context)
+            logger.info(
+                "ops_context_injected",
+                account_id=task.account_id,
+                task_id=task.id,
+                effective_mode=ops_context.get("run_strategy", {}).get("effective_mode"),
+            )
+
         # ===== 初始化任务状态 =====
         task.status = "running"
         task.started_at = datetime.now(timezone.utc)

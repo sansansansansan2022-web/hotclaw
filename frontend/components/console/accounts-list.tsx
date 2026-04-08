@@ -83,7 +83,7 @@ export function AccountManagementPage() {
           <Link href="/accounts/new">
             <Button>
               <Icon name="plus" className="h-4 w-4" />
-              {t("accounts.add")}
+              {locale === "zh-CN" ? "接入公众号" : "Connect Account"}
             </Button>
           </Link>
         }
@@ -168,7 +168,7 @@ export function AccountManagementPage() {
           description={t("accounts.emptyDesc")}
           action={
             <Link href="/accounts/new">
-              <Button>{t("accounts.addFirst")}</Button>
+              <Button>{locale === "zh-CN" ? "接入第一个公众号" : "Connect Your First Account"}</Button>
             </Link>
           }
         />

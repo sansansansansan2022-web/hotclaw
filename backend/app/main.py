@@ -1,21 +1,22 @@
 """
 HotClaw FastAPI application entry point.
 
-【FastAPI 应用入口】
-负责：
-1. 应用初始化（配置、日志、智能体注册、数据库）
-2. 生命周期管理（startup/shutdown）
-3. 全局中间件（CORS、Trace ID）
-4. 全局异常处理
-5. 路由注册
+銆怓astAPI 搴旂敤鍏ュ彛銆?
+璐熻矗锛?
+1. 搴旂敤鍒濆鍖栵紙閰嶇疆銆佹棩蹇椼€佹櫤鑳戒綋娉ㄥ唽銆佹暟鎹簱锛?
+2. 鐢熷懡鍛ㄦ湡绠＄悊锛坰tartup/shutdown锛?
+3. 鍏ㄥ眬涓棿浠讹紙CORS銆乀race ID锛?
+4. 鍏ㄥ眬寮傚父澶勭悊
+5. 璺敱娉ㄥ唽
 
-面试点：
-- FastAPI lifespan 生命周期管理
-- 全局中间件
-- 全局异常处理器
-- 启动时初始化（智能体注册、数据库表创建）
+闈㈣瘯鐐癸細
+- FastAPI lifespan 鐢熷懡鍛ㄦ湡绠＄悊
+- 鍏ㄥ眬涓棿浠?
+- 鍏ㄥ眬寮傚父澶勭悊鍣?
+- 鍚姩鏃跺垵濮嬪寲锛堟櫤鑳戒綋娉ㄥ唽銆佹暟鎹簱琛ㄥ垱寤猴級
 """
 
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -35,17 +36,21 @@ from app.api.skill_routes import router as skill_router
 from app.api.llm_provider_routes import router as llm_provider_router
 from app.api.system_config_routes import router as system_config_router
 from app.api.account_routes import router as account_router
+from app.api.account_onboarding_routes import router as account_onboarding_router
+from app.api.automation_plan_routes import router as automation_plan_router
+from app.api.reference_source_routes import router as reference_source_router
 from app.api.draft_routes import router as draft_router
 from app.api.wechat_routes import router as wechat_router
 
 # Import agent implementations to register them
-# 【关键】导入所有智能体类，触发注册
+# 銆愬叧閿€戝鍏ユ墍鏈夋櫤鑳戒綋绫伙紝瑙﹀彂娉ㄥ唽
 from app.agents.profile_agent import ProfileAgent
 from app.agents.hot_topic_agent import HotTopicAgent
 from app.agents.topic_planner_agent import TopicPlannerAgent
 from app.agents.title_generator_agent import TitleGeneratorAgent
 from app.agents.content_writer_agent import ContentWriterAgent
 from app.agents.audit_agent import AuditAgent
+from app.agents.account_ops_agent import AccountOpsAgent
 from app.agents.registry import agent_registry
 
 logger = get_logger(__name__)
@@ -55,9 +60,9 @@ def _register_agents() -> None:
     """
     Register all agents into the registry.
 
-    【智能体注册】
-    应用启动时，将所有智能体注册到全局注册表。
-    后续编排引擎通过 agent_registry.get(agent_id) 获取实例。
+    銆愭櫤鑳戒綋娉ㄥ唽銆?
+    搴旂敤鍚姩鏃讹紝灏嗘墍鏈夋櫤鑳戒綋娉ㄥ唽鍒板叏灞€娉ㄥ唽琛ㄣ€?
+    鍚庣画缂栨帓寮曟搸閫氳繃 agent_registry.get(agent_id) 鑾峰彇瀹炰緥銆?
     """
     agent_registry.register(ProfileAgent())
     agent_registry.register(HotTopicAgent())
@@ -65,6 +70,7 @@ def _register_agents() -> None:
     agent_registry.register(TitleGeneratorAgent())
     agent_registry.register(ContentWriterAgent())
     agent_registry.register(AuditAgent())
+    agent_registry.register(AccountOpsAgent())
 
 
 @asynccontextmanager
@@ -72,24 +78,25 @@ async def lifespan(app: FastAPI):
     """
     Application lifespan: startup and shutdown.
 
-    【生命周期管理】
-    FastAPI lifespan 替代老的 startup/shutdown 事件。
-    - enter: 应用启动时执行
-    - exit: 应用关闭时执行
+    銆愮敓鍛藉懆鏈熺鐞嗐€?
+    FastAPI lifespan 鏇夸唬鑰佺殑 startup/shutdown 浜嬩欢銆?
+    - enter: 搴旂敤鍚姩鏃舵墽琛?
+    - exit: 搴旂敤鍏抽棴鏃舵墽琛?
     """
     # ===== STARTUP =====
-    setup_logging()  # 初始化结构化日志
-    _register_agents()  # 注册所有智能体
+    setup_logging()  # 鍒濆鍖栫粨鏋勫寲鏃ュ織
+    _register_agents()  # 娉ㄥ唽鎵€鏈夋櫤鑳戒綋
+    auto_create_tables = os.getenv("HOTCLAW_AUTO_CREATE_TABLES", "0").strip().lower() in {"1", "true", "yes"}
+    if auto_create_tables:
+        from app.db.session import engine
+        from app.models.tables import Base
+        from app.models.wechat_config import WeChatConfigModel, WeChatPublishRecordModel
 
-    # Auto-create tables in development mode
-    # 【开发友好】自动创建数据库表，无需手动运行 migration
-    from app.db.session import engine
-    from app.models.tables import Base
-    from app.models.wechat_config import WeChatConfigModel, WeChatPublishRecordModel
-    # Import all models to ensure they are registered with Base
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("database_tables_ready")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.warning("database_tables_auto_created")
+    else:
+        logger.info("database_table_auto_create_skipped")
 
     # Initialize default system configs
     from app.db.session import async_session_factory
@@ -117,12 +124,12 @@ app = FastAPI(
 )
 
 # CORS middleware for frontend
-# 【CORS 配置】
-# allow_origins=["*"] 允许所有来源（开发环境）
-# 生产环境应限制为具体的域名
+# 銆怌ORS 閰嶇疆銆?
+# allow_origins=["*"] 鍏佽鎵€鏈夋潵婧愶紙寮€鍙戠幆澧冿級
+# 鐢熶骇鐜搴旈檺鍒朵负鍏蜂綋鐨勫煙鍚?
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产环境应限制
+    allow_origins=["*"],  # 鐢熶骇鐜搴旈檺鍒?
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -130,47 +137,47 @@ app.add_middleware(
 
 
 # Trace ID middleware
-# 【链路追踪中间件】
-# 为每个请求生成唯一的 trace_id，注入到日志和响应头中
+# 銆愰摼璺拷韪腑闂翠欢銆?
+# 涓烘瘡涓姹傜敓鎴愬敮涓€鐨?trace_id锛屾敞鍏ュ埌鏃ュ織鍜屽搷搴斿ご涓?
 @app.middleware("http")
 async def trace_id_middleware(request: Request, call_next):
     trace_id = generate_trace_id()
     set_trace_id(trace_id)
     response = await call_next(request)
-    # 将 trace_id 返回给前端，便于问题排查
+    # 灏?trace_id 杩斿洖缁欏墠绔紝渚夸簬闂鎺掓煡
     response.headers["X-Trace-Id"] = trace_id
     return response
 
 
 # Global exception handler for HotClawError
-# 【自定义异常处理】
+# 銆愯嚜瀹氫箟寮傚父澶勭悊銆?
 @app.exception_handler(HotClawError)
 async def hotclaw_error_handler(request: Request, exc: HotClawError) -> JSONResponse:
     """
-    处理所有 HotClawError 子类异常。
+    澶勭悊鎵€鏈?HotClawError 瀛愮被寮傚父銆?
 
-    【错误码到 HTTP 状态码的映射】
-    code // 1000 = HTTP 状态码
+    銆愰敊璇爜鍒?HTTP 鐘舵€佺爜鐨勬槧灏勩€?
+    code // 1000 = HTTP 鐘舵€佺爜
     """
-    # 错误码分段映射
+    # 閿欒鐮佸垎娈垫槧灏?
     status_map = {
-        1: 400,  # 1xxx -> 400 用户输入错误
-        2: 409,  # 2xxx -> 409 冲突错误
-        3: 502,  # 3xxx -> 502 外部服务错误
-        4: 400,  # 4xxx -> 400 配置错误
-        5: 500,  # 5xxx -> 500 系统错误
-        6: 400,  # 6xxx -> 400 账号错误
-        7: 500,  # 7xxx -> 500 调度器错误
-        8: 409,  # 8xxx -> 409 任务冲突错误
-        9: 400,  # 9xxx -> 400 草稿错误
+        1: 400,  # 1xxx -> 400 鐢ㄦ埛杈撳叆閿欒
+        2: 409,  # 2xxx -> 409 鍐茬獊閿欒
+        3: 502,  # 3xxx -> 502 澶栭儴鏈嶅姟閿欒
+        4: 400,  # 4xxx -> 400 閰嶇疆閿欒
+        5: 500,  # 5xxx -> 500 绯荤粺閿欒
+        6: 400,  # 6xxx -> 400 璐﹀彿閿欒
+        7: 500,  # 7xxx -> 500 璋冨害鍣ㄩ敊璇?
+        8: 409,  # 8xxx -> 409 浠诲姟鍐茬獊閿欒
+        9: 400,  # 9xxx -> 400 鑽夌閿欒
     }
     category = exc.code // 1000
     http_status = status_map.get(category, 500)
 
-    # 特殊处理：资源不存在
+    # 鐗规畩澶勭悊锛氳祫婧愪笉瀛樺湪
     if exc.code in (1002, 1003, 1004, 2002):
         http_status = 404
-    # 超时错误
+    # 瓒呮椂閿欒
     if exc.code == 3003:
         http_status = 504
 
@@ -186,8 +193,8 @@ async def hotclaw_error_handler(request: Request, exc: HotClawError) -> JSONResp
 
 
 # Global unhandled exception handler
-# 【兜底异常处理】
-# 捕获所有未被处理的异常，作为最后防线
+# 銆愬厹搴曞紓甯稿鐞嗐€?
+# 鎹曡幏鎵€鏈夋湭琚鐞嗙殑寮傚父锛屼綔涓烘渶鍚庨槻绾?
 @app.exception_handler(Exception)
 async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
     logger.error("unhandled_exception", error=str(exc), path=request.url.path)
@@ -197,7 +204,7 @@ async def unhandled_error_handler(request: Request, exc: Exception) -> JSONRespo
             "code": 5000,
             "message": "internal server error",
             "data": None,
-            # 【安全】生产环境不泄露详细错误信息
+            # 銆愬畨鍏ㄣ€戠敓浜х幆澧冧笉娉勯湶璇︾粏閿欒淇℃伅
             "details": {"error": str(exc)} if settings.app_debug else None,
         },
     )
@@ -211,11 +218,17 @@ app.include_router(skill_router)
 app.include_router(llm_provider_router)
 app.include_router(system_config_router)
 app.include_router(account_router)
+app.include_router(account_onboarding_router)
+app.include_router(automation_plan_router)
+app.include_router(reference_source_router)
 app.include_router(draft_router)
 app.include_router(wechat_router)
 
 
 @app.get("/api/v1/health")
 async def health_check() -> dict:
-    """健康检查端点，用于负载均衡探活。"""
+    """Health check endpoint used by local smoke tests."""
     return {"status": "ok", "version": "0.1.0"}
+
+
+

@@ -4,6 +4,11 @@ import type {
   AccountMemoryListResponse,
   AccountCreateRequest,
   AccountDetail,
+  AutomationPlan,
+  CreateAutomationPlanRequest,
+  CreateReferenceSourceRequest,
+  ExistingAccountAnalysisRequest,
+  ExistingAccountAnalysisResponse,
   AccountListResponse,
   AccountRunData,
   AccountStyleProfileActionResponse,
@@ -12,6 +17,9 @@ import type {
   ApiOriginSource,
   AppLocale,
   AccountSummary,
+  ReferenceSource,
+  ReferenceSourceListResponse,
+  SyncReferenceSourceResponse,
   AccountUpdateRequest,
   AgentInfo,
   DraftConfirmData,
@@ -32,6 +40,8 @@ import type {
   TaskDetail,
   TaskListResponse,
   TaskNodeListResponse,
+  UpdateAutomationPlanRequest,
+  UpdateReferenceSourceRequest,
   WeChatConfigCreate,
   WeChatConfigDetail,
   WeChatConfigSummary,
@@ -258,6 +268,15 @@ export async function createAccount(data: AccountCreateRequest): Promise<Account
   });
 }
 
+export async function analyzeExistingAccount(
+  data: ExistingAccountAnalysisRequest,
+): Promise<ExistingAccountAnalysisResponse> {
+  return request<ExistingAccountAnalysisResponse>("/account-onboarding/analyze-existing", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function listAccounts(page = 1, pageSize = 20): Promise<AccountListResponse> {
   return request<AccountListResponse>(`/accounts${toQuery({ page, page_size: pageSize })}`);
 }
@@ -309,6 +328,64 @@ export async function updateAccount(accountId: string, data: AccountUpdateReques
   return request<AccountSummary>(`/accounts/${accountId}`, {
     method: "PATCH",
     body: JSON.stringify(data),
+  });
+}
+
+export async function listReferenceSources(accountId: string): Promise<ReferenceSourceListResponse> {
+  return request<ReferenceSourceListResponse>(`/accounts/${accountId}/reference-sources`);
+}
+
+export async function getAutomationPlan(accountId: string): Promise<AutomationPlan> {
+  return request<AutomationPlan>(`/accounts/${accountId}/automation-plan`);
+}
+
+export async function createAutomationPlan(
+  accountId: string,
+  data: CreateAutomationPlanRequest,
+): Promise<AutomationPlan> {
+  return request<AutomationPlan>(`/accounts/${accountId}/automation-plan`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateAutomationPlan(
+  accountId: string,
+  data: UpdateAutomationPlanRequest,
+): Promise<AutomationPlan> {
+  return request<AutomationPlan>(`/accounts/${accountId}/automation-plan`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function createReferenceSource(
+  accountId: string,
+  data: CreateReferenceSourceRequest,
+): Promise<ReferenceSource> {
+  return request<ReferenceSource>(`/accounts/${accountId}/reference-sources`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateReferenceSource(
+  accountId: string,
+  sourceId: number,
+  data: UpdateReferenceSourceRequest,
+): Promise<ReferenceSource> {
+  return request<ReferenceSource>(`/accounts/${accountId}/reference-sources/${sourceId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function syncReferenceSource(
+  accountId: string,
+  sourceId: number,
+): Promise<SyncReferenceSourceResponse> {
+  return request<SyncReferenceSourceResponse>(`/accounts/${accountId}/reference-sources/${sourceId}/sync`, {
+    method: "POST",
   });
 }
 
@@ -419,6 +496,16 @@ export async function createWeChatConfig(data: WeChatConfigCreate): Promise<WeCh
   });
 }
 
+export async function createAccountWeChatConfig(
+  accountId: string,
+  data: Omit<WeChatConfigCreate, "account_id">,
+): Promise<WeChatConfigSummary> {
+  return request<WeChatConfigSummary>(`/accounts/${accountId}/wechat-config`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
 export async function updateWeChatConfig(accountId: string, data: WeChatConfigUpdate): Promise<WeChatConfigSummary> {
   return request<WeChatConfigSummary>(`/wechat/config/${accountId}`, {
     method: "PUT",
@@ -430,6 +517,12 @@ export async function testWeChatConnection(data: WeChatTestConnectionRequest): P
   return request<WeChatTestConnectionResponse>("/wechat/test-connection", {
     method: "POST",
     body: JSON.stringify(data),
+  });
+}
+
+export async function testAccountWeChatConfig(accountId: string): Promise<WeChatTestConnectionResponse> {
+  return request<WeChatTestConnectionResponse>(`/accounts/${accountId}/wechat-config/test`, {
+    method: "POST",
   });
 }
 

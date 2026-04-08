@@ -11,10 +11,16 @@ export type TaskStatus = "pending" | "running" | "completed" | "failed";
 export type NodeStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 export type OperationMode = "manual" | "semi_auto" | "full_auto";
 export type PostingFrequency = "daily" | "weekly" | "biweekly" | "monthly";
+export type AutomationPlanType = OperationMode;
+export type AutomationRunStrategy = "manual_only" | "scheduled" | "hybrid";
+export type AutomationScheduleType = "none" | "daily" | "weekly" | "monthly";
 export type DraftStatus = "draft" | "pending_review" | "approved" | "rejected" | "discarded" | "published";
 export type PublishStatus = "not_published" | "pending" | "publishing" | "published" | "failed" | "skipped" | "unknown";
 export type SourceType = "manual_task" | "semi_auto_task";
 export type ToastTone = "brand" | "success" | "warning" | "danger" | "info";
+export type ReferenceSourceType = "wechat_account" | "article_url" | "pasted_article";
+export type ReferenceSourceSyncStatus = "pending" | "synced" | "failed" | "manual_only";
+export type AccountHealthStatus = "ready" | "attention" | "risk_recovery";
 
 export interface ApiResponse<T = unknown> {
   code: number;
@@ -50,6 +56,7 @@ export interface TaskDetail {
   input_data: { positioning?: string; [key: string]: unknown } | null;
   workflow_id: string;
   result_data: TaskResultData | null;
+  ops_context?: OpsContext | null;
   error_message?: string | null;
   created_at: string;
   started_at: string | null;
@@ -331,6 +338,94 @@ export interface DashboardStats {
   weekly_growth: number;
 }
 
+export interface AutomationPlanSummary {
+  id: number | null;
+  account_id: string;
+  config_source: "plan" | "legacy_fallback";
+  plan_type: AutomationPlanType;
+  is_enabled: boolean;
+  run_strategy: AutomationRunStrategy;
+  schedule_type: AutomationScheduleType;
+  schedule_config: Record<string, unknown> | null;
+  schedule_summary: string | null;
+  auto_publish_enabled: boolean;
+  publish_review_required: boolean;
+  max_posts_per_day: number | null;
+  min_interval_minutes: number | null;
+  timezone: string;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  notes: string | null;
+  latest_status: string | null;
+  is_active_plan: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface AutomationPlan extends AutomationPlanSummary {}
+
+export interface AccountHealthSummary {
+  status: AccountHealthStatus;
+  issues: string[];
+}
+
+export interface RunStrategy {
+  allow_run: boolean;
+  requested_mode?: OperationMode | null;
+  effective_mode: OperationMode;
+  allow_auto_publish: boolean;
+  preferred_reference_source_ids: string[];
+  avoid_recent_topics: string[];
+  preferred_content_lane?: string | null;
+  degraded_from?: OperationMode | null;
+  degrade_reason?: string | null;
+}
+
+export interface OpsContext {
+  generated_at?: string | null;
+  trigger?: {
+    source?: "manual" | "scheduler" | string;
+    requested_plan_type?: OperationMode | string | null;
+  } | null;
+  account_health: AccountHealthSummary;
+  operation_stage?: string | null;
+  run_strategy: RunStrategy;
+  ops_notes: string[];
+  signals?: {
+    enabled_reference_source_count?: number;
+    pending_review_count?: number;
+    recent_failed_publish_count?: number;
+    recent_success_publish_count?: number;
+    recent_failed_task_count?: number;
+    recent_task_count?: number;
+    recent_draft_count?: number;
+    recent_publish_count?: number;
+    preferred_content_lane?: string | null;
+    [key: string]: unknown;
+  } | null;
+  fallback_used?: boolean;
+  account_summary?: {
+    account_id?: string;
+    account_name?: string;
+  } | null;
+}
+
+export interface CreateAutomationPlanRequest {
+  plan_type?: AutomationPlanType;
+  is_enabled?: boolean;
+  run_strategy?: AutomationRunStrategy;
+  schedule_type?: AutomationScheduleType;
+  schedule_config?: Record<string, unknown> | null;
+  auto_publish_enabled?: boolean;
+  publish_review_required?: boolean;
+  max_posts_per_day?: number | null;
+  min_interval_minutes?: number | null;
+  timezone?: string;
+  notes?: string;
+}
+
+export interface UpdateAutomationPlanRequest extends Partial<CreateAutomationPlanRequest> {}
+
 export interface AccountCreateRequest {
   name: string;
   category?: string;
@@ -348,6 +443,7 @@ export interface AccountCreateRequest {
   publish_paused?: boolean;
   max_posts_per_day?: number | null;
   min_interval_minutes?: number | null;
+  automation_plan?: CreateAutomationPlanRequest;
 }
 
 export interface AccountUpdateRequest extends Partial<AccountCreateRequest> {}
@@ -384,6 +480,14 @@ export interface AccountDetail extends AccountSummary {
   posting_time: string | null;
   content_strategy: string | null;
   reference_accounts: string | null;
+  reference_source_count: number;
+  reference_source_enabled_count: number;
+  reference_source_last_sync_status: string | null;
+  automation_plan_summary?: AutomationPlanSummary | null;
+  latest_ops_context?: OpsContext | null;
+  latest_effective_mode?: OperationMode | null;
+  latest_allow_auto_publish?: boolean | null;
+  latest_ops_degraded?: boolean;
   auto_publish_enabled: boolean;
   publish_paused: boolean;
   max_posts_per_day: number | null;
@@ -402,11 +506,80 @@ export interface AccountCreateData {
   operation_mode: OperationMode;
 }
 
+export type AccountOnboardingPath = "new" | "existing";
+export type AccountOnboardingStep = "choose" | "new_details" | "existing_input" | "wechat_connect" | "existing_review";
+export type AccountWeChatOnboardingMode = "connect_now" | "skip_for_now";
+
+export interface ExistingAccountAnalysisRequest {
+  account_name: string;
+  article_urls?: string[];
+  article_texts?: string[];
+}
+
+export interface ExistingAccountAnalysisResponse {
+  account_name: string;
+  inferred_positioning: string;
+  inferred_audience: string;
+  inferred_tone_style: string;
+  inferred_content_strategy: string;
+  inferred_reference_accounts_summary: string | null;
+  recommended_operation_mode: OperationMode;
+  onboarding_notes: string[];
+  extracted_topics: string[];
+  style_summary: string;
+  analysis_confidence: "low" | "medium" | "high";
+  source_summary: string;
+  used_article_count: number;
+}
+
+export interface ReferenceSource {
+  id: number;
+  account_id: string;
+  source_type: ReferenceSourceType;
+  name: string;
+  source_value: string;
+  notes: string | null;
+  is_enabled: boolean;
+  sync_status: ReferenceSourceSyncStatus;
+  last_synced_at: string | null;
+  article_count: number;
+  latest_error_message: string | null;
+  metadata_json: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReferenceSourceListResponse {
+  account_id: string;
+  sources: ReferenceSource[];
+  total: number;
+}
+
+export interface CreateReferenceSourceRequest {
+  source_type: ReferenceSourceType;
+  name?: string;
+  source_value: string;
+  notes?: string;
+  is_enabled?: boolean;
+}
+
+export interface UpdateReferenceSourceRequest {
+  name?: string;
+  notes?: string;
+  is_enabled?: boolean;
+}
+
+export interface SyncReferenceSourceResponse {
+  source: ReferenceSource;
+  message: string;
+}
+
 export interface AccountRunData {
   account_id: string;
   task_id: string;
   status: TaskStatus;
   operation_mode: OperationMode;
+  effective_mode?: OperationMode | null;
 }
 
 export interface AccountListResponse {
