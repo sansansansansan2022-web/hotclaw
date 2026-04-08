@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { createTask, listAccounts, listDrafts, listTasks } from "@/lib/api";
+import { createTask, getApiOriginDebugInfo, listAccounts, listDrafts, listTasks } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { truncate } from "@/lib/utils";
 import type { AccountSummary, DraftSummary, TaskSummary } from "@/types";
@@ -30,7 +30,7 @@ interface WorkspaceCard {
 }
 
 export function WorkspacePage() {
-  const { locale, t } = useI18n();
+  const { locale } = useI18n();
   const router = useRouter();
   const pushToast = useAppStore((state) => state.pushToast);
   const composerValue = useWorkspaceStore((state) => state.composerValue);
@@ -58,7 +58,7 @@ export function WorkspacePage() {
         drafts: draftsRes.drafts,
       });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t("workspace.loadError"));
+      setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载调试工作台。" : "Unable to load the debug workspace.");
     } finally {
       setLoading(false);
     }
@@ -67,6 +67,8 @@ export function WorkspacePage() {
   useEffect(() => {
     void load();
   }, []);
+
+  const apiInfo = getApiOriginDebugInfo();
 
   const lanes = useMemo<Record<WorkspaceLane, WorkspaceCard[]>>(() => {
     if (!data) {
@@ -80,7 +82,7 @@ export function WorkspacePage() {
           id: account.account_id,
           title: account.name,
           body: truncate(account.positioning, 120),
-          meta: account.posting_frequency ? (locale === "zh-CN" ? "等待首次任务运行" : "Awaiting first task run") : (locale === "zh-CN" ? "缺少发布频率配置" : "Missing cadence setup"),
+          meta: account.posting_frequency ? (locale === "zh-CN" ? "等待首次账号运行" : "Awaiting first account run") : (locale === "zh-CN" ? "缺少发布节奏配置" : "Missing cadence setup"),
           href: `/accounts/${account.account_id}`,
           tone: "muted",
         })),
@@ -88,9 +90,9 @@ export function WorkspacePage() {
         .filter((task) => task.status === "pending" || task.status === "running")
         .map((task) => ({
           id: task.task_id,
-          title: task.task_id,
+          title: task.account_name || task.task_id,
           body: truncate(task.positioning_summary, 120),
-          meta: task.status === "running" ? (locale === "zh-CN" ? "Agent 链路执行中" : "Agent chain is executing") : (locale === "zh-CN" ? "等待编排执行" : "Queued for orchestration"),
+          meta: task.account_id ? (locale === "zh-CN" ? "账号内运行" : "Account-scoped run") : (locale === "zh-CN" ? "全局调试任务" : "Global debug task"),
           href: `/task/${task.task_id}`,
           tone: "warning",
         })),
@@ -100,7 +102,7 @@ export function WorkspacePage() {
           id: String(draft.id),
           title: draft.title,
           body: draft.selected_topic || (locale === "zh-CN" ? "发布前等待人工审核" : "Pending manual review before publish"),
-          meta: `Draft #${draft.id}`,
+          meta: draft.account_id ? (locale === "zh-CN" ? "账号草稿" : "Account draft") : `Draft #${draft.id}`,
           href: `/drafts/${draft.id}`,
           tone: "brand",
         })),
@@ -109,7 +111,7 @@ export function WorkspacePage() {
         .map((draft) => ({
           id: String(draft.id),
           title: draft.title,
-          body: draft.selected_topic || (locale === "zh-CN" ? "已通过微信集成发布" : "Published through WeChat integration"),
+          body: draft.selected_topic || (locale === "zh-CN" ? "已通过微信链路发布" : "Published through the WeChat delivery pipeline"),
           meta: locale === "zh-CN" ? "已发布" : "Published",
           href: `/drafts/${draft.id}`,
           tone: "success",
@@ -119,9 +121,9 @@ export function WorkspacePage() {
           .filter((task) => task.status === "failed")
           .map((task) => ({
             id: task.task_id,
-            title: task.task_id,
+            title: task.account_name || task.task_id,
             body: task.error_message || (locale === "zh-CN" ? "任务在编排过程中失败" : "Task failed during orchestration"),
-            meta: locale === "zh-CN" ? "任务失败" : "Task failure",
+            meta: task.account_id ? (locale === "zh-CN" ? "账号任务失败" : "Account task failure") : (locale === "zh-CN" ? "全局调试失败" : "Global debug failure"),
             href: `/task/${task.task_id}`,
             tone: "danger" as const,
           })),
@@ -143,8 +145,8 @@ export function WorkspacePage() {
     if (!composerValue.trim()) {
       pushToast({
         tone: "warning",
-        title: t("workspace.positioningRequired"),
-        message: t("workspace.positioningRequiredDesc"),
+        title: locale === "zh-CN" ? "需要定位描述" : "Positioning required",
+        message: locale === "zh-CN" ? "全局调试任务仍然需要输入定位描述。" : "A global debug task still needs a positioning description.",
       });
       return;
     }
@@ -154,15 +156,15 @@ export function WorkspacePage() {
       const created = await createTask(composerValue.trim());
       pushToast({
         tone: "success",
-        title: t("workspace.taskCreated"),
-        message: locale === "zh-CN" ? `任务 ${created.task_id} 已进入队列。` : `Task ${created.task_id} is now queued.`,
+        title: locale === "zh-CN" ? "调试任务已创建" : "Debug task created",
+        message: locale === "zh-CN" ? `任务 ${created.task_id} 已进入全局调试队列。` : `Task ${created.task_id} is now queued in the global debug workspace.`,
       });
       router.push(`/task/${created.task_id}`);
     } catch (submitError) {
       pushToast({
         tone: "danger",
-        title: t("workspace.taskCreateFailed"),
-        message: submitError instanceof Error ? submitError.message : (locale === "zh-CN" ? "发生了意外错误" : "Unexpected error"),
+        title: locale === "zh-CN" ? "调试任务创建失败" : "Debug task creation failed",
+        message: submitError instanceof Error ? submitError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error",
       });
     } finally {
       setSubmitting(false);
@@ -172,38 +174,72 @@ export function WorkspacePage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow={t("workspace.eyebrow")}
-        title={t("workspace.title")}
-        description={t("workspace.description")}
+        eyebrow={locale === "zh-CN" ? "全局调试入口" : "Global Debug Entry"}
+        title={locale === "zh-CN" ? "实验工作台" : "Debug Workspace"}
+        description={
+          locale === "zh-CN"
+            ? "这个页面保留给开发、验收和排障使用。普通运营主路径应从账号详情进入账号工作台，再在账号上下文里运行任务。"
+            : "Keep this page for development, QA and troubleshooting. The normal operator path should start from an account detail page and continue inside the account workspace."
+        }
         actions={
-          <Link href="/tasks/history">
-            <Button variant="secondary">
-              <Icon name="history" className="h-4 w-4" />
-              {t("workspace.fullTaskHistory")}
-            </Button>
-          </Link>
+          <>
+            <Link href="/accounts">
+              <Button>
+                <Icon name="accounts" className="h-4 w-4" />
+                {locale === "zh-CN" ? "进入账号列表" : "Open Accounts"}
+              </Button>
+            </Link>
+            <Link href="/tasks/history">
+              <Button variant="secondary">
+                <Icon name="history" className="h-4 w-4" />
+                {locale === "zh-CN" ? "任务历史" : "Task History"}
+              </Button>
+            </Link>
+          </>
         }
       />
 
+      <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        {locale === "zh-CN"
+          ? `这个 /workspace 只用于调试入口。当前 API origin：${apiInfo.origin || "/api"}。普通运营请从账号详情进入账号工作台。`
+          : `This /workspace page is debug-only. Current API origin: ${apiInfo.origin || "/api"}. Normal operations should start from an account detail page and continue in the account workspace.`}
+      </div>
+
       <div className="grid gap-6 xl:grid-cols-[1.1fr_2fr]">
-        <Card title={t("workspace.manualTaskComposer")} description={t("workspace.manualTaskComposerDesc")}>
+        <Card
+          title={locale === "zh-CN" ? "全局调试任务发起" : "Global Debug Composer"}
+          description={
+            locale === "zh-CN"
+              ? "这里只有在没有明确账号上下文时，才建议使用全局 POST /api/v1/tasks。"
+              : "Only use the global POST /api/v1/tasks path when you intentionally do not want an account-scoped run."
+          }
+        >
           <div className="space-y-4">
             <Input
-              placeholder={t("workspace.composerPlaceholder")}
+              placeholder={locale === "zh-CN" ? "输入用于实验或排障的定位描述..." : "Describe the positioning used for debugging or experiments..."}
               value={composerValue}
               onChange={(event) => setComposerValue(event.target.value)}
             />
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-              {t("workspace.composerApiHint")}
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+              {locale === "zh-CN"
+                ? "普通业务任务请从账号详情或账号工作台发起，这里只保留给全局实验、回归验收和问题定位。"
+                : "Normal business runs should start from an account detail page or account workspace. This board is reserved for global experiments, QA and troubleshooting."}
             </div>
             <Button className="w-full" disabled={submitting} onClick={() => void submitManualTask()}>
               <Icon name="play" className="h-4 w-4" />
-              {submitting ? t("workspace.creatingTask") : t("workspace.runWorkflow")}
+              {submitting ? (locale === "zh-CN" ? "创建调试任务..." : "Creating Debug Task...") : locale === "zh-CN" ? "运行全局调试任务" : "Run Global Debug Task"}
             </Button>
           </div>
         </Card>
 
-        <Card title={t("workspace.laneFocus")} description={t("workspace.laneFocusDesc")}>
+        <Card
+          title={locale === "zh-CN" ? "调试看板聚焦" : "Debug Board Focus"}
+          description={
+            locale === "zh-CN"
+              ? "保留全局看板视图，但它现在只作为观察跨账号运行信号的调试面板。"
+              : "Retain the global board view, but position it as a debugging panel for cross-account runtime signals."
+          }
+        >
           <div className="grid gap-3 sm:grid-cols-5">
             {([
               ["idea", locale === "zh-CN" ? "筹备" : "Idea"],
@@ -221,7 +257,7 @@ export function WorkspacePage() {
                 }`}
               >
                 <p className="text-sm font-semibold text-slate-900">{label}</p>
-                <p className="mt-1 text-xs text-slate-500">{locale === "zh-CN" ? `${lanes[value].length} 条` : `${lanes[value].length} items`}</p>
+                <p className="mt-1 text-xs text-slate-500">{locale === "zh-CN" ? `${lanes[value].length} 项` : `${lanes[value].length} items`}</p>
               </button>
             ))}
           </div>
@@ -231,7 +267,7 @@ export function WorkspacePage() {
       {loading ? (
         <SkeletonRows rows={5} />
       ) : error ? (
-        <ErrorState title={t("workspace.loadError")} description={error} retry={() => void load()} />
+        <ErrorState title={locale === "zh-CN" ? "调试工作台加载失败" : "Debug workspace failed to load"} description={error} retry={() => void load()} />
       ) : (
         <div className="grid gap-5 xl:grid-cols-5">
           {([
@@ -241,7 +277,7 @@ export function WorkspacePage() {
             ["published", locale === "zh-CN" ? "已发布" : "Published"],
             ["blocked", locale === "zh-CN" ? "受阻" : "Blocked"],
           ] as Array<[WorkspaceLane, string]>).map(([lane, label]) => (
-            <Card key={lane} title={label} description={locale === "zh-CN" ? `${lanes[lane].length} 条` : `${lanes[lane].length} items`} className={selectedLane === lane ? "ring-2 ring-brand-200" : ""}>
+            <Card key={lane} title={label} description={locale === "zh-CN" ? `${lanes[lane].length} 项` : `${lanes[lane].length} items`} className={selectedLane === lane ? "ring-2 ring-brand-200" : ""}>
               {lanes[lane].length ? (
                 <div className="space-y-3">
                   {lanes[lane].map((card) => (
@@ -260,8 +296,16 @@ export function WorkspacePage() {
                 </div>
               ) : (
                 <EmptyState
-                  title={locale === "zh-CN" ? `暂无${label}` : `No ${label.toLowerCase()} items`}
-                  description={locale === "zh-CN" ? `当真实后端数据进入${label}阶段后，这个泳道会自动填充。` : `This lane will fill as real backend data reaches the ${label.toLowerCase()} stage.`}
+                  title={locale === "zh-CN" ? "当前泳道为空" : "No items in this lane"}
+                  description={
+                    lane === "idea"
+                      ? locale === "zh-CN"
+                        ? "建议从账号详情进入账号工作台，为具体账号发起运行。"
+                        : "Prefer opening an account workspace and starting runs from a specific account."
+                      : locale === "zh-CN"
+                        ? "当前没有符合该调试状态的全局记录。"
+                        : "There are no global records matching this debugging state."
+                  }
                 />
               )}
             </Card>

@@ -1,9 +1,15 @@
 import type {
   AccountCreateData,
+  AccountMemoryActionResponse,
+  AccountMemoryListResponse,
   AccountCreateRequest,
   AccountDetail,
   AccountListResponse,
   AccountRunData,
+  AccountStyleProfileActionResponse,
+  AccountStyleProfileResponse,
+  ApiOriginDebugInfo,
+  ApiOriginSource,
   AppLocale,
   AccountSummary,
   AccountUpdateRequest,
@@ -59,25 +65,69 @@ export class ApiError extends Error {
   }
 }
 
+const devLoggedApiOrigins = new Set<string>();
+
 function normalizeOrigin(origin?: string): string | null {
   if (!origin) return null;
   return origin.replace(/\/$/, "");
 }
 
-function getApiOrigin(): string {
+function getRelativeApiOrigin(): string {
+  return "";
+}
+
+function resolveApiOrigin(): ApiOriginDebugInfo {
+  const runtimeOrigin =
+    typeof window !== "undefined"
+      ? normalizeOrigin((window as Window & { __HOTCLAW_API_ORIGIN__?: string }).__HOTCLAW_API_ORIGIN__)
+      : null;
+  if (runtimeOrigin) {
+    return { origin: runtimeOrigin, source: "runtime" };
+  }
+
   const envOrigin =
     normalizeOrigin(process.env.NEXT_PUBLIC_HOTCLAW_API_ORIGIN) ??
     normalizeOrigin(process.env.HOTCLAW_API_ORIGIN);
-  if (envOrigin) return envOrigin;
-  if (typeof window !== "undefined") {
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  if (envOrigin) {
+    return { origin: envOrigin, source: "env" };
   }
-  return "http://127.0.0.1:8000";
+
+  return {
+    origin: getRelativeApiOrigin(),
+    source: "relative",
+  };
+}
+
+function logApiOriginOnce(info: ApiOriginDebugInfo): void {
+  if (process.env.NODE_ENV === "production" || typeof window === "undefined") {
+    return;
+  }
+
+  const label = info.origin || "/api";
+  const key = `${info.source}:${label}`;
+  if (devLoggedApiOrigins.has(key)) {
+    return;
+  }
+
+  devLoggedApiOrigins.add(key);
+  console.info("[HotClaw][api-origin]", { origin: label, source: info.source });
+
+  if (info.source === "relative") {
+    console.warn("[HotClaw][api-origin] NEXT_PUBLIC_HOTCLAW_API_ORIGIN is unset. Falling back to same-origin /api proxy.");
+  }
+}
+
+export function getApiOriginDebugInfo(): ApiOriginDebugInfo {
+  const info = resolveApiOrigin();
+  logApiOriginOnce(info);
+  return info;
 }
 
 function buildUrl(path: string, root: ApiRoot = "v1"): string {
-  const base = root === "raw" ? getApiOrigin() : `${getApiOrigin()}/api/v1`;
-  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+  const info = getApiOriginDebugInfo();
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const basePath = root === "raw" ? "" : "/api/v1";
+  return `${info.origin}${basePath}${normalizedPath}`;
 }
 
 function repairText(value: string): string {
@@ -181,8 +231,12 @@ export async function createTask(positioning: string, workflowId = "default_pipe
   });
 }
 
-export async function listTasks(page = 1, pageSize = 20, status?: string): Promise<TaskListResponse> {
-  return request<TaskListResponse>(`/tasks${toQuery({ page, page_size: pageSize, status })}`);
+export async function listTasks(page = 1, pageSize = 20, status?: string, accountId?: string): Promise<TaskListResponse> {
+  return request<TaskListResponse>(`/tasks${toQuery({ page, page_size: pageSize, status, account_id: accountId })}`);
+}
+
+export async function listAccountTasks(accountId: string, page = 1, pageSize = 20, status?: string): Promise<TaskListResponse> {
+  return listTasks(page, pageSize, status, accountId);
 }
 
 export async function getTaskDetail(taskId: string): Promise<TaskDetail> {
@@ -212,6 +266,45 @@ export async function getAccount(accountId: string): Promise<AccountDetail> {
   return request<AccountDetail>(`/accounts/${accountId}`);
 }
 
+export async function listAccountMemories(
+  accountId: string,
+  params?: { query?: string; page?: number; page_size?: number },
+): Promise<AccountMemoryListResponse> {
+  return request<AccountMemoryListResponse>(
+    `/accounts/${accountId}/article-memories${toQuery({
+      query: params?.query,
+      page: params?.page,
+      page_size: params?.page_size,
+    })}`,
+  );
+}
+
+export async function searchAccountMemories(accountId: string, query: string): Promise<AccountMemoryListResponse> {
+  return listAccountMemories(accountId, { query });
+}
+
+export async function rebuildAccountMemories(accountId: string): Promise<AccountMemoryActionResponse> {
+  return request<AccountMemoryActionResponse>(`/accounts/${accountId}/article-memories/rebuild`, {
+    method: "POST",
+  });
+}
+
+export async function syncAccountMemories(accountId: string): Promise<AccountMemoryActionResponse> {
+  return request<AccountMemoryActionResponse>(`/accounts/${accountId}/article-memories/sync`, {
+    method: "POST",
+  });
+}
+
+export async function getAccountStyleProfile(accountId: string): Promise<AccountStyleProfileResponse> {
+  return request<AccountStyleProfileResponse>(`/accounts/${accountId}/style-profile`);
+}
+
+export async function rebuildAccountStyleProfile(accountId: string): Promise<AccountStyleProfileActionResponse> {
+  return request<AccountStyleProfileActionResponse>(`/accounts/${accountId}/style-profile/rebuild`, {
+    method: "POST",
+  });
+}
+
 export async function updateAccount(accountId: string, data: AccountUpdateRequest): Promise<AccountSummary> {
   return request<AccountSummary>(`/accounts/${accountId}`, {
     method: "PATCH",
@@ -220,6 +313,12 @@ export async function updateAccount(accountId: string, data: AccountUpdateReques
 }
 
 export async function runAccount(accountId: string): Promise<AccountRunData> {
+  if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+    console.info("[HotClaw][account-run]", {
+      accountId,
+      endpoint: buildUrl(`/accounts/${accountId}/run`),
+    });
+  }
   return request<AccountRunData>(`/accounts/${accountId}/run`, { method: "POST" });
 }
 
