@@ -1,5 +1,12 @@
 /** Shared type definitions for HotClaw frontend. */
 
+export type ApiOriginSource = "runtime" | "env" | "relative";
+
+export interface ApiOriginDebugInfo {
+  origin: string;
+  source: ApiOriginSource;
+}
+
 export type TaskStatus = "pending" | "running" | "completed" | "failed";
 export type NodeStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 export type OperationMode = "manual" | "semi_auto" | "full_auto";
@@ -37,6 +44,8 @@ export interface TaskCreateData {
 
 export interface TaskDetail {
   task_id: string;
+  account_id: string | null;
+  account_name: string | null;
   status: TaskStatus;
   input_data: { positioning?: string; [key: string]: unknown } | null;
   workflow_id: string;
@@ -67,6 +76,13 @@ export interface TaskStatusResponse {
 export interface TaskResultData {
   input?: { positioning: string };
   profile?: AccountProfile;
+  style_profile?: StyleProfile | Record<string, unknown> | null;
+  retrieved_memories?: ContentMemory[] | Record<string, unknown> | null;
+  outline_plan?: OutlinePlan | Record<string, unknown> | null;
+  section_drafts?: SectionDraft[] | Record<string, unknown> | null;
+  review_results?: ReviewResult[] | Record<string, unknown> | null;
+  rewrite_result?: RewriteResult | Record<string, unknown> | null;
+  evaluation?: EvaluationSummary | Record<string, unknown> | null;
   hot_topics?: { hot_topics: HotTopic[] };
   topics?: { topics: TopicCandidate[] };
   titles?: { selected_topic: string; titles: TitleCandidate[] };
@@ -122,6 +138,99 @@ export interface ArticleContent {
   tags?: string[];
 }
 
+export interface ContentMemory {
+  id: number | string;
+  title: string;
+  summary?: string | null;
+  tags?: string[] | null;
+  source_draft_id?: number | null;
+  source_task_id?: string | null;
+  article_id?: string | null;
+  content_excerpt?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export interface OutlineSection {
+  id?: number | string | null;
+  title: string;
+  summary?: string | null;
+  goal?: string | null;
+  notes?: string | null;
+}
+
+export interface OutlinePlan {
+  summary?: string | null;
+  sections: OutlineSection[];
+  raw?: Record<string, unknown> | null;
+}
+
+export interface SectionDraft {
+  id?: number | string | null;
+  heading: string;
+  summary?: string | null;
+  content_markdown?: string | null;
+  content_html?: string | null;
+  status?: string | null;
+}
+
+export interface ReviewIssueDetail {
+  title?: string | null;
+  description: string;
+  severity?: string | null;
+  location?: string | null;
+  suggestion?: string | null;
+}
+
+export interface ReviewResult {
+  reviewer?: string | null;
+  passed?: boolean | null;
+  summary?: string | null;
+  issues?: ReviewIssueDetail[] | null;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface RewriteResult {
+  title?: string | null;
+  summary?: string | null;
+  notes?: string | null;
+  content_markdown?: string | null;
+  content_html?: string | null;
+  changed_sections?: string[] | null;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface EvaluationDimension {
+  score?: number | null;
+  explanation?: string | null;
+  badges?: string[] | null;
+}
+
+export interface EvaluationSummary {
+  style_score?: number | null;
+  structure_score?: number | null;
+  evidence_score?: number | null;
+  readability_score?: number | null;
+  final_score?: number | null;
+  summary?: string | null;
+  dimensions?: Record<string, EvaluationDimension> | null;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface StyleProfile {
+  summary?: string | null;
+  tone_profile?: string | null;
+  title_style?: string | null;
+  intro_style?: string | null;
+  structure_style?: string | null;
+  cta_style?: string | null;
+  lexical_features?: string[] | null;
+  banned_patterns?: string[] | null;
+  evidence_article_ids?: Array<number | string> | null;
+  raw?: Record<string, unknown> | null;
+}
+
 export interface NodeRun {
   node_id: string;
   agent_id: string;
@@ -141,6 +250,8 @@ export interface NodeRun {
 
 export interface TaskSummary {
   task_id: string;
+  account_id: string | null;
+  account_name: string | null;
   positioning_summary: string;
   status: TaskStatus;
   created_at: string;
@@ -356,6 +467,13 @@ export interface DraftDetail {
   published_at: string | null;
   publish_error_message: string | null;
   audit_result: AuditResultInfo | null;
+  style_profile?: StyleProfile | Record<string, unknown> | null;
+  retrieved_memories?: ContentMemory[] | Record<string, unknown> | null;
+  outline_plan?: OutlinePlan | Record<string, unknown> | null;
+  section_drafts?: SectionDraft[] | Record<string, unknown> | null;
+  review_results?: ReviewResult[] | Record<string, unknown> | null;
+  rewrite_result?: RewriteResult | Record<string, unknown> | null;
+  evaluation?: EvaluationSummary | Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -561,4 +679,31 @@ export interface AppSession {
   email: string;
   displayName: string;
   provider: "local_adapter";
+}
+
+export interface AccountMemoryListResponse {
+  account_id: string;
+  total: number;
+  query?: string | null;
+  memories: ContentMemory[];
+}
+
+export interface AccountMemoryActionResponse {
+  account_id: string;
+  status: string;
+  message?: string | null;
+  job_id?: string | null;
+}
+
+export interface AccountStyleProfileResponse {
+  account_id: string;
+  generated_at?: string | null;
+  style_profile: StyleProfile | null;
+}
+
+export interface AccountStyleProfileActionResponse {
+  account_id: string;
+  status: string;
+  message?: string | null;
+  generated_at?: string | null;
 }
