@@ -77,7 +77,7 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
       styleProfile: normalizeStyleProfile(result?.style_profile, result?.profile ?? null),
       outline: normalizeOutlinePlan(result?.outline_plan),
       sections: sections.length ? sections : fallbackSections(detail),
-      reviews: normalizeReviewResults(result?.review_results),
+      reviews: normalizeReviewResults(result),
       rewrite: normalizeRewriteResult(result?.rewrite_result),
       evaluation: normalizeEvaluation(result?.evaluation),
     };
@@ -389,7 +389,7 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
 
           <Card
             title={locale === "zh-CN" ? "节点轨迹" : "Node Trace"}
-            description={locale === "zh-CN" ? "保留原有六节点链路调试表，方便排查 agent 执行问题。" : "Keep the original six-node execution table for agent-chain debugging."}
+            description={locale === "zh-CN" ? "保留结构化内容链的节点调试表，方便排查提纲、分段、组装与回退行为。" : "Keep the structured content pipeline trace visible, including outline, sections, assembly and fallback behavior."}
           >
             {nodes.length ? (
               <Table columns={[locale === "zh-CN" ? "节点" : "Node", locale === "zh-CN" ? "状态" : "Status", locale === "zh-CN" ? "耗时" : "Duration", locale === "zh-CN" ? "模型" : "Model", locale === "zh-CN" ? "降级" : "Degraded", locale === "zh-CN" ? "错误" : "Error"]}>

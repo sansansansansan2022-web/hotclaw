@@ -13,6 +13,7 @@ from app.models.tables import TaskModel, TaskNodeRunModel
 from app.orchestrator.engine import orchestrator_engine
 from app.orchestrator.broadcaster import broadcaster
 from app.services.account_harness_service import account_harness_service
+from app.services.article_assembler_service import article_assembler_service
 
 logger = get_logger(__name__)
 
@@ -52,9 +53,13 @@ class TaskService:
         try:
             # Run the orchestrator
             result_data = await orchestrator_engine.run(task, db)
+            result_data = article_assembler_service.normalize_result_data(result_data)
             if isinstance(result_data, dict) and isinstance(task.input_data, dict):
                 if "ops_context" not in result_data and isinstance(task.input_data.get("ops_context"), dict):
                     result_data["ops_context"] = task.input_data.get("ops_context")
+            task.result_data = result_data
+            db.add(task)
+            await db.flush()
 
             # Create draft from task result BEFORE commit to ensure atomicity
             # Draft creation failure should not fail the task
@@ -238,6 +243,8 @@ class TaskService:
         try:
             from app.services.draft_service import draft_service
             from app.services.automation_plan_service import automation_plan_service
+
+            result_data = article_assembler_service.normalize_result_data(result_data)
 
             # Get account operation mode if account_id exists
             operation_mode = None

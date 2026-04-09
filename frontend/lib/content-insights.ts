@@ -124,9 +124,15 @@ function mapOutlineSection(value: unknown, index: number): OutlineSection | null
   const title = asString(record.title) ?? asString(record.heading) ?? asString(record.name) ?? `Section ${index + 1}`;
   return {
     id: (record.id as number | string | undefined) ?? index,
+    section_id: (record.section_id as number | string | undefined) ?? (record.id as number | string | undefined) ?? index,
     title,
+    heading: asString(record.heading) ?? title,
     summary: asString(record.summary) ?? asString(record.description),
-    goal: asString(record.goal) ?? asString(record.objective),
+    goal: asString(record.goal) ?? asString(record.objective) ?? asString(record.purpose),
+    purpose: asString(record.purpose) ?? asString(record.goal) ?? asString(record.objective),
+    key_points: asStringArray(record.key_points),
+    tone_hint: asString(record.tone_hint),
+    evidence_refs: asStringArray(record.evidence_refs),
     notes: asString(record.notes),
   };
 }
@@ -146,8 +152,13 @@ export function normalizeOutlinePlan(value: unknown): OutlinePlan | null {
   }
 
   return {
+    article_goal: asString(record.article_goal),
+    target_reader_takeaway: asString(record.target_reader_takeaway),
+    opening_hook: asString(record.opening_hook),
     summary: asString(record.summary) ?? asString(record.description),
     sections,
+    ending_cta: asString(record.ending_cta),
+    estimated_word_count: asNumber(record.estimated_word_count),
     raw: record,
   };
 }
@@ -165,10 +176,13 @@ function mapSectionDraft(value: unknown, index: number): SectionDraft | null {
   if (!record) return null;
   return {
     id: (record.id as number | string | undefined) ?? index,
+    section_id: (record.section_id as number | string | undefined) ?? (record.id as number | string | undefined) ?? index,
     heading: asString(record.heading) ?? asString(record.title) ?? asString(record.section_title) ?? `Section ${index + 1}`,
     summary: asString(record.summary) ?? asString(record.brief),
     content_markdown: asString(record.content_markdown) ?? asString(record.markdown) ?? asString(record.content),
     content_html: asString(record.content_html) ?? asString(record.html),
+    word_count: asNumber(record.word_count),
+    evidence_refs: asStringArray(record.evidence_refs),
     status: asString(record.status),
   };
 }
@@ -193,10 +207,12 @@ function mapReviewIssue(value: unknown): ReviewIssueDetail | null {
   const description = asString(record.description) ?? asString(record.message) ?? asString(record.issue);
   if (!description) return null;
   return {
+    code: asString(record.code),
     title: asString(record.title),
     description,
     severity: asString(record.severity) ?? asString(record.level),
-    location: asString(record.location),
+    location: asString(record.location) ?? asString(record.section_id),
+    section_id: asString(record.section_id),
     suggestion: asString(record.suggestion) ?? asString(record.recommendation),
   };
 }
@@ -221,16 +237,26 @@ function mapReviewResult(value: unknown, index: number): ReviewResult | null {
   return {
     reviewer: asString(record.reviewer) ?? asString(record.agent) ?? `reviewer_${index + 1}`,
     passed: asBoolean(record.passed),
+    score: asNumber(record.score),
     summary,
+    rewrite_suggestions: asStringArray(record.rewrite_suggestions),
     issues,
+    failed: asBoolean(record.failed),
+    degraded: asBoolean(record.degraded),
+    error_message: asString(record.error_message),
     raw: record,
   };
 }
 
 export function normalizeReviewResults(value: unknown, auditResult?: AuditResultInfo | null): ReviewResult[] {
+  const record = asRecord(value);
   const source = Array.isArray(value)
     ? value
-    : arrayFromKeys(asRecord(value), ["review_results", "reviews", "results", "items"]);
+    : [
+        ...arrayFromKeys(record, ["review_results", "reviews", "results", "items"]),
+        ...(record?.style_review ? [record.style_review] : []),
+        ...(record?.structure_review ? [record.structure_review] : []),
+      ];
 
   const normalized = source
     .map((item, index) => mapReviewResult(item, index))
@@ -267,11 +293,20 @@ export function normalizeRewriteResult(value: unknown): RewriteResult | null {
 
   return {
     title: asString(record.title),
-    summary: asString(record.summary) ?? asString(record.rewrite_summary),
+    summary: asString(record.summary) ?? asString(record.rewrite_summary) ?? asString(record.revision_summary),
     notes: asString(record.notes) ?? asString(record.comment),
-    content_markdown: asString(record.content_markdown) ?? asString(record.markdown) ?? asString(record.content),
-    content_html: asString(record.content_html) ?? asString(record.html),
+    used_rewrite: asBoolean(record.used_rewrite),
+    content_markdown:
+      asString(record.revised_content_markdown)
+      ?? asString(record.content_markdown)
+      ?? asString(record.markdown)
+      ?? asString(record.content),
+    content_html: asString(record.revised_content_html) ?? asString(record.content_html) ?? asString(record.html),
+    fixed_issues: asStringArray(record.fixed_issues),
     changed_sections: asStringArray(record.changed_sections),
+    rewrite_failed: asBoolean(record.rewrite_failed),
+    rewrite_skipped: asBoolean(record.rewrite_skipped),
+    failure_reason: asString(record.failure_reason),
     raw: record,
   };
 }
@@ -295,6 +330,7 @@ export function normalizeEvaluation(value: unknown): EvaluationSummary | null {
     style_score: extractDimension(record, "style_score"),
     structure_score: extractDimension(record, "structure_score"),
     evidence_score: extractDimension(record, "evidence_score"),
+    repetition_score: extractDimension(record, "repetition_score"),
     readability_score: extractDimension(record, "readability_score"),
     final_score: extractDimension(record, "final_score"),
   };
@@ -303,6 +339,7 @@ export function normalizeEvaluation(value: unknown): EvaluationSummary | null {
     style_score: dimensions.style_score.score,
     structure_score: dimensions.structure_score.score,
     evidence_score: dimensions.evidence_score.score,
+    repetition_score: dimensions.repetition_score.score,
     readability_score: dimensions.readability_score.score,
     final_score: dimensions.final_score.score,
     summary: asString(record.summary) ?? asString(record.overall_comment),

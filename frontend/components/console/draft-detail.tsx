@@ -113,7 +113,14 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
       styleProfile: normalizeStyleProfile(detail?.style_profile),
       outline: normalizeOutlinePlan(detail?.outline_plan),
       sections: sections.length ? sections : fallbackSections(detail),
-      reviews: normalizeReviewResults(detail?.review_results, detail?.audit_result ?? null),
+      reviews: normalizeReviewResults(
+        {
+          review_results: detail?.review_results,
+          style_review: detail?.style_review,
+          structure_review: detail?.structure_review,
+        },
+        detail?.audit_result ?? null,
+      ),
       rewrite: normalizeRewriteResult(detail?.rewrite_result),
       evaluation: normalizeEvaluation(detail?.evaluation),
     };
@@ -345,6 +352,17 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone={tone(detail.draft_status)}>{draftStatusLabel(detail.draft_status)}</Badge>
                   <Badge tone={tone(detail.publish_status)}>{publishStatusLabel(detail.publish_status)}</Badge>
+                  {insights.rewrite ? (
+                    <Badge tone={insights.rewrite.used_rewrite ? "success" : "muted"}>
+                      {insights.rewrite.used_rewrite
+                        ? locale === "zh-CN"
+                          ? "使用修订稿"
+                          : "Using revised draft"
+                        : locale === "zh-CN"
+                          ? "保留原组装稿"
+                          : "Using assembled draft"}
+                    </Badge>
+                  ) : null}
                   <Badge tone={detail.audit_result?.passed ? "success" : "warning"}>
                     {detail.audit_result?.passed ? (locale === "zh-CN" ? "审核通过" : "Audit Passed") : locale === "zh-CN" ? "待审核" : "Audit Review"}
                   </Badge>

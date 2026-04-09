@@ -87,9 +87,18 @@ export interface TaskResultData {
   retrieved_memories?: ContentMemory[] | Record<string, unknown> | null;
   outline_plan?: OutlinePlan | Record<string, unknown> | null;
   section_drafts?: SectionDraft[] | Record<string, unknown> | null;
+  style_review?: ReviewResult | Record<string, unknown> | null;
+  structure_review?: ReviewResult | Record<string, unknown> | null;
   review_results?: ReviewResult[] | Record<string, unknown> | null;
   rewrite_result?: RewriteResult | Record<string, unknown> | null;
   evaluation?: EvaluationSummary | Record<string, unknown> | null;
+  content_pipeline?: {
+    version?: string | null;
+    used_structured_pipeline?: boolean;
+    fallback_to_content_writer?: boolean;
+    degraded?: boolean;
+    fallback_reason?: string | null;
+  } | null;
   hot_topics?: { hot_topics: HotTopic[] };
   topics?: { topics: TopicCandidate[] };
   titles?: { selected_topic: string; titles: TitleCandidate[] };
@@ -137,10 +146,21 @@ export interface TitleCandidate {
 }
 
 export interface ArticleContent {
+  selected_topic?: string | null;
+  title_candidates?: string[] | null;
+  selected_title?: string | null;
+  summary?: string | null;
   content_markdown: string;
+  content_html?: string | null;
   word_count?: number;
   structure?: {
-    sections?: { heading: string; summary: string }[];
+    sections?: {
+      section_id?: string | number | null;
+      heading: string;
+      summary: string;
+      word_count?: number | null;
+      evidence_refs?: string[] | null;
+    }[];
   };
   tags?: string[];
 }
@@ -161,40 +181,61 @@ export interface ContentMemory {
 
 export interface OutlineSection {
   id?: number | string | null;
+  section_id?: number | string | null;
   title: string;
+  heading?: string | null;
   summary?: string | null;
   goal?: string | null;
+  purpose?: string | null;
+  key_points?: string[] | null;
+  tone_hint?: string | null;
+  evidence_refs?: string[] | null;
   notes?: string | null;
 }
 
 export interface OutlinePlan {
+  article_goal?: string | null;
+  target_reader_takeaway?: string | null;
+  opening_hook?: string | null;
   summary?: string | null;
   sections: OutlineSection[];
+  ending_cta?: string | null;
+  estimated_word_count?: number | null;
   raw?: Record<string, unknown> | null;
 }
 
 export interface SectionDraft {
   id?: number | string | null;
+  section_id?: number | string | null;
   heading: string;
   summary?: string | null;
   content_markdown?: string | null;
   content_html?: string | null;
+  word_count?: number | null;
+  evidence_refs?: string[] | null;
   status?: string | null;
 }
 
 export interface ReviewIssueDetail {
+  code?: string | null;
   title?: string | null;
   description: string;
   severity?: string | null;
   location?: string | null;
+  section_id?: string | null;
   suggestion?: string | null;
 }
 
 export interface ReviewResult {
   reviewer?: string | null;
   passed?: boolean | null;
+  score?: number | null;
   summary?: string | null;
+  rewrite_suggestions?: string[] | null;
   issues?: ReviewIssueDetail[] | null;
+  failed?: boolean | null;
+  degraded?: boolean | null;
+  error_message?: string | null;
   raw?: Record<string, unknown> | null;
 }
 
@@ -202,9 +243,14 @@ export interface RewriteResult {
   title?: string | null;
   summary?: string | null;
   notes?: string | null;
+  used_rewrite?: boolean | null;
   content_markdown?: string | null;
   content_html?: string | null;
+  fixed_issues?: string[] | null;
   changed_sections?: string[] | null;
+  rewrite_failed?: boolean | null;
+  rewrite_skipped?: boolean | null;
+  failure_reason?: string | null;
   raw?: Record<string, unknown> | null;
 }
 
@@ -218,6 +264,7 @@ export interface EvaluationSummary {
   style_score?: number | null;
   structure_score?: number | null;
   evidence_score?: number | null;
+  repetition_score?: number | null;
   readability_score?: number | null;
   final_score?: number | null;
   summary?: string | null;
@@ -644,6 +691,8 @@ export interface DraftDetail {
   retrieved_memories?: ContentMemory[] | Record<string, unknown> | null;
   outline_plan?: OutlinePlan | Record<string, unknown> | null;
   section_drafts?: SectionDraft[] | Record<string, unknown> | null;
+  style_review?: ReviewResult | Record<string, unknown> | null;
+  structure_review?: ReviewResult | Record<string, unknown> | null;
   review_results?: ReviewResult[] | Record<string, unknown> | null;
   rewrite_result?: RewriteResult | Record<string, unknown> | null;
   evaluation?: EvaluationSummary | Record<string, unknown> | null;

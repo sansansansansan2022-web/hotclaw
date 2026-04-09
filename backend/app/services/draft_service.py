@@ -17,6 +17,7 @@ from app.core.logger import get_logger
 from app.core.tracer import generate_task_id
 from app.models.tables import ArticleDraftModel, AuditResultModel, TaskModel, AccountModel
 from app.models.wechat_config import WeChatConfigModel, WeChatPublishRecordModel
+from app.services.article_assembler_service import article_assembler_service
 
 logger = get_logger(__name__)
 
@@ -57,20 +58,14 @@ class DraftService:
         Returns:
             Created ArticleDraftModel
         """
-        # Extract content from result_data
-        content = result_data.get("content", {})
-        titles = result_data.get("titles", {})
-        topics = result_data.get("topics", {})
-        profile = result_data.get("profile", {})
+        normalized_result = article_assembler_service.normalize_result_data(result_data)
+        content = article_assembler_service.extract_article_payload(normalized_result)
 
-        # Get selected title and topic
-        selected_title = titles.get("selected_title", "Untitled")
-        title_candidates = titles.get("candidates", [])
-        selected_topic = topics.get("selected_topic", "")
+        selected_title = content.get("selected_title", "Untitled")
+        title_candidates = content.get("title_candidates", [])
+        selected_topic = content.get("selected_topic", "")
         summary = content.get("summary", "")
-
-        # Extract main content
-        main_content = content.get("content_markdown", content.get("content", ""))
+        main_content = content.get("content_markdown", "")
 
         # Determine draft status based on operation mode.
         # full_auto drafts can auto-publish later, but they are not yet marked as published.
@@ -173,6 +168,14 @@ class DraftService:
                 "issues": audit.issues,
             }
 
+        task_result = await db.execute(
+            select(TaskModel.result_data).where(TaskModel.id == draft.task_id)
+        )
+        task_result_data = task_result.scalar_one_or_none()
+        if not isinstance(task_result_data, dict):
+            task_result_data = {}
+        task_result_data = article_assembler_service.normalize_result_data(task_result_data)
+
         return {
             "id": draft.id,
             "task_id": draft.task_id,
@@ -195,6 +198,15 @@ class DraftService:
             "published_at": draft.published_at.isoformat() if draft.published_at else None,
             "publish_error_message": draft.publish_error_message,
             "audit_result": audit_result,
+            "style_profile": task_result_data.get("style_profile"),
+            "retrieved_memories": task_result_data.get("retrieved_memories"),
+            "outline_plan": task_result_data.get("outline_plan"),
+            "section_drafts": task_result_data.get("section_drafts"),
+            "style_review": task_result_data.get("style_review"),
+            "structure_review": task_result_data.get("structure_review"),
+            "review_results": task_result_data.get("review_results"),
+            "rewrite_result": task_result_data.get("rewrite_result"),
+            "evaluation": task_result_data.get("evaluation"),
             "created_at": draft.created_at.isoformat() if draft.created_at else None,
             "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,
         }

@@ -80,6 +80,15 @@ class DraftDetail(BaseModel):
     published_at: datetime | None
     publish_error_message: str | None
     audit_result: AuditResultInfo | None
+    style_profile: dict | None = None
+    retrieved_memories: list | dict | None = None
+    outline_plan: dict | None = None
+    section_drafts: list | dict | None = None
+    style_review: dict | None = None
+    structure_review: dict | None = None
+    review_results: list | dict | None = None
+    rewrite_result: dict | None = None
+    evaluation: dict | None = None
     created_at: datetime
     updated_at: datetime
 
