@@ -51,6 +51,7 @@ class StructureReviewerAgent(BaseAgent):
                         "message": {"type": "string"},
                         "section_id": {"type": "string"},
                         "suggestion": {"type": "string"},
+                        "evidence_excerpt": {"type": "string"},
                     },
                 },
             },
@@ -67,12 +68,13 @@ Review the outline plan, section drafts, and assembled article.
 Return strict JSON only.
 
 Focus on:
-- whether the article follows the outline
-- whether sections feel balanced and concrete
-- whether the closing lands well
-- whether any section feels thin or off-structure
+- whether the article follows the outline and preserves section progression
+- whether the hook, middle turns, and closing each do their proper job
+- whether sections feel thin, bloated, scattered, or too similar to one another
+- whether preferred reference-source structure cues are visible in the final piece
 
 Do not rewrite the article. Only review it.
+Make the issues specific enough that rewrite can act on them section by section.
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
@@ -115,25 +117,70 @@ Do not rewrite the article. Only review it.
         outline_plan = input_data.get("outline_plan") or {}
         section_drafts = input_data.get("section_drafts") or {}
         ops_context = input_data.get("ops_context") or {}
+        account_context = input_data.get("account_context") or {}
+        outline_summary = article_assembler_service.summarize_outline_plan(outline_plan)
+        section_summary = article_assembler_service.summarize_section_drafts(section_drafts)
+        reference_context = article_assembler_service.build_reference_source_context(
+            account_context,
+            ops_context,
+        )
+        review_job = {
+            "allowed_issue_codes": [
+                "generic_opening",
+                "weak_closing",
+                "section_thin",
+                "section_overweight",
+                "outline_misaligned",
+                "section_transition_flat",
+                "reference_structure_missed",
+            ],
+            "issue_requirements": {
+                "section_id": "Use the affected outline section when possible.",
+                "message": "Say what structural job failed and how that hurts the article.",
+                "suggestion": "Give a concrete revision direction.",
+                "evidence_excerpt": "Short quote or outline mismatch note when useful.",
+            },
+        }
 
         return "\n".join(
             [
                 "Review the article structure and outline fit.",
+                "Keep the summary short. Use issues[] for the real diagnosis.",
                 "",
-                "OPS CONTEXT",
-                f"- effective_mode: {(ops_context.get('run_strategy') or {}).get('effective_mode') or ''}",
-                f"- preferred_content_lane: {(ops_context.get('run_strategy') or {}).get('preferred_content_lane') or ''}",
+                "REVIEW RULES",
+                "- Prefer concrete structure problems over generic quality comments.",
+                "- Check whether opening_hook energy shows up in the opening and whether ending_cta is earned by the closing.",
+                "- Flag thin, bloated, or off-purpose sections with their section_id whenever possible.",
+                "- Check whether section transitions create real progression instead of parallel point-stacking.",
                 "",
-                "OUTLINE PLAN",
-                str(outline_plan),
+                "OPS SNAPSHOT",
+                article_assembler_service.to_pretty_json(
+                    {
+                        "effective_mode": (ops_context.get("run_strategy") or {}).get("effective_mode") or "",
+                        "preferred_content_lane": (ops_context.get("run_strategy") or {}).get("preferred_content_lane") or "",
+                    }
+                ),
                 "",
-                "SECTION DRAFTS",
-                str(section_drafts),
+                "REFERENCE STYLE BRIEF",
+                article_assembler_service.to_pretty_json(reference_context),
+                "",
+                "OUTLINE SUMMARY",
+                article_assembler_service.to_pretty_json(outline_summary),
+                "",
+                "SECTION SUMMARY",
+                article_assembler_service.to_pretty_json(section_summary),
                 "",
                 "ASSEMBLED ARTICLE",
-                f"- selected_title: {article.get('selected_title') or ''}",
-                f"- selected_topic: {article.get('selected_topic') or ''}",
-                f"- content_markdown: {article.get('content_markdown') or ''}",
+                article_assembler_service.to_pretty_json(
+                    {
+                        "selected_title": article.get("selected_title") or "",
+                        "selected_topic": article.get("selected_topic") or "",
+                        "content_markdown": article.get("content_markdown") or "",
+                    }
+                ),
+                "",
+                "OUTPUT CONTRACT",
+                article_assembler_service.to_pretty_json(review_job),
                 "",
                 "Return JSON with reviewer, passed, score, summary, issues, rewrite_suggestions.",
             ]
@@ -162,7 +209,7 @@ Do not rewrite the article. Only review it.
                     continue
                 normalized_issues.append(
                     {
-                        "code": str(item.get("code") or "structure_issue").strip() or "structure_issue",
+                        "code": self._normalize_issue_code(item.get("code")),
                         "severity": self._normalize_severity(item.get("severity")),
                         "message": message,
                         "description": message,
@@ -170,6 +217,7 @@ Do not rewrite the article. Only review it.
                         "location": self._as_optional_text(item.get("section_id")),
                         "title": self._as_optional_text(item.get("title")),
                         "suggestion": self._as_optional_text(item.get("suggestion")),
+                        "evidence_excerpt": self._as_optional_text(item.get("evidence_excerpt")),
                     }
                 )
 
@@ -212,6 +260,21 @@ Do not rewrite the article. Only review it.
         if text in {"high", "medium", "low"}:
             return text
         return "medium"
+
+    def _normalize_issue_code(self, value: Any) -> str:
+        text = str(value or "").strip().lower()
+        allowed_codes = {
+            "generic_opening",
+            "weak_closing",
+            "section_thin",
+            "section_overweight",
+            "outline_misaligned",
+            "section_transition_flat",
+            "reference_structure_missed",
+        }
+        if text in allowed_codes:
+            return text
+        return "outline_misaligned"
 
     def _as_optional_text(self, value: Any) -> str | None:
         text = str(value or "").strip()

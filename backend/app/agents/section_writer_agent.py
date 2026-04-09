@@ -60,16 +60,21 @@ Write section-level drafts from the provided outline.
 Return strict JSON only.
 
 Requirements:
-- Respect account tone, audience, automation plan summary, and ops context.
-- Use the preferred content lane if one is given.
-- Avoid the recent topics listed in ops_context.
-- Keep sections scannable and mobile-friendly.
-- Each section should have a clear purpose and a concrete takeaway.
+- The selected_topic and selected_title are locked. Do not widen or swap them for a neighboring theme.
+- Respect account tone, audience, automation plan summary, preferred content lane, and reference-source cues.
+- Each section must fulfill its own purpose, not just restate the article theme in new words.
+- Keep sections scannable and mobile-friendly, but do not sound like a checklist.
+- Reduce AI tone: no generic comfort-talk, no padded summaries, no rigid 'first/second/finally' scaffolding.
+- Make each section carry concrete movement through observation, contrast, scene, example, or action.
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
         system_prompt = self.get_system_prompt(context)
         user_prompt = self._build_user_prompt(input_data)
+        selected_title = article_assembler_service.extract_selected_title(input_data.get("titles"))
+        selected_topic = article_assembler_service.extract_selected_topic(
+            input_data.get("topics"), input_data.get("titles")
+        )
 
         try:
             model = settings.llm_model_name
@@ -89,7 +94,15 @@ Requirements:
             )
             content = response.choices[0].message.content
             data = self._parse_json(content)
-            return self._success(self._normalize_section_drafts(data))
+            normalized = self._normalize_section_drafts(data)
+            if not self._section_drafts_match_topic(normalized, selected_topic, selected_title):
+                fallback_result = await self.fallback(
+                    RuntimeError("section topic drift detected"),
+                    input_data,
+                )
+                if fallback_result and fallback_result.is_success:
+                    return fallback_result
+            return self._success(normalized)
         except json.JSONDecodeError as exc:
             return self._failure("JSON_PARSE_ERROR", f"Failed to parse section JSON: {exc}")
         except Exception as exc:
@@ -110,16 +123,23 @@ Requirements:
             heading = str(section.get("heading") or section.get("title") or f"Section {index + 1}").strip()
             summary = str(section.get("summary") or section.get("purpose") or "").strip()
             key_points = section.get("key_points") if isinstance(section.get("key_points"), list) else []
+            transition_hint = str(
+                section.get("section_transition_hint") or section.get("transition_hint") or ""
+            ).strip()
 
             paragraphs = [
-                f"This section supports the article '{title}' by focusing on {heading.lower()}.",
+                f"In '{title}', this section turns toward {heading.lower()} with a clear job to do.",
             ]
             if topic:
-                paragraphs.append(f"Keep the discussion anchored in {topic}.")
+                paragraphs.append(f"Keep the discussion anchored in {topic}, but move it forward instead of reintroducing the topic from zero.")
+            if summary:
+                paragraphs.append(summary)
             for point in key_points[:3]:
                 text = str(point).strip()
                 if text:
-                    paragraphs.append(f"- {text}")
+                    paragraphs.append(text)
+            if transition_hint:
+                paragraphs.append(transition_hint)
 
             content_markdown = "\n\n".join(paragraphs)
             section_drafts.append(
@@ -146,28 +166,69 @@ Requirements:
 
         selected_title = article_assembler_service.extract_selected_title(titles)
         selected_topic = article_assembler_service.extract_selected_topic(topics, titles)
+        outline_summary = article_assembler_service.summarize_outline_plan(outline)
         preferred_lane = (ops_context.get("run_strategy") or {}).get("preferred_content_lane")
+        preferred_source_ids = (ops_context.get("run_strategy") or {}).get("preferred_reference_source_ids") or []
+        reference_context = article_assembler_service.build_reference_source_context(
+            account_context,
+            ops_context,
+        )
+        account_snapshot = {
+            "account_name": account_context.get("account_name") or "unknown",
+            "positioning": account_context.get("positioning") or profile.get("positioning_raw") or "",
+            "audience": account_context.get("audience") or profile.get("target_audience") or "",
+            "tone_style": account_context.get("tone_style") or profile.get("tone") or "",
+            "content_strategy": account_context.get("content_strategy") or "",
+            "preferred_content_lane": preferred_lane or "",
+        }
+        ops_snapshot = {
+            "effective_mode": (ops_context.get("run_strategy") or {}).get("effective_mode") or "",
+            "preferred_content_lane": preferred_lane or "",
+            "avoid_recent_topics": (ops_context.get("run_strategy") or {}).get("avoid_recent_topics") or [],
+            "preferred_reference_source_ids": preferred_source_ids,
+        }
+        article_blueprint = {
+            "selected_topic": selected_topic,
+            "selected_title": selected_title,
+            "article_goal": outline_summary.get("article_goal"),
+            "target_reader_takeaway": outline_summary.get("target_reader_takeaway"),
+            "opening_hook": outline_summary.get("opening_hook"),
+            "ending_cta": outline_summary.get("ending_cta"),
+            "emotional_arc": outline_summary.get("emotional_arc"),
+            "sections": self._build_section_briefs(outline_summary),
+        }
 
         return "\n".join(
             [
                 "Write section-level article drafts from this outline.",
+                "The result should read like a writer drafting in sequence, not like a model filling a worksheet.",
                 "",
-                "ACCOUNT",
-                f"- name: {account_context.get('account_name') or 'unknown'}",
-                f"- positioning: {account_context.get('positioning') or profile.get('positioning_raw') or ''}",
-                f"- audience: {account_context.get('audience') or profile.get('target_audience') or ''}",
-                f"- tone: {account_context.get('tone_style') or profile.get('tone') or ''}",
-                f"- content strategy: {account_context.get('content_strategy') or ''}",
+                "WRITING RULES",
+                f"- Stay locked to this exact topic/title pair: {selected_topic} / {selected_title}. Do not widen it into the account's general domain.",
+                "- Follow each section's purpose and key_points closely. If a key point is weak, deepen it with observation or contrast instead of drifting away.",
+                "- The first section should inherit the energy of opening_hook. The last section should set up or echo ending_cta without sounding like a conclusion template.",
+                "- Use the preferred content lane and preferred reference-source cues to shape framing, cadence, and emphasis.",
+                "- Do not repeat what the previous section already established. Each new section must add something meaningfully new.",
+                "- Avoid these anti-patterns: empty background explanation, hollow motivational sentences, over-symmetry, 'first/second/finally', 'in conclusion/to sum up', and summary after summary.",
+                "- Every section should contain concrete movement: a scene, a sharp observation, a contrast, a mini-example, or a usable action.",
                 "",
-                "OPS CONTEXT",
-                f"- effective_mode: {(ops_context.get('run_strategy') or {}).get('effective_mode') or ''}",
-                f"- preferred_content_lane: {preferred_lane or ''}",
-                f"- avoid_recent_topics: {(ops_context.get('run_strategy') or {}).get('avoid_recent_topics') or []}",
+                "ACCOUNT SNAPSHOT",
+                article_assembler_service.to_pretty_json(account_snapshot),
                 "",
-                "ARTICLE",
-                f"- selected_topic: {selected_topic}",
-                f"- selected_title: {selected_title}",
-                f"- outline_plan: {outline}",
+                "OPS SNAPSHOT",
+                article_assembler_service.to_pretty_json(ops_snapshot),
+                "",
+                "REFERENCE STYLE BRIEF",
+                article_assembler_service.to_pretty_json(reference_context),
+                "",
+                "ARTICLE BLUEPRINT",
+                article_assembler_service.to_pretty_json(article_blueprint),
+                "",
+                "RETURN CONTRACT",
+                "- Return JSON with section_drafts.",
+                "- Each section_draft must include section_id, heading, summary, content_markdown, word_count, evidence_refs.",
+                "- content_markdown should be 2-5 short paragraphs or purposeful bullets only when the section naturally calls for bullets.",
+                "- summary should say what the section now accomplishes, not repeat the heading verbatim.",
                 "",
                 "Return JSON with section_drafts. Each section_draft must include section_id, heading, summary, content_markdown, word_count, evidence_refs.",
             ]
@@ -212,3 +273,80 @@ Requirements:
                 }
             )
         return {"section_drafts": normalized}
+
+    def _section_drafts_match_topic(
+        self,
+        section_drafts: dict[str, Any],
+        selected_topic: str,
+        selected_title: str,
+    ) -> bool:
+        drafts = section_drafts.get("section_drafts") if isinstance(section_drafts, dict) else []
+        if not isinstance(drafts, list):
+            return False
+
+        combined_text = " ".join(
+            " ".join(
+                [
+                    str(item.get("heading") or ""),
+                    str(item.get("summary") or ""),
+                    str(item.get("content_markdown") or ""),
+                ]
+            )
+            for item in drafts
+            if isinstance(item, dict)
+        )
+        return article_assembler_service.text_matches_topic(
+            combined_text,
+            selected_topic=selected_topic,
+            selected_title=selected_title,
+        )
+
+    def _build_section_briefs(self, outline_summary: dict[str, Any]) -> list[dict[str, Any]]:
+        sections = outline_summary.get("sections") if isinstance(outline_summary, dict) else []
+        if not isinstance(sections, list):
+            return []
+
+        total_sections = len(sections)
+        estimated_word_count = int(outline_summary.get("estimated_word_count") or 1200)
+        target_words = self._estimate_target_words(total_sections, estimated_word_count)
+
+        briefs: list[dict[str, Any]] = []
+        for index, section in enumerate(sections):
+            if not isinstance(section, dict):
+                continue
+            article_position = "middle"
+            if index == 0:
+                article_position = "opening"
+            elif index == total_sections - 1:
+                article_position = "closing"
+            briefs.append(
+                {
+                    "section_id": section.get("section_id") or f"s{index + 1}",
+                    "article_position": article_position,
+                    "heading": section.get("heading"),
+                    "purpose": section.get("purpose"),
+                    "summary": section.get("summary"),
+                    "key_points": section.get("key_points") or [],
+                    "tone_hint": section.get("tone_hint"),
+                    "section_transition_hint": section.get("section_transition_hint"),
+                    "evidence_refs": section.get("evidence_refs") or [],
+                    "target_words": target_words[index] if index < len(target_words) else None,
+                }
+            )
+        return briefs
+
+    def _estimate_target_words(self, section_count: int, estimated_word_count: int) -> list[int]:
+        if section_count <= 0:
+            return []
+        if section_count == 1:
+            return [estimated_word_count]
+
+        weights = [1.0 for _ in range(section_count)]
+        weights[0] = 0.95
+        weights[-1] = 0.9
+        for index in range(1, section_count - 1):
+            weights[index] = 1.1
+
+        weight_sum = sum(weights) or float(section_count)
+        targets = [max(180, int(estimated_word_count * weight / weight_sum)) for weight in weights]
+        return targets

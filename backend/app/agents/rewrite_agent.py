@@ -54,8 +54,9 @@ Use the assembled article and reviewer findings to make one revision pass.
 Return strict JSON only.
 
 Requirements:
-- preserve the article topic, title, and main argument
+- preserve the article topic, title, outline intent, and main argument
 - fix the most important style and structure issues first
+- pull the voice closer to the account and preferred reference sources when style drift is flagged
 - do not invent sources or facts
 - keep the article readable on mobile
 - do only one rewrite pass
@@ -104,38 +105,71 @@ Requirements:
         section_drafts = input_data.get("section_drafts") or {}
         ops_context = input_data.get("ops_context") or {}
         account_context = input_data.get("account_context") or {}
+        reference_context = article_assembler_service.build_reference_source_context(
+            account_context,
+            ops_context,
+        )
+        outline_summary = article_assembler_service.summarize_outline_plan(outline_plan)
+        section_summary = article_assembler_service.summarize_section_drafts(section_drafts)
+        review_focus = self._collect_review_focus(style_review, structure_review, review_results)
+        account_snapshot = {
+            "account_name": account_context.get("account_name") or "unknown",
+            "tone_style": account_context.get("tone_style") or "",
+            "positioning": account_context.get("positioning") or "",
+            "audience": account_context.get("audience") or "",
+            "preferred_content_lane": (ops_context.get("run_strategy") or {}).get("preferred_content_lane") or "",
+        }
 
         return "\n".join(
             [
                 "Rewrite the article once using the reviewer findings.",
+                "Do not perform a second-pass review. Make the strongest single rewrite you can.",
                 "",
-                "ACCOUNT",
-                f"- name: {account_context.get('account_name') or 'unknown'}",
-                f"- tone: {account_context.get('tone_style') or ''}",
-                f"- positioning: {account_context.get('positioning') or ''}",
+                "REWRITE PRIORITIES",
+                "- Fix medium/high reviewer issues before touching minor polish.",
+                "- If the style is generic or templated, replace the phrasing with something more specific, human, and account-consistent.",
+                "- If a section is thin or off-purpose, deepen it in place instead of drifting into a new topic.",
+                "- If opening or closing issues are flagged, rewrite those parts decisively so the article starts and lands with intent.",
+                "- Absorb reference-source cadence and framing cues without copying any reference sentences.",
                 "",
-                "OPS CONTEXT",
-                f"- effective_mode: {(ops_context.get('run_strategy') or {}).get('effective_mode') or ''}",
-                f"- preferred_content_lane: {(ops_context.get('run_strategy') or {}).get('preferred_content_lane') or ''}",
+                "ACCOUNT SNAPSHOT",
+                article_assembler_service.to_pretty_json(account_snapshot),
+                "",
+                "OPS SNAPSHOT",
+                article_assembler_service.to_pretty_json(
+                    {
+                        "effective_mode": (ops_context.get("run_strategy") or {}).get("effective_mode") or "",
+                        "preferred_content_lane": (ops_context.get("run_strategy") or {}).get("preferred_content_lane") or "",
+                    }
+                ),
+                "",
+                "REFERENCE STYLE BRIEF",
+                article_assembler_service.to_pretty_json(reference_context),
                 "",
                 "ARTICLE",
-                f"- selected_title: {article.get('selected_title') or ''}",
-                f"- selected_topic: {article.get('selected_topic') or ''}",
-                f"- summary: {article.get('summary') or ''}",
-                f"- content_markdown: {article.get('content_markdown') or ''}",
+                article_assembler_service.to_pretty_json(
+                    {
+                        "selected_title": article.get("selected_title") or "",
+                        "selected_topic": article.get("selected_topic") or "",
+                        "summary": article.get("summary") or "",
+                        "content_markdown": article.get("content_markdown") or "",
+                    }
+                ),
                 "",
-                "OUTLINE AND DRAFTS",
-                f"- outline_plan: {outline_plan}",
-                f"- section_drafts: {section_drafts}",
+                "OUTLINE SUMMARY",
+                article_assembler_service.to_pretty_json(outline_summary),
                 "",
-                "STYLE REVIEW",
-                str(style_review),
+                "SECTION SUMMARY",
+                article_assembler_service.to_pretty_json(section_summary),
                 "",
-                "STRUCTURE REVIEW",
-                str(structure_review),
+                "REVIEW FOCUS",
+                article_assembler_service.to_pretty_json(review_focus),
                 "",
-                "ALL REVIEW RESULTS",
-                str(review_results),
+                "RETURN CONTRACT",
+                "- Return JSON with revised_content_markdown, revision_summary, fixed_issues, changed_sections, used_rewrite.",
+                "- fixed_issues should list the issue codes you actually addressed.",
+                "- changed_sections should use section_ids when the rewrite was localized.",
+                "- revision_summary should explain the main improvements in one or two sentences.",
                 "",
                 "Return JSON with revised_content_markdown, revision_summary, fixed_issues, changed_sections, used_rewrite.",
             ]
@@ -197,3 +231,36 @@ Requirements:
     def _optional_text(self, value: Any) -> str | None:
         text = str(value or "").strip()
         return text or None
+
+    def _collect_review_focus(
+        self,
+        style_review: dict[str, Any],
+        structure_review: dict[str, Any],
+        review_results: list[Any],
+    ) -> dict[str, Any]:
+        normalized_reviews = [
+            article_assembler_service.summarize_review_result(style_review),
+            article_assembler_service.summarize_review_result(structure_review),
+        ]
+        for item in review_results:
+            if isinstance(item, dict):
+                summary = article_assembler_service.summarize_review_result(item)
+                reviewer = summary.get("reviewer")
+                if reviewer and reviewer not in {
+                    normalized_reviews[0].get("reviewer"),
+                    normalized_reviews[1].get("reviewer"),
+                }:
+                    normalized_reviews.append(summary)
+
+        priority_issues: list[dict[str, Any]] = []
+        for review in normalized_reviews:
+            for issue in review.get("issues", []):
+                if not isinstance(issue, dict):
+                    continue
+                if issue.get("severity") in {"high", "medium"}:
+                    priority_issues.append(issue)
+
+        return {
+            "reviews": normalized_reviews,
+            "priority_issues": priority_issues[:10],
+        }

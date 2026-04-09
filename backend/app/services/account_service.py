@@ -19,6 +19,7 @@ from app.core.tracer import generate_task_id, generate_account_id
 from app.models.tables import AccountModel, ReferenceSourceModel, TaskModel
 from app.services.automation_plan_service import automation_plan_service
 from app.services.account_harness_service import account_harness_service
+from app.services.article_assembler_service import article_assembler_service
 
 logger = get_logger(__name__)
 
@@ -536,10 +537,54 @@ class AccountService:
 
         account = await self.get_account(account_id, db)
         summary = await automation_plan_service.get_effective_summary(account, db)
+        source_rows = await db.execute(
+            select(
+                ReferenceSourceModel.id,
+                ReferenceSourceModel.name,
+                ReferenceSourceModel.source_type,
+                ReferenceSourceModel.sync_status,
+                ReferenceSourceModel.article_count,
+                ReferenceSourceModel.notes,
+                ReferenceSourceModel.source_value,
+                ReferenceSourceModel.metadata_json,
+            )
+            .where(
+                ReferenceSourceModel.account_id == account_id,
+                ReferenceSourceModel.is_enabled.is_(True),
+            )
+            .order_by(desc(ReferenceSourceModel.updated_at), desc(ReferenceSourceModel.id))
+            .limit(5)
+        )
         serializable_summary = {
             key: value.isoformat() if hasattr(value, "isoformat") else value
             for key, value in summary.items()
         }
+        reference_sources = []
+        for row in source_rows.all():
+            metadata = row.metadata_json if isinstance(row.metadata_json, dict) else {}
+            preview = (
+                metadata.get("preview")
+                or (row.source_value if row.source_type == "pasted_article" else None)
+            )
+            reference_sources.append(
+                {
+                    "id": str(row.id),
+                    "name": row.name,
+                    "source_type": row.source_type,
+                    "sync_status": row.sync_status,
+                    "article_count": int(row.article_count or 0),
+                    "notes": row.notes,
+                    "resolved_title": metadata.get("resolved_title"),
+                    "preview": article_assembler_service._clip_text(preview, 280),
+                    "metadata_json": metadata,
+                }
+            )
+
+        reference_source_briefs = article_assembler_service.build_reference_source_context(
+            {"reference_sources": reference_sources},
+            {},
+            limit=3,
+        )
         return {
             "account_id": account.id,
             "account_name": account.name,
@@ -548,6 +593,14 @@ class AccountService:
             "tone_style": account.tone_style,
             "content_strategy": account.content_strategy,
             "reference_accounts": account.reference_accounts,
+            "reference_sources": reference_sources,
+            "reference_source_briefs": reference_source_briefs.get("sources", []),
+            "reference_style_guide": {
+                "preferred_source_names": reference_source_briefs.get("preferred_source_names", []),
+                "style_takeaways": reference_source_briefs.get("style_takeaways", []),
+                "structure_takeaways": reference_source_briefs.get("structure_takeaways", []),
+                "usage_rules": reference_source_briefs.get("usage_rules", []),
+            },
             "operation_mode": summary.get("plan_type", account.operation_mode),
             "automation_plan_summary": serializable_summary,
         }

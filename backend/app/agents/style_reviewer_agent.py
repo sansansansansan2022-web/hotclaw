@@ -52,6 +52,7 @@ class StyleReviewerAgent(BaseAgent):
                         "message": {"type": "string"},
                         "section_id": {"type": "string"},
                         "suggestion": {"type": "string"},
+                        "evidence_excerpt": {"type": "string"},
                     },
                 },
             },
@@ -68,11 +69,12 @@ Review the assembled article and return strict JSON only.
 
 Focus on:
 - tone drift from the account voice
-- generic AI-sounding phrasing
-- weak or repetitive phrasing
-- whether the article sounds like the account instead of a generic assistant
+- whether the article sounds too generic or AI-written
+- whether the preferred reference-source style is actually visible in the draft
+- repetitive phrasing, templated transitions, and weak opening/closing voice
 
-Be concrete and conservative. Do not rewrite the article. Only review it.
+Be concrete and conservative. Do not rewrite the article.
+Flag only actionable problems and ground them in specific sections whenever possible.
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
@@ -117,31 +119,73 @@ Be concrete and conservative. Do not rewrite the article. Only review it.
                 "topics": input_data.get("topics"),
             }
         )
+        reference_context = article_assembler_service.build_reference_source_context(
+            account_context,
+            ops_context,
+        )
+        outline_summary = article_assembler_service.summarize_outline_plan(outline_plan)
+        section_summary = article_assembler_service.summarize_section_drafts(section_drafts)
+        account_snapshot = {
+            "account_name": account_context.get("account_name") or "unknown",
+            "positioning": account_context.get("positioning") or profile.get("positioning_raw") or "",
+            "audience": account_context.get("audience") or profile.get("target_audience") or "",
+            "tone_style": account_context.get("tone_style") or profile.get("tone") or "",
+            "content_strategy": account_context.get("content_strategy") or "",
+            "preferred_content_lane": (ops_context.get("run_strategy") or {}).get("preferred_content_lane") or "",
+        }
+        review_job = {
+            "allowed_issue_codes": [
+                "style_drift",
+                "reference_style_missed",
+                "templated_tone",
+                "repetitive_expression",
+                "generic_opening",
+                "weak_closing",
+                "section_thin",
+            ],
+            "issue_requirements": {
+                "section_id": "Set when you can localize the problem.",
+                "message": "Describe what is wrong and why it hurts the article voice.",
+                "suggestion": "Give one concrete edit direction rewrite can execute.",
+                "evidence_excerpt": "Quote a short problematic phrase when useful.",
+            },
+        }
 
         return "\n".join(
             [
                 "Review the article style fit and voice consistency.",
+                "Keep the summary short. Spend the detail budget on issues that rewrite can act on directly.",
                 "",
-                "ACCOUNT",
-                f"- name: {account_context.get('account_name') or 'unknown'}",
-                f"- positioning: {account_context.get('positioning') or profile.get('positioning_raw') or ''}",
-                f"- audience: {account_context.get('audience') or profile.get('target_audience') or ''}",
-                f"- tone: {account_context.get('tone_style') or profile.get('tone') or ''}",
-                f"- content strategy: {account_context.get('content_strategy') or ''}",
+                "REVIEW RULES",
+                "- Prefer 0-6 high-signal issues. Do not pad the review with vague praise.",
+                "- Judge whether the draft sounds like this account and whether preferred references actually influenced the writing.",
+                "- Catch AI-ish wording, templated transitions, repeated expressions, and lines that feel too generic for a real public-account writer.",
+                "- If the opening or closing feels generic, flag it directly instead of hiding it under a broad summary.",
                 "",
-                "OPS CONTEXT",
-                f"- effective_mode: {(ops_context.get('run_strategy') or {}).get('effective_mode') or ''}",
-                f"- preferred_content_lane: {(ops_context.get('run_strategy') or {}).get('preferred_content_lane') or ''}",
+                "ACCOUNT SNAPSHOT",
+                article_assembler_service.to_pretty_json(account_snapshot),
                 "",
-                "OUTLINE",
-                f"- outline_plan: {outline_plan}",
-                f"- section_drafts: {section_drafts}",
+                "REFERENCE STYLE BRIEF",
+                article_assembler_service.to_pretty_json(reference_context),
+                "",
+                "OUTLINE SUMMARY",
+                article_assembler_service.to_pretty_json(outline_summary),
+                "",
+                "SECTION SUMMARY",
+                article_assembler_service.to_pretty_json(section_summary),
                 "",
                 "ARTICLE",
-                f"- selected_title: {article.get('selected_title') or ''}",
-                f"- selected_topic: {article.get('selected_topic') or ''}",
-                f"- summary: {article.get('summary') or ''}",
-                f"- content_markdown: {article.get('content_markdown') or ''}",
+                article_assembler_service.to_pretty_json(
+                    {
+                        "selected_title": article.get("selected_title") or "",
+                        "selected_topic": article.get("selected_topic") or "",
+                        "summary": article.get("summary") or "",
+                        "content_markdown": article.get("content_markdown") or "",
+                    }
+                ),
+                "",
+                "OUTPUT CONTRACT",
+                article_assembler_service.to_pretty_json(review_job),
                 "",
                 "Return JSON with reviewer, passed, score, summary, issues, rewrite_suggestions.",
             ]
@@ -170,7 +214,7 @@ Be concrete and conservative. Do not rewrite the article. Only review it.
                     continue
                 normalized_issues.append(
                     {
-                        "code": str(item.get("code") or "style_issue").strip() or "style_issue",
+                        "code": self._normalize_issue_code(item.get("code")),
                         "severity": self._normalize_severity(item.get("severity")),
                         "message": message,
                         "description": message,
@@ -178,6 +222,7 @@ Be concrete and conservative. Do not rewrite the article. Only review it.
                         "location": self._as_optional_text(item.get("section_id")),
                         "title": self._as_optional_text(item.get("title")),
                         "suggestion": self._as_optional_text(item.get("suggestion")),
+                        "evidence_excerpt": self._as_optional_text(item.get("evidence_excerpt")),
                     }
                 )
 
@@ -220,6 +265,21 @@ Be concrete and conservative. Do not rewrite the article. Only review it.
         if text in {"high", "medium", "low"}:
             return text
         return "medium"
+
+    def _normalize_issue_code(self, value: Any) -> str:
+        text = str(value or "").strip().lower()
+        allowed_codes = {
+            "style_drift",
+            "reference_style_missed",
+            "templated_tone",
+            "repetitive_expression",
+            "generic_opening",
+            "weak_closing",
+            "section_thin",
+        }
+        if text in allowed_codes:
+            return text
+        return "style_drift"
 
     def _as_optional_text(self, value: Any) -> str | None:
         text = str(value or "").strip()

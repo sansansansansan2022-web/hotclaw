@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from copy import deepcopy
 from typing import Any
@@ -9,6 +10,242 @@ from typing import Any
 
 class ArticleAssemblerService:
     """Assemble section drafts into article content and normalize legacy outputs."""
+
+    def to_pretty_json(self, value: Any) -> str:
+        """Serialize prompt context as readable JSON for LLM calls."""
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except TypeError:
+            return json.dumps(str(value), ensure_ascii=False, indent=2)
+
+    def summarize_outline_plan(self, outline_plan: dict[str, Any] | None) -> dict[str, Any]:
+        """Build a compact outline summary for downstream prompts."""
+        outline_plan = outline_plan if isinstance(outline_plan, dict) else {}
+        sections: list[dict[str, Any]] = []
+        raw_sections = outline_plan.get("sections")
+        if isinstance(raw_sections, list):
+            for index, item in enumerate(raw_sections):
+                if not isinstance(item, dict):
+                    continue
+                sections.append(
+                    {
+                        "section_id": str(item.get("section_id") or item.get("id") or f"s{index + 1}"),
+                        "heading": self._clean_text(item.get("heading") or item.get("title"))
+                        or f"Section {index + 1}",
+                        "purpose": self._clean_text(item.get("purpose") or item.get("goal")),
+                        "summary": self._clean_text(item.get("summary")),
+                        "key_points": self._normalize_string_list(item.get("key_points")),
+                        "tone_hint": self._clean_text(item.get("tone_hint")),
+                        "section_transition_hint": self._clean_text(
+                            item.get("section_transition_hint") or item.get("transition_hint")
+                        ),
+                        "evidence_refs": self._normalize_string_list(item.get("evidence_refs")),
+                    }
+                )
+
+        return {
+            "article_goal": self._clean_text(outline_plan.get("article_goal")),
+            "target_reader_takeaway": self._clean_text(outline_plan.get("target_reader_takeaway")),
+            "opening_hook": self._clean_text(outline_plan.get("opening_hook")),
+            "emotional_arc": self._clean_text(outline_plan.get("emotional_arc")),
+            "ending_cta": self._clean_text(outline_plan.get("ending_cta")),
+            "estimated_word_count": int(outline_plan.get("estimated_word_count") or 0),
+            "summary": self._clean_text(outline_plan.get("summary")),
+            "sections": sections,
+        }
+
+    def summarize_section_drafts(
+        self,
+        section_drafts: dict[str, Any] | list[dict[str, Any]] | None,
+        *,
+        content_preview_chars: int = 220,
+    ) -> list[dict[str, Any]]:
+        """Build a compact section summary for review and rewrite prompts."""
+        normalized_sections = self._normalize_section_drafts(section_drafts)
+        return [
+            {
+                "section_id": item.get("section_id"),
+                "heading": item.get("heading"),
+                "summary": item.get("summary"),
+                "word_count": int(item.get("word_count") or self.count_words(item.get("content_markdown") or "")),
+                "evidence_refs": self._normalize_string_list(item.get("evidence_refs")),
+                "content_preview": self._clip_text(item.get("content_markdown"), content_preview_chars),
+            }
+            for item in normalized_sections
+        ]
+
+    def summarize_review_result(
+        self,
+        review_result: dict[str, Any] | None,
+        *,
+        issue_limit: int = 8,
+    ) -> dict[str, Any]:
+        """Compact reviewer output for rewrite prompts and diagnostics."""
+        review_result = review_result if isinstance(review_result, dict) else {}
+        issues = review_result.get("issues") if isinstance(review_result.get("issues"), list) else []
+        normalized_issues: list[dict[str, Any]] = []
+        for item in issues[:issue_limit]:
+            if not isinstance(item, dict):
+                continue
+            normalized_issues.append(
+                {
+                    "code": self._clean_text(item.get("code")) or "issue",
+                    "severity": self._clean_text(item.get("severity")) or "medium",
+                    "section_id": self._clean_text(item.get("section_id") or item.get("location")),
+                    "message": self._clean_text(item.get("message") or item.get("description")),
+                    "suggestion": self._clean_text(item.get("suggestion")),
+                    "evidence_excerpt": self._clean_text(item.get("evidence_excerpt")),
+                }
+            )
+        return {
+            "reviewer": self._clean_text(review_result.get("reviewer")),
+            "passed": review_result.get("passed"),
+            "summary": self._clean_text(review_result.get("summary")),
+            "rewrite_suggestions": self._normalize_string_list(review_result.get("rewrite_suggestions")),
+            "issues": normalized_issues,
+        }
+
+    def build_topic_anchors(self, *values: Any) -> list[str]:
+        """Extract lightweight anchor phrases from topic/title text for drift checks."""
+        anchors: list[str] = []
+        seen: set[str] = set()
+        weak_short_anchors = {
+            "为什",
+            "为什么",
+            "什么",
+            "怎么",
+            "如何",
+            "很多",
+            "一些",
+            "一个",
+            "这种",
+            "那种",
+            "这个",
+            "那个",
+            "不是",
+            "没有",
+            "我们",
+            "你们",
+            "他们",
+            "因为",
+            "所以",
+            "然后",
+            "最后",
+            "就是",
+        }
+        for value in values:
+            raw_text = self._clean_text(value)
+            parts = [
+                re.sub(r"[^\w\u4e00-\u9fff]+", "", part)
+                for part in re.split(r"[\s,，。！？、:：;；()（）【】《》“”\"'/-]+", raw_text)
+            ]
+            normalized_parts = [part for part in parts if len(part) >= 2] or [
+                re.sub(r"[^\w\u4e00-\u9fff]+", "", raw_text)
+            ]
+
+            for text in normalized_parts:
+                if len(text) < 2:
+                    continue
+
+                candidates = [text] if len(text) <= 8 else []
+                for width in (4, 3, 2, 5, 6):
+                    if len(text) < width:
+                        continue
+                    for index in range(len(text) - width + 1):
+                        candidates.append(text[index:index + width])
+
+                added_for_text = 0
+                for candidate in candidates:
+                    cleaned = candidate.strip()
+                    if len(cleaned) < 2:
+                        continue
+                    if cleaned in seen:
+                        continue
+                    if cleaned.isdigit():
+                        continue
+                    if len(cleaned) <= 3 and cleaned in weak_short_anchors:
+                        continue
+                    seen.add(cleaned)
+                    anchors.append(cleaned)
+                    added_for_text += 1
+                    if added_for_text >= 24:
+                        break
+        return anchors[:48]
+
+    def text_matches_topic(
+        self,
+        text: Any,
+        *,
+        selected_topic: Any,
+        selected_title: Any,
+    ) -> bool:
+        """Heuristic guard against large topic drift in generated content."""
+        haystack = re.sub(r"\s+", "", self._clean_text(text)).lower()
+        if not haystack:
+            return False
+
+        anchors = self.build_topic_anchors(selected_topic, selected_title)
+        if not anchors:
+            return True
+
+        strong_matches = [
+            anchor for anchor in anchors if len(anchor) >= 4 and anchor.lower() in haystack
+        ]
+        if strong_matches:
+            return True
+
+        medium_matches = {
+            anchor for anchor in anchors if len(anchor) in {2, 3} and anchor.lower() in haystack
+        }
+        return len(medium_matches) >= 2
+
+    def build_reference_source_context(
+        self,
+        account_context: dict[str, Any] | None,
+        ops_context: dict[str, Any] | None,
+        *,
+        limit: int = 3,
+    ) -> dict[str, Any]:
+        """Build a stable, lightweight reference style summary for content agents."""
+        account_context = account_context if isinstance(account_context, dict) else {}
+        ops_context = ops_context if isinstance(ops_context, dict) else {}
+
+        preferred_ids = [
+            str(item).strip()
+            for item in ((ops_context.get("run_strategy") or {}).get("preferred_reference_source_ids") or [])
+            if str(item).strip()
+        ]
+        source_items = account_context.get("reference_source_briefs")
+        if not isinstance(source_items, list):
+            source_items = account_context.get("reference_sources") or []
+        normalized_sources = self._normalize_reference_sources(source_items)
+        selected_sources = self._prioritize_reference_sources(normalized_sources, preferred_ids, limit=limit)
+
+        style_takeaways: list[str] = []
+        structure_takeaways: list[str] = []
+        for source in selected_sources:
+            style_text = source.get("style_clues") or source.get("notes")
+            if style_text:
+                style_takeaways.append(f"{source['name']}: {style_text}")
+            structure_text = source.get("preview") or source.get("resolved_title")
+            if structure_text:
+                structure_takeaways.append(f"{source['name']}: {structure_text}")
+
+        usage_rules = [
+            "Borrow framing, pacing, and voice cues from the references, but do not copy sentences or facts.",
+            "Let preferred reference sources influence hook shape, section progression, and closing pressure.",
+            "If a reference cue conflicts with the chosen topic, keep the topic accurate and only absorb the writing pattern.",
+        ]
+
+        return {
+            "source_count": len(normalized_sources),
+            "selected_source_ids": [source["id"] for source in selected_sources if source.get("id")],
+            "preferred_source_names": [source["name"] for source in selected_sources if source.get("name")],
+            "style_takeaways": style_takeaways[:limit],
+            "structure_takeaways": structure_takeaways[:limit],
+            "usage_rules": usage_rules,
+            "sources": selected_sources,
+        }
 
     def assemble_article(
         self,
@@ -62,7 +299,9 @@ class ArticleAssemblerService:
 
         ending_cta = self._clean_text(outline_plan.get("ending_cta"))
         if ending_cta:
-            body_parts.append(f"## Closing\n{ending_cta}")
+            last_body_part = body_parts[-1] if body_parts else ""
+            if ending_cta not in last_body_part:
+                body_parts.append(ending_cta)
 
         content_markdown = "\n\n".join(part for part in body_parts if part).strip()
         summary = (
@@ -421,6 +660,64 @@ class ArticleAssemblerService:
             if text and text not in normalized:
                 normalized.append(text)
         return normalized
+
+    def _normalize_reference_sources(self, value: Any) -> list[dict[str, Any]]:
+        if not isinstance(value, list):
+            return []
+
+        normalized: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            metadata = item.get("metadata_json") if isinstance(item.get("metadata_json"), dict) else {}
+            preview = self._clean_text(item.get("preview") or metadata.get("preview"))
+            source_value = self._clean_text(item.get("source_value"))
+            if not preview and source_value:
+                preview = source_value
+
+            notes = self._clip_text(item.get("notes"), 220)
+            normalized.append(
+                {
+                    "id": self._clean_text(item.get("id")),
+                    "name": self._clean_text(item.get("name")) or "Unnamed reference",
+                    "source_type": self._clean_text(item.get("source_type")) or "reference",
+                    "sync_status": self._clean_text(item.get("sync_status")) or "unknown",
+                    "article_count": int(item.get("article_count") or 0),
+                    "resolved_title": self._clip_text(item.get("resolved_title") or metadata.get("resolved_title"), 120),
+                    "notes": notes,
+                    "preview": self._clip_text(preview, 260),
+                    "style_clues": self._clip_text(item.get("style_clues") or notes, 180),
+                }
+            )
+        return normalized
+
+    def _prioritize_reference_sources(
+        self,
+        sources: list[dict[str, Any]],
+        preferred_ids: list[str],
+        *,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if not sources:
+            return []
+
+        preferred_index = {source_id: index for index, source_id in enumerate(preferred_ids)}
+
+        def _sort_key(item: dict[str, Any]) -> tuple[int, int, str]:
+            item_id = self._clean_text(item.get("id"))
+            is_preferred = 0 if item_id in preferred_index else 1
+            preferred_order = preferred_index.get(item_id, 999)
+            return (is_preferred, preferred_order, self._clean_text(item.get("name")))
+
+        sorted_sources = sorted(sources, key=_sort_key)
+        return sorted_sources[:limit]
+
+    def _clip_text(self, value: Any, limit: int) -> str:
+        text = self._clean_text(value)
+        if len(text) <= limit:
+            return text
+        clipped = text[: max(limit - 3, 0)].rstrip()
+        return f"{clipped}..."
 
     def _clean_text(self, value: Any) -> str:
         if value is None:
