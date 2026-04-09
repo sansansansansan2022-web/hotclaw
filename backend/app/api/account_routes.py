@@ -23,6 +23,8 @@ API 端点：
 - 前端 API: frontend/lib/api.ts (createAccount, listAccounts 等)
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,6 +50,26 @@ from app.services.account_service import account_service
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/accounts", tags=["accounts"])
+_background_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _run_account_task_in_background(task_id: str, account_id: str) -> None:
+    """Run an account-created task in a dedicated DB session."""
+    from app.db.session import async_session_factory
+    from app.core.tracer import set_task_id
+    from app.services.task_service import task_service
+
+    async with async_session_factory() as bg_db:
+        try:
+            set_task_id(task_id)
+            logger.info("account_run_background_started", account_id=account_id, task_id=task_id)
+            await task_service.run_task(task_id, bg_db)
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+        finally:
+            _background_tasks.pop(task_id, None)
 
 
 # =============================================================================
@@ -266,11 +288,21 @@ async def run_account(
     try:
         account, task = await account_service.run_account(account_id, db, allow_auto=False)
         await db.commit()
+        bg_task = asyncio.create_task(_run_account_task_in_background(task.id, account.id))
+        _background_tasks[task.id] = bg_task
+        logger.info("account_run_background_scheduled", account_id=account.id, task_id=task.id)
         return AccountRunData(
             account_id=account.id,
             task_id=task.id,
             status=task.status,
             operation_mode=account.operation_mode,
+            effective_mode=(
+                task.input_data.get("ops_context", {})
+                .get("run_strategy", {})
+                .get("effective_mode")
+                if isinstance(task.input_data, dict)
+                else None
+            ),
         )
     except AccountNotFoundError as e:
         logger.warning("account_run_not_found", account_id=account_id)

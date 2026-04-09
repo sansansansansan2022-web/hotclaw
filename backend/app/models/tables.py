@@ -12,7 +12,7 @@ from sqlalchemy import (
     JSON,
     func,
 )
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
 
 
 class Base(DeclarativeBase):
@@ -61,6 +61,12 @@ class AccountModel(Base):
     )
 
     tasks: Mapped[list["TaskModel"]] = relationship(back_populates="account")
+    automation_plans: Mapped[list["AutomationPlanModel"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+    reference_sources: Mapped[list["ReferenceSourceModel"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
 
 
 # =============================================================================
@@ -183,6 +189,10 @@ class ArticleDraftModel(Base):
     word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     structure: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # Legacy compatibility column kept in local SQLite schemas.
+    # Keep it synchronized with draft_status so runtime acceptance does not depend
+    # on stale demo/dev table definitions.
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     # Draft status: draft / pending_review / approved / rejected / discarded
     draft_status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     # Publish status: not_published / pending / published / failed
@@ -212,6 +222,11 @@ class ArticleDraftModel(Base):
     # Note: audit_result should be fetched via query by draft_id, not via relationship
     # to avoid circular import issues
 
+    @validates("draft_status")
+    def _sync_legacy_status(self, key: str, value: str) -> str:
+        self.status = value
+        return value
+
 
 class AuditResultModel(Base):
     """Audit results for article drafts."""
@@ -229,6 +244,66 @@ class AuditResultModel(Base):
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
     # Note: No back_populates relationship to avoid circular imports
+
+
+class ReferenceSourceModel(Base):
+    """Reference material source managed per account."""
+    __tablename__ = "reference_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("accounts.id"), nullable=False, index=True
+    )
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    source_value: Mapped[str] = mapped_column(Text, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    sync_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    article_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latest_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    account: Mapped["AccountModel"] = relationship(back_populates="reference_sources")
+
+
+class AutomationPlanModel(Base):
+    """Per-account automation plan used by runtime and scheduling logic."""
+
+    __tablename__ = "automation_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("accounts.id"), nullable=False, index=True
+    )
+    is_active_plan: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    plan_type: Mapped[str] = mapped_column(String(20), nullable=False, default="manual")
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    run_strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="manual_only")
+    schedule_type: Mapped[str] = mapped_column(String(20), nullable=False, default="none")
+    schedule_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    auto_publish_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    publish_review_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    max_posts_per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    min_interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="Asia/Shanghai")
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latest_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    degrade_policy_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    quality_threshold_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    account: Mapped["AccountModel"] = relationship(back_populates="automation_plans")
 
 
 class AgentModel(Base):

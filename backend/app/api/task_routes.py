@@ -16,16 +16,20 @@ Task API routes.
 """
 
 import asyncio
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.core.logger import get_logger
 from app.schemas.common import ApiResponse
 from app.schemas.task import TaskCreateRequest
 from app.services.task_service import task_service
+from app.services.account_harness_service import account_harness_service
 from app.core.tracer import get_trace_id, set_task_id
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
+logger = get_logger(__name__)
 
 # Store background tasks for cleanup
 # 【后台任务追踪】
@@ -169,13 +173,23 @@ async def get_task_detail(task_id: str, db: AsyncSession = Depends(get_db)) -> A
         { task_id, status, input_data, result_data, timestamps, tokens, ... }
     """
     task = await task_service.get_task(task_id, db)
+    account_name = task.account.name if getattr(task, "account", None) else None
+    logger.info(
+        "task_detail_loaded",
+        task_id=task.id,
+        account_id=task.account_id,
+        account_name=account_name,
+    )
 
     return ApiResponse(data={
         "task_id": task.id,
+        "account_id": task.account_id,
+        "account_name": account_name,
         "status": task.status,
         "input_data": task.input_data,
         "workflow_id": task.workflow_id,
         "result_data": task.result_data,
+        "ops_context": account_harness_service.extract_ops_context(task.input_data, task.result_data),
         "error_message": task.error_message,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "started_at": task.started_at.isoformat() if task.started_at else None,
@@ -221,6 +235,7 @@ async def list_tasks(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     status: str | None = Query(default=None),
+    account_id: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
     """
@@ -237,7 +252,13 @@ async def list_tasks(
     Returns:
         { tasks: [...], pagination: { page, page_size, total } }
     """
-    tasks, total = await task_service.list_tasks(db, page=page, page_size=page_size, status=status)
+    tasks, total = await task_service.list_tasks(
+        db,
+        page=page,
+        page_size=page_size,
+        status=status,
+        account_id=account_id,
+    )
 
     tasks_data = []
     for t in tasks:
@@ -252,6 +273,8 @@ async def list_tasks(
 
         tasks_data.append({
             "task_id": t.id,
+            "account_id": t.account_id,
+            "account_name": t.account.name if getattr(t, "account", None) else None,
             "positioning_summary": positioning[:50] + ("..." if len(positioning) > 50 else ""),
             "status": t.status,
             "created_at": t.created_at.isoformat() if t.created_at else None,

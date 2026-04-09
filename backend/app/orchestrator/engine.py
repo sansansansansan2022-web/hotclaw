@@ -1,330 +1,449 @@
-"""
-Orchestrator engine: loads workflow, schedules agents sequentially, manages workspace.
+"""Workflow orchestrator with structured content pipeline support."""
 
-【编排引擎】
-这是整个系统的"大脑"，负责：
-1. 定义工作流的节点顺序（DEFAULT_WORKFLOW_NODES）
-2. 按顺序执行每个智能体
-3. 管理 Workspace 数据共享
-4. 通过 SSE 广播实时状态
-5. 处理超时和降级策略
-
-核心设计原则（来自 NOTICE.md）：
-- 智能体顺序由编排器控制，智能体不能自行跳过或添加步骤
-- 单节点失败必须有明确的错误输出
-- 必须记录节点执行日志
-- 必须支持任务级追踪
-
-面试点：
-- Pipeline Pattern（线性流水线）
-- asyncio.wait_for 超时控制
-- Fallback 降级策略
-- Workspace 数据传递模式
-"""
+from __future__ import annotations
 
 import asyncio
-import time
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agents.base import BaseAgent, AgentResult
+from app.agents.base import AgentResult, BaseAgent
 from app.agents.registry import agent_registry
-from app.core.exceptions import AgentTimeoutError, AgentExecutionError
-from app.core.logger import get_logger
 from app.core.config import settings
+from app.core.exceptions import AgentExecutionError, AgentTimeoutError
+from app.core.logger import get_logger
 from app.core.tracer import get_trace_id
-from app.models.tables import TaskModel, TaskNodeRunModel, AgentModel
-from app.orchestrator.workspace import Workspace
+from app.models.tables import AgentModel, TaskModel, TaskNodeRunModel
 from app.orchestrator.broadcaster import broadcaster
+from app.orchestrator.workspace import Workspace
 from app.services.account_service import account_service
+from app.services.article_assembler_service import article_assembler_service
 
 logger = get_logger(__name__)
 
+STRUCTURED_CONTENT_NODE_IDS = {
+    "outline_planner",
+    "section_writer",
+    "article_assembler",
+}
 
-# =============================================================================
-# 工作流节点定义
-# =============================================================================
+REVIEWER_NODE_IDS = {
+    "style_reviewer",
+    "structure_reviewer",
+}
 
-# Default workflow node definitions for MVP (linear chain)
-# 【工作流定义】定义 6 个智能体的执行顺序和依赖关系
-# 每个节点包含：
-#   - node_id: 唯一标识
-#   - agent_id: 对应的智能体 ID（用于注册表查找）
-#   - name: 中文显示名称
-#   - input_mapping: 从 Workspace 提取哪些数据作为输入
-#   - output_key: 输出存到 Workspace 的哪个 key
-#   - required: 是否必须成功（False 时失败不中断流水线）
+REWRITE_NODE_IDS = {
+    "rewrite_agent",
+}
+
+LEGACY_CONTENT_FALLBACK_NODE = {
+    "node_id": "content_writing_fallback",
+    "agent_id": "content_writer_agent",
+    "name": "Legacy Content Writer Fallback",
+    "input_mapping": {
+        "profile": "profile",
+        "topics": "topics",
+        "titles": "titles",
+        "hot_topics": "hot_topics",
+        "account_context": "account_context",
+        "ops_context": "ops_context",
+    },
+    "output_key": "content",
+    "required": True,
+}
 
 DEFAULT_WORKFLOW_NODES = [
-    # ========== 节点 1: 账号定位解析 ==========
     {
         "node_id": "profile_parsing",
         "agent_id": "profile_agent",
-        "name": "账号定位解析",
-        # 【输入映射】从用户输入的 positioning 提取
+        "name": "Profile Parsing",
         "input_mapping": {"positioning": "input.positioning"},
-        # 【输出】账号画像存到 workspace["profile"]
         "output_key": "profile",
-        # 账号解析是后续所有节点的基础，必须成功
         "required": True,
     },
-    # ========== 节点 2: 热点分析 ==========
     {
         "node_id": "hot_topic_analysis",
         "agent_id": "hot_topic_agent",
-        "name": "热点分析",
-        # 依赖账号画像来搜索相关热点
+        "name": "Hot Topic Analysis",
         "input_mapping": {"profile": "profile"},
         "output_key": "hot_topics",
         "required": True,
     },
-    # ========== 节点 3: 选题策划 ==========
     {
         "node_id": "topic_planning",
         "agent_id": "topic_planner_agent",
-        "name": "选题策划",
-        # 需要画像和热点两个输入
-        "input_mapping": {"profile": "profile", "hot_topics": "hot_topics"},
+        "name": "Topic Planning",
+        "input_mapping": {
+            "profile": "profile",
+            "hot_topics": "hot_topics",
+            "account_context": "account_context",
+            "ops_context": "ops_context",
+        },
         "output_key": "topics",
         "required": True,
     },
-    # ========== 节点 4: 标题生成 ==========
     {
         "node_id": "title_generation",
         "agent_id": "title_generator_agent",
-        "name": "标题生成",
-        # 基于画像和选题生成标题
-        "input_mapping": {"profile": "profile", "topics": "topics"},
+        "name": "Title Generation",
+        "input_mapping": {
+            "profile": "profile",
+            "topics": "topics",
+            "account_context": "account_context",
+            "ops_context": "ops_context",
+        },
         "output_key": "titles",
         "required": True,
     },
-    # ========== 节点 5: 正文生成 ==========
     {
-        "node_id": "content_writing",
-        "agent_id": "content_writer_agent",
-        "name": "正文生成",
-        # 正文需要所有前置信息
+        "node_id": "outline_planner",
+        "agent_id": "outline_planner_agent",
+        "name": "Outline Planner",
         "input_mapping": {
+            "profile": "profile",
+            "hot_topics": "hot_topics",
+            "topics": "topics",
+            "titles": "titles",
+            "account_context": "account_context",
+            "ops_context": "ops_context",
+        },
+        "output_key": "outline_plan",
+        "required": True,
+    },
+    {
+        "node_id": "section_writer",
+        "agent_id": "section_writer_agent",
+        "name": "Section Writer",
+        "input_mapping": {
+            "outline_plan": "outline_plan",
             "profile": "profile",
             "topics": "topics",
             "titles": "titles",
             "hot_topics": "hot_topics",
+            "account_context": "account_context",
+            "ops_context": "ops_context",
         },
-        "output_key": "content",
+        "output_key": "section_drafts",
         "required": True,
     },
-    # ========== 节点 6: 审核评估 ==========
+    {
+        "node_id": "article_assembler",
+        "agent_id": "article_assembler_service",
+        "name": "Article Assembler",
+        "executor": "service",
+        "service": "article_assembler",
+        "input_mapping": {
+            "outline_plan": "outline_plan",
+            "section_drafts": "section_drafts",
+            "titles": "titles",
+            "topics": "topics",
+            "content": "content",
+        },
+        "output_key": "assembled_article",
+        "required": True,
+    },
+    {
+        "node_id": "style_reviewer",
+        "agent_id": "style_reviewer_agent",
+        "name": "Style Reviewer",
+        "input_mapping": {
+            "assembled_article": "assembled_article",
+            "content": "content",
+            "titles": "titles",
+            "topics": "topics",
+            "profile": "profile",
+            "account_context": "account_context",
+            "ops_context": "ops_context",
+            "outline_plan": "outline_plan",
+            "section_drafts": "section_drafts",
+        },
+        "output_key": "style_review",
+        "required": False,
+    },
+    {
+        "node_id": "structure_reviewer",
+        "agent_id": "structure_reviewer_agent",
+        "name": "Structure Reviewer",
+        "input_mapping": {
+            "outline_plan": "outline_plan",
+            "section_drafts": "section_drafts",
+            "assembled_article": "assembled_article",
+            "content": "content",
+            "titles": "titles",
+            "topics": "topics",
+            "account_context": "account_context",
+            "ops_context": "ops_context",
+        },
+        "output_key": "structure_review",
+        "required": False,
+    },
+    {
+        "node_id": "rewrite_agent",
+        "agent_id": "rewrite_agent",
+        "name": "Rewrite Agent",
+        "input_mapping": {
+            "titles": "titles",
+            "topics": "topics",
+            "outline_plan": "outline_plan",
+            "section_drafts": "section_drafts",
+            "assembled_article": "assembled_article",
+            "style_review": "style_review",
+            "structure_review": "structure_review",
+            "review_results": "review_results",
+            "account_context": "account_context",
+            "ops_context": "ops_context",
+        },
+        "output_key": "rewrite_result",
+        "required": False,
+    },
     {
         "node_id": "audit",
         "agent_id": "audit_agent",
-        "name": "审核评估",
-        # 审核需要标题和正文
-        "input_mapping": {"titles": "titles", "content": "content", "profile": "profile"},
+        "name": "Audit",
+        "input_mapping": {
+            "titles": "titles",
+            "content": "content",
+            "profile": "profile",
+        },
         "output_key": "audit_result",
-        # 【关键】审核不是必需的，文章生成后可直接返回
         "required": False,
     },
 ]
 
 
 class OrchestratorEngine:
-    """
-    执行工作流的引擎。
+    """Run the content workflow sequentially and persist node-level traces."""
 
-    【核心职责】
-    1. 遍历工作流节点，按顺序执行
-    2. 为每个节点创建运行记录 (TaskNodeRunModel)
-    3. 从 Workspace 提取智能体需要的输入数据
-    4. 执行智能体，处理超时和异常
-    5. 管理降级策略（Fallback）
-    6. 通过 SSE 广播实时状态
-    """
+    def get_workflow_node_count(self) -> int:
+        return len(DEFAULT_WORKFLOW_NODES)
+
+    def get_node_display_name(self, node_id: str, agent_id: str | None = None) -> str:
+        for node_def in [*DEFAULT_WORKFLOW_NODES, LEGACY_CONTENT_FALLBACK_NODE]:
+            if node_def["node_id"] == node_id:
+                return node_def["name"]
+        return agent_id or node_id
 
     async def run(self, task: TaskModel, db: AsyncSession) -> dict[str, Any]:
-        """
-        执行完整的工作流。
-
-        Args:
-            task: 任务模型实例（包含 positioning 输入）
-            db: 数据库会话（由调用者管理提交）
-
-        Returns:
-            最终的 workspace 快照，作为 result_data 存入数据库
-
-        工作流程：
-        1. 初始化 Workspace
-        2. 遍历每个节点：
-           - 创建 TaskNodeRunModel 记录
-           - 广播 node_start 事件
-           - 提取输入、解析 Prompt、执行智能体
-           - 成功 → 存结果，广播 node_complete
-           - 失败 → 尝试 Fallback，仍失败则根据 required 决定是否中断
-        3. 所有节点完成，广播 task_complete
-        """
-        # 获取当前请求的 trace_id（用于日志关联）
         trace_id = get_trace_id()
-        # 【关键】Workspace 是任务级数据容器，所有智能体共享
         workspace = Workspace(task_id=task.id, input_data=task.input_data or {})
-        nodes = DEFAULT_WORKFLOW_NODES
         total_tokens = 0
+        structured_pipeline_degraded = False
 
-        # ===== Account Context 注入 =====
-        # 如果任务关联了账号，获取账号上下文并注入到 workspace
-        # 这样智能体可以访问账号的定位、受众、内容策略等信息
         account_context = await account_service.get_account_context(task.account_id, db)
         if account_context:
             workspace.set("account_context", account_context)
             logger.info("account_context_injected", account_id=task.account_id)
 
-        # ===== 初始化任务状态 =====
+        ops_context = None
+        if isinstance(task.input_data, dict):
+            candidate = task.input_data.get("ops_context")
+            if isinstance(candidate, dict):
+                ops_context = candidate
+        if ops_context:
+            workspace.set("ops_context", ops_context)
+            logger.info(
+                "ops_context_injected",
+                account_id=task.account_id,
+                task_id=task.id,
+                effective_mode=(ops_context.get("run_strategy") or {}).get("effective_mode"),
+            )
+
         task.status = "running"
         task.started_at = datetime.now(timezone.utc)
         db.add(task)
-        # flush: 立即写入数据库（但不 commit），确保其他会话能看到
         await db.flush()
 
-        # ===== 遍历节点执行 =====
-        for idx, node_def in enumerate(nodes):
+        for idx, node_def in enumerate(DEFAULT_WORKFLOW_NODES):
             node_id = node_def["node_id"]
-            agent_id = node_def["agent_id"]
-            node_name = node_def["name"]
-            required = node_def.get("required", True)
+            if structured_pipeline_degraded and node_id in STRUCTURED_CONTENT_NODE_IDS:
+                await self._record_skipped_node(task.id, node_def, db, "legacy_content_fallback")
+                continue
 
-            # ----- 创建节点运行记录 -----
             node_run = TaskNodeRunModel(
                 task_id=task.id,
                 node_id=node_id,
-                agent_id=agent_id,
+                agent_id=node_def["agent_id"],
                 status="running",
                 started_at=datetime.now(timezone.utc),
             )
             db.add(node_run)
             await db.flush()
 
-            # ----- 广播节点启动事件 -----
-            # 前端 EventSource 监听此事件，开始显示"执行中"状态
-            await broadcaster.broadcast(task.id, "node_start", {
-                "node_id": node_id,
-                "agent_id": agent_id,
-                "name": node_name,
-                "index": idx,
-                "total": len(nodes),
-                "started_at": node_run.started_at.isoformat() if node_run.started_at else None,
-            })
-
-            # ----- 从 Workspace 提取输入 -----
-            # input_mapping 定义了"本智能体需要什么数据" → "从 Workspace 哪里取"
-            # 例如：{"profile": "profile"} → workspace.get("profile")
             agent_input = workspace.extract_for_agent(node_def["input_mapping"])
+            node_run.input_data = agent_input
+            db.add(node_run)
+            await db.flush()
+
+            await broadcaster.broadcast(
+                task.id,
+                "node_start",
+                {
+                    "node_id": node_id,
+                    "agent_id": node_def["agent_id"],
+                    "name": node_def["name"],
+                    "index": idx,
+                    "total": len(DEFAULT_WORKFLOW_NODES),
+                    "started_at": node_run.started_at.isoformat() if node_run.started_at else None,
+                },
+            )
 
             try:
-                # ----- 获取智能体实例 -----
-                agent = agent_registry.get(agent_id)
-
-                # ----- 解析系统 Prompt -----
-                # 【优先级】数据库自定义 > 智能体默认
-                effective_prompt = await self._resolve_system_prompt(
-                    agent_id, agent.default_system_prompt, db
-                )
-                context = workspace.snapshot()
-                context["system_prompt"] = effective_prompt
-
-                # ----- 【核心】执行智能体（带超时）-----
-                result = await self._execute_agent_with_timeout(
-                    agent, agent_input, context, trace_id
-                )
-
-                # ----- 处理执行结果 -----
+                result = await self._execute_node(node_def, agent_input, workspace.snapshot(), trace_id, db)
                 if result.is_success:
-                    # 成功：存入 Workspace，供后续节点使用
-                    workspace.set(node_def["output_key"], result.data)
+                    self._store_node_result(workspace, node_def, result.data or {})
                     node_run.status = "completed"
                     node_run.output_data = result.data
                 else:
-                    # 失败：尝试降级策略
-                    logger.warning("agent_returned_failure", agent_id=agent_id,
-                                   error=result.error)
-                    fallback_result = await agent.fallback(
-                        AgentExecutionError(
-                            agent_id,
-                            result.error.get("message", "unknown") if result.error else "unknown"
-                        ),
+                    error_message = self._result_error_message(result)
+                    if node_id in STRUCTURED_CONTENT_NODE_IDS:
+                        await self._mark_node_failed(node_run, error_message, db)
+                        await broadcaster.broadcast(
+                            task.id,
+                            "node_error",
+                            {"node_id": node_id, "error": error_message},
+                        )
+                        await self._run_legacy_content_fallback(
+                            task_id=task.id,
+                            workspace=workspace,
+                            db=db,
+                            trace_id=trace_id,
+                            reason=f"{node_id}: {error_message}",
+                        )
+                        structured_pipeline_degraded = True
+                        continue
+
+                    fallback_result = await self._execute_agent_fallback(
+                        node_def["agent_id"],
+                        AgentExecutionError(node_def["agent_id"], error_message),
                         agent_input,
                     )
                     if fallback_result and fallback_result.is_success:
-                        # 降级成功：使用 fallback 结果，标记为 degraded
-                        workspace.set(node_def["output_key"], fallback_result.data)
+                        self._store_node_result(workspace, node_def, fallback_result.data or {})
                         node_run.status = "completed"
                         node_run.output_data = fallback_result.data
-                        node_run.degraded = True  # 标记降级
-                    elif required:
-                        # 降级失败 + required → 中断流水线
-                        node_run.status = "failed"
-                        node_run.error_message = (
-                            result.error.get("message", "unknown") if result.error else "unknown"
+                        node_run.degraded = True
+                    elif node_def.get("required", True):
+                        await self._mark_node_failed(node_run, error_message, db)
+                        await broadcaster.broadcast(
+                            task.id,
+                            "node_error",
+                            {"node_id": node_id, "error": error_message},
                         )
-                        await self._finalize_node(node_run, db)
-                        await broadcaster.broadcast(task.id, "node_error", {
-                            "node_id": node_id, "error": node_run.error_message,
-                        })
-                        raise AgentExecutionError(agent_id, node_run.error_message or "")
+                        raise AgentExecutionError(node_def["agent_id"], error_message)
                     else:
-                        # 非必需节点失败 → 继续流水线，但记录错误
                         node_run.status = "failed"
-                        node_run.error_message = (
-                            result.error.get("message", "unknown") if result.error else "unknown"
+                        node_run.error_message = error_message
+                        node_run.degraded = True
+                        self._store_optional_node_failure(workspace, node_def, error_message)
+                        await broadcaster.broadcast(
+                            task.id,
+                            "node_error",
+                            {"node_id": node_id, "error": error_message},
                         )
-
-            except AgentExecutionError:
-                # AgentExecutionError 是业务异常，直接重新抛出
-                raise
             except asyncio.TimeoutError:
-                # 【超时处理】执行时间超过 agent_timeout
-                logger.warning("agent_timeout", agent_id=agent_id, timeout=settings.agent_timeout)
-                node_run.status = "failed"
-                node_run.error_message = f"agent {agent_id} timed out"
-                await self._finalize_node(node_run, db)
-                await broadcaster.broadcast(task.id, "node_error", {
-                    "node_id": node_id, "error": node_run.error_message,
-                })
-                if required:
-                    raise AgentTimeoutError(agent_id)
-            except Exception as e:
-                # 【兜底异常处理】捕获所有未预期错误
-                logger.error("node_execution_error", task_id=task.id, node_id=node_id, error=str(e))
-                node_run.status = "failed"
-                node_run.error_message = str(e)
-                await self._finalize_node(node_run, db)
-                await broadcaster.broadcast(task.id, "node_error", {
-                    "node_id": node_id, "error": str(e),
-                })
-                if required:
-                    raise AgentExecutionError(agent_id, str(e))
+                error_message = f"agent {node_def['agent_id']} timed out"
+                if node_id in STRUCTURED_CONTENT_NODE_IDS:
+                    await self._mark_node_failed(node_run, error_message, db)
+                    await broadcaster.broadcast(
+                        task.id,
+                        "node_error",
+                        {"node_id": node_id, "error": error_message},
+                    )
+                    await self._run_legacy_content_fallback(
+                        task_id=task.id,
+                        workspace=workspace,
+                        db=db,
+                        trace_id=trace_id,
+                        reason=f"{node_id}: timeout",
+                    )
+                    structured_pipeline_degraded = True
+                    continue
 
-            # ----- 结束节点：计算耗时 + 持久化 -----
+                if node_def.get("required", True):
+                    await self._mark_node_failed(node_run, error_message, db)
+                    await broadcaster.broadcast(
+                        task.id,
+                        "node_error",
+                        {"node_id": node_id, "error": error_message},
+                    )
+                    raise AgentTimeoutError(node_def["agent_id"])
+                node_run.status = "failed"
+                node_run.error_message = error_message
+                node_run.degraded = True
+                self._store_optional_node_failure(workspace, node_def, error_message)
+                await broadcaster.broadcast(
+                    task.id,
+                    "node_error",
+                    {"node_id": node_id, "error": error_message},
+                )
+            except AgentExecutionError:
+                raise
+            except Exception as exc:
+                error_message = str(exc)
+                if node_id in STRUCTURED_CONTENT_NODE_IDS:
+                    await self._mark_node_failed(node_run, error_message, db)
+                    await broadcaster.broadcast(
+                        task.id,
+                        "node_error",
+                        {"node_id": node_id, "error": error_message},
+                    )
+                    await self._run_legacy_content_fallback(
+                        task_id=task.id,
+                        workspace=workspace,
+                        db=db,
+                        trace_id=trace_id,
+                        reason=f"{node_id}: {error_message}",
+                    )
+                    structured_pipeline_degraded = True
+                    continue
+
+                logger.error(
+                    "node_execution_error",
+                    task_id=task.id,
+                    node_id=node_id,
+                    error=error_message,
+                )
+                if node_def.get("required", True):
+                    await self._mark_node_failed(node_run, error_message, db)
+                    await broadcaster.broadcast(
+                        task.id,
+                        "node_error",
+                        {"node_id": node_id, "error": error_message},
+                    )
+                    raise AgentExecutionError(node_def["agent_id"], error_message)
+                node_run.status = "failed"
+                node_run.error_message = error_message
+                node_run.degraded = True
+                self._store_optional_node_failure(workspace, node_def, error_message)
+                await broadcaster.broadcast(
+                    task.id,
+                    "node_error",
+                    {"node_id": node_id, "error": error_message},
+                )
+
             await self._finalize_node(node_run, db)
-
-            # ----- 广播节点完成事件 -----
             if node_run.status == "completed":
-                await broadcaster.broadcast(task.id, "node_complete", {
-                    "node_id": node_id,
-                    "agent_id": agent_id,
-                    "name": node_name,
-                    "elapsed_seconds": node_run.elapsed_seconds,
-                    "degraded": node_run.degraded,
-                    "output_summary": self._summarize_output(node_run.output_data),
-                })
+                await broadcaster.broadcast(
+                    task.id,
+                    "node_complete",
+                    {
+                        "node_id": node_id,
+                        "agent_id": node_def["agent_id"],
+                        "name": node_def["name"],
+                        "elapsed_seconds": node_run.elapsed_seconds,
+                        "degraded": node_run.degraded,
+                        "output_summary": self._summarize_output(node_run.output_data),
+                    },
+                )
 
-            # 累计 Token 消耗
             if node_run.prompt_tokens:
                 total_tokens += node_run.prompt_tokens
             if node_run.completion_tokens:
                 total_tokens += node_run.completion_tokens
 
-        # ===== 任务完成 =====
-        result_data = workspace.snapshot()
+        result_data = article_assembler_service.normalize_result_data(workspace.snapshot())
         task.status = "completed"
         task.completed_at = datetime.now(timezone.utc)
         task.result_data = result_data
@@ -334,82 +453,409 @@ class OrchestratorEngine:
         db.add(task)
         await db.flush()
 
-        await broadcaster.broadcast(task.id, "task_complete", {
-            "task_id": task.id,
-            "elapsed_seconds": task.elapsed_seconds,
-        })
-        # 通知 SSE 关闭连接，触发历史清理（60秒后）
+        await broadcaster.broadcast(
+            task.id,
+            "task_complete",
+            {
+                "task_id": task.id,
+                "elapsed_seconds": task.elapsed_seconds,
+            },
+        )
         await broadcaster.close_task(task.id)
-
         return result_data
+
+    async def _execute_node(
+        self,
+        node_def: dict[str, Any],
+        input_data: dict[str, Any],
+        context: dict[str, Any],
+        trace_id: str,
+        db: AsyncSession,
+    ) -> AgentResult:
+        if node_def.get("executor") == "service":
+            return await self._execute_service_node(node_def, input_data)
+
+        agent = agent_registry.get(node_def["agent_id"])
+        effective_prompt = await self._resolve_system_prompt(
+            node_def["agent_id"],
+            agent.default_system_prompt,
+            db,
+        )
+        enriched_context = dict(context)
+        enriched_context["system_prompt"] = effective_prompt
+        return await self._execute_agent_with_timeout(agent, input_data, enriched_context, trace_id)
+
+    async def _execute_service_node(
+        self, node_def: dict[str, Any], input_data: dict[str, Any]
+    ) -> AgentResult:
+        if node_def.get("service") != "article_assembler":
+            return AgentResult(
+                status="failed",
+                agent_name=node_def["agent_id"],
+                error={"code": "UNKNOWN_SERVICE", "message": f"Unknown service node: {node_def.get('service')}"},
+            )
+
+        assembled = article_assembler_service.assemble_article(
+            outline_plan=input_data.get("outline_plan"),
+            section_drafts=input_data.get("section_drafts"),
+            titles=input_data.get("titles"),
+            topics=input_data.get("topics"),
+            existing_content=input_data.get("content"),
+        )
+        return AgentResult(
+            status="success",
+            agent_name=node_def["agent_id"],
+            data=assembled,
+        )
 
     async def _execute_agent_with_timeout(
         self, agent: BaseAgent, input_data: dict, context: dict, trace_id: str
     ) -> AgentResult:
-        """
-        使用超时控制执行智能体。
-
-        【关键设计】asyncio.wait_for 实现超时
-        当超时时，抛出 asyncio.TimeoutError 异常，
-        由调用者捕获并决定如何处理（降级 or 中断）。
-        """
         return await asyncio.wait_for(
             agent.execute(input_data, context),
-            timeout=settings.agent_timeout,  # 默认 120 秒
+            timeout=settings.agent_timeout,
         )
+
+    async def _execute_agent_fallback(
+        self, agent_id: str, error: Exception, input_data: dict
+    ) -> AgentResult | None:
+        agent = agent_registry.get(agent_id)
+        return await agent.fallback(error, input_data)
+
+    async def _run_legacy_content_fallback(
+        self,
+        *,
+        task_id: str,
+        workspace: Workspace,
+        db: AsyncSession,
+        trace_id: str,
+        reason: str,
+    ) -> None:
+        logger.warning(
+            "structured_content_pipeline_fallback",
+            task_id=task_id,
+            reason=reason,
+        )
+
+        node_def = LEGACY_CONTENT_FALLBACK_NODE
+        node_run = TaskNodeRunModel(
+            task_id=task_id,
+            node_id=node_def["node_id"],
+            agent_id=node_def["agent_id"],
+            status="running",
+            started_at=datetime.now(timezone.utc),
+            degraded=True,
+        )
+        db.add(node_run)
+        await db.flush()
+
+        agent_input = workspace.extract_for_agent(node_def["input_mapping"])
+        node_run.input_data = agent_input
+        db.add(node_run)
+        await db.flush()
+
+        await broadcaster.broadcast(
+            task_id,
+            "node_start",
+            {
+                "node_id": node_def["node_id"],
+                "agent_id": node_def["agent_id"],
+                "name": node_def["name"],
+                "index": len(DEFAULT_WORKFLOW_NODES),
+                "total": len(DEFAULT_WORKFLOW_NODES) + 1,
+                "started_at": node_run.started_at.isoformat() if node_run.started_at else None,
+            },
+        )
+
+        try:
+            result = await self._execute_node(node_def, agent_input, workspace.snapshot(), trace_id, db)
+            if not result.is_success:
+                fallback_result = await self._execute_agent_fallback(
+                    node_def["agent_id"],
+                    AgentExecutionError(node_def["agent_id"], self._result_error_message(result)),
+                    agent_input,
+                )
+                if not fallback_result or not fallback_result.is_success:
+                    raise AgentExecutionError(
+                        node_def["agent_id"],
+                        self._result_error_message(result),
+                    )
+                result = fallback_result
+
+            legacy_content = article_assembler_service.extract_article_payload(
+                {
+                    "content": result.data,
+                    "titles": workspace.get("titles"),
+                    "topics": workspace.get("topics"),
+                }
+            )
+            workspace.set("content", legacy_content)
+            workspace.set("assembled_article", legacy_content)
+            workspace.set(
+                "content_pipeline",
+                {
+                    "version": "phase6-structured-v1",
+                    "used_structured_pipeline": False,
+                    "fallback_to_content_writer": True,
+                    "degraded": True,
+                    "fallback_reason": reason,
+                },
+            )
+
+            node_run.status = "completed"
+            node_run.output_data = legacy_content
+            node_run.degraded = True
+            await self._finalize_node(node_run, db)
+            await broadcaster.broadcast(
+                task_id,
+                "node_complete",
+                {
+                    "node_id": node_def["node_id"],
+                    "agent_id": node_def["agent_id"],
+                    "name": node_def["name"],
+                    "elapsed_seconds": node_run.elapsed_seconds,
+                    "degraded": True,
+                    "output_summary": self._summarize_output(legacy_content),
+                },
+            )
+        except Exception:
+            await self._mark_node_failed(node_run, reason, db)
+            await broadcaster.broadcast(
+                task_id,
+                "node_error",
+                {"node_id": node_def["node_id"], "error": reason},
+            )
+            raise
+
+    def _store_node_result(
+        self, workspace: Workspace, node_def: dict[str, Any], data: dict[str, Any]
+    ) -> None:
+        node_id = node_def["node_id"]
+        if node_id == "article_assembler":
+            workspace.set(node_def["output_key"], data)
+            workspace.set("content", data)
+            workspace.set(
+                "content_pipeline",
+                {
+                    "version": "phase6-structured-v1",
+                    "used_structured_pipeline": True,
+                    "fallback_to_content_writer": False,
+                    "degraded": False,
+                },
+            )
+            return
+        if node_id in REVIEWER_NODE_IDS:
+            review_result = self._normalize_review_result(node_id, data)
+            workspace.set(node_def["output_key"], review_result)
+            self._upsert_review_result(workspace, review_result)
+            pipeline = workspace.get("content_pipeline")
+            if not isinstance(pipeline, dict):
+                pipeline = {}
+            pipeline["review_attempted"] = True
+            workspace.set("content_pipeline", pipeline)
+            return
+        if node_id in REWRITE_NODE_IDS:
+            rewrite_result = self._normalize_rewrite_result(data)
+            workspace.set(node_def["output_key"], rewrite_result)
+
+            pipeline = workspace.get("content_pipeline")
+            if not isinstance(pipeline, dict):
+                pipeline = {}
+            pipeline["rewrite_attempted"] = True
+            pipeline["rewrite_used"] = bool(rewrite_result.get("used_rewrite"))
+            pipeline["rewrite_failed"] = bool(rewrite_result.get("rewrite_failed"))
+            if rewrite_result.get("used_rewrite"):
+                assembled_article = article_assembler_service.extract_assembled_article_payload(
+                    {
+                        "assembled_article": workspace.get("assembled_article"),
+                        "content": workspace.get("assembled_article") or workspace.get("content"),
+                        "titles": workspace.get("titles"),
+                        "topics": workspace.get("topics"),
+                        "outline_plan": workspace.get("outline_plan"),
+                        "section_drafts": workspace.get("section_drafts"),
+                    }
+                )
+                revised_article = dict(assembled_article)
+                revised_content = str(rewrite_result.get("revised_content_markdown") or "").strip()
+                revised_article["content_markdown"] = revised_content
+                revised_html = rewrite_result.get("revised_content_html")
+                if revised_html:
+                    revised_article["content_html"] = revised_html
+                revised_article["word_count"] = article_assembler_service.count_words(revised_content)
+                workspace.set("content", revised_article)
+            workspace.set("content_pipeline", pipeline)
+            return
+        workspace.set(node_def["output_key"], data)
+
+    def _store_optional_node_failure(
+        self, workspace: Workspace, node_def: dict[str, Any], error_message: str
+    ) -> None:
+        node_id = node_def["node_id"]
+        if node_id in REVIEWER_NODE_IDS:
+            review_result = {
+                "reviewer": node_id,
+                "passed": False,
+                "score": None,
+                "summary": f"{node_def['name']} failed. Keeping the assembled article without reviewer guidance.",
+                "issues": [],
+                "rewrite_suggestions": [],
+                "failed": True,
+                "degraded": True,
+                "error_message": error_message,
+            }
+            workspace.set(node_def["output_key"], review_result)
+            self._upsert_review_result(workspace, review_result)
+            pipeline = workspace.get("content_pipeline")
+            if not isinstance(pipeline, dict):
+                pipeline = {}
+            pipeline["review_degraded"] = True
+            pipeline["degraded"] = True
+            workspace.set("content_pipeline", pipeline)
+            return
+        if node_id in REWRITE_NODE_IDS:
+            rewrite_result = {
+                "used_rewrite": False,
+                "rewrite_failed": True,
+                "rewrite_skipped": True,
+                "revision_summary": "Rewrite failed. Keeping the assembled draft.",
+                "summary": "Rewrite failed. Keeping the assembled draft.",
+                "fixed_issues": [],
+                "failure_reason": error_message,
+            }
+            workspace.set(node_def["output_key"], rewrite_result)
+            pipeline = workspace.get("content_pipeline")
+            if not isinstance(pipeline, dict):
+                pipeline = {}
+            pipeline["rewrite_attempted"] = True
+            pipeline["rewrite_used"] = False
+            pipeline["rewrite_failed"] = True
+            pipeline["degraded"] = True
+            workspace.set("content_pipeline", pipeline)
+
+    def _normalize_review_result(self, node_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        reviewer = str(data.get("reviewer") or node_id).strip() or node_id
+        issues = data.get("issues") if isinstance(data.get("issues"), list) else []
+        rewrite_suggestions = (
+            [str(item).strip() for item in data.get("rewrite_suggestions", []) if str(item).strip()]
+            if isinstance(data.get("rewrite_suggestions"), list)
+            else []
+        )
+        normalized_score = None
+        raw_score = data.get("score")
+        try:
+            if raw_score is not None:
+                normalized_score = max(0.0, min(1.0, float(raw_score)))
+        except (TypeError, ValueError):
+            normalized_score = None
+        return {
+            "reviewer": reviewer,
+            "passed": data.get("passed"),
+            "score": normalized_score,
+            "summary": str(data.get("summary") or "").strip(),
+            "issues": issues,
+            "rewrite_suggestions": rewrite_suggestions,
+            "failed": bool(data.get("failed")),
+            "degraded": bool(data.get("degraded")),
+            "error_message": data.get("error_message"),
+        }
+
+    def _normalize_rewrite_result(self, data: dict[str, Any]) -> dict[str, Any]:
+        revised_content = str(
+            data.get("revised_content_markdown")
+            or data.get("content_markdown")
+            or data.get("content")
+            or ""
+        ).strip()
+        used_rewrite = data.get("used_rewrite")
+        if not isinstance(used_rewrite, bool):
+            used_rewrite = bool(revised_content)
+        return {
+            "used_rewrite": used_rewrite,
+            "revised_content_markdown": revised_content,
+            "revised_content_html": data.get("revised_content_html") or data.get("content_html"),
+            "revision_summary": str(data.get("revision_summary") or data.get("summary") or "").strip(),
+            "summary": str(data.get("revision_summary") or data.get("summary") or "").strip(),
+            "fixed_issues": [
+                str(item).strip()
+                for item in data.get("fixed_issues", [])
+                if str(item).strip()
+            ] if isinstance(data.get("fixed_issues"), list) else [],
+            "changed_sections": [
+                str(item).strip()
+                for item in data.get("changed_sections", [])
+                if str(item).strip()
+            ] if isinstance(data.get("changed_sections"), list) else [],
+            "rewrite_failed": bool(data.get("rewrite_failed")),
+            "rewrite_skipped": bool(data.get("rewrite_skipped")),
+            "failure_reason": data.get("failure_reason"),
+        }
+
+    def _upsert_review_result(self, workspace: Workspace, review_result: dict[str, Any]) -> None:
+        existing = workspace.get("review_results")
+        review_results = existing if isinstance(existing, list) else []
+        reviewer = review_result.get("reviewer")
+        filtered = [
+            item
+            for item in review_results
+            if not (isinstance(item, dict) and item.get("reviewer") == reviewer)
+        ]
+        filtered.append(review_result)
+        workspace.set("review_results", filtered)
+
+    async def _record_skipped_node(
+        self,
+        task_id: str,
+        node_def: dict[str, Any],
+        db: AsyncSession,
+        reason: str,
+    ) -> None:
+        node_run = TaskNodeRunModel(
+            task_id=task_id,
+            node_id=node_def["node_id"],
+            agent_id=node_def["agent_id"],
+            status="skipped",
+            error_message=reason,
+            degraded=True,
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+            elapsed_seconds=0,
+        )
+        db.add(node_run)
+        await db.flush()
 
     async def _resolve_system_prompt(
         self, agent_id: str, default_prompt: str, db: AsyncSession
     ) -> str:
-        """
-        解析有效的系统 Prompt。
-
-        【Prompt 优先级】数据库自定义 > 智能体默认
-        允许管理员在数据库中覆盖特定智能体的 Prompt，
-        实现零代码调整智能体行为。
-
-        Args:
-            agent_id: 智能体 ID
-            default_prompt: 智能体代码中定义的默认 Prompt
-            db: 数据库会话
-
-        Returns:
-            最终使用的系统 Prompt
-        """
-        from sqlalchemy import select
-
-        # 查询数据库是否有自定义 Prompt
         stmt = select(AgentModel.prompt_template).where(AgentModel.agent_id == agent_id)
         result = await db.execute(stmt)
         db_prompt = result.scalar_one_or_none()
-
         if db_prompt:
             logger.info("prompt_resolved", agent_id=agent_id, source="custom")
             return db_prompt
-
         logger.info("prompt_resolved", agent_id=agent_id, source="default")
         return default_prompt
 
-    async def _finalize_node(self, node_run: TaskNodeRunModel, db: AsyncSession) -> None:
-        """
-        结束节点：计算耗时并持久化。
+    async def _mark_node_failed(
+        self, node_run: TaskNodeRunModel, error_message: str, db: AsyncSession
+    ) -> None:
+        node_run.status = "failed"
+        node_run.error_message = error_message
+        await self._finalize_node(node_run, db)
 
-        注意：只 flush 不 commit，事务由调用者（run 方法）统一管理。
-        """
-        node_run.completed_at = datetime.now(timezone.utc)
+    async def _finalize_node(self, node_run: TaskNodeRunModel, db: AsyncSession) -> None:
+        if node_run.completed_at is None:
+            node_run.completed_at = datetime.now(timezone.utc)
         if node_run.started_at and node_run.completed_at:
-            # 计算执行耗时（秒）
             node_run.elapsed_seconds = (node_run.completed_at - node_run.started_at).total_seconds()
         db.add(node_run)
         await db.flush()
 
-    def _summarize_output(self, output: dict | None) -> str:
-        """
-        为 SSE 输出创建简短摘要。
+    def _result_error_message(self, result: AgentResult) -> str:
+        if not result.error:
+            return "unknown agent failure"
+        return str(result.error.get("message") or "unknown agent failure")
 
-        前端只需要知道输出了哪些字段，不需要完整数据。
-        例如：'keys: domain, subdomain, target_audience... (7 total)'
-        """
+    def _summarize_output(self, output: dict | None) -> str:
         if not output:
             return ""
         keys = list(output.keys())
@@ -418,6 +864,4 @@ class OrchestratorEngine:
         return f"keys: {', '.join(keys[:3])}... ({len(keys)} total)"
 
 
-# 【单例模式】全局编排引擎实例
-# 整个应用共享同一个引擎实例
 orchestrator_engine = OrchestratorEngine()

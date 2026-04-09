@@ -1,10 +1,10 @@
 import { AppShell } from "@/components/console/layout";
-import { AccountFormPage } from "@/components/console/account-form";
+import { AccountOnboardingWizard } from "@/components/console/account-onboarding-wizard";
 
 export default function NewAccountRoute() {
   return (
     <AppShell>
-      <AccountFormPage />
+      <AccountOnboardingWizard />
     </AppShell>
   );
 }

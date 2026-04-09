@@ -173,13 +173,13 @@ export function DashboardPage() {
             <Link href="/accounts/new">
               <Button>
                 <Icon name="plus" className="h-4 w-4" />
-                Add Account
+                {locale === "zh-CN" ? "接入公众号" : "Connect Account"}
               </Button>
             </Link>
             <Link href="/workspace">
               <Button variant="secondary">
                 <Icon name="arrowUpRight" className="h-4 w-4" />
-                Open Workspace
+                {locale === "zh-CN" ? "调试工作台" : "Debug Workspace"}
               </Button>
             </Link>
           </>
@@ -279,7 +279,7 @@ export function DashboardPage() {
                   description={t("dashboard.noAccountsDesc")}
                   action={
                     <Link href="/accounts/new">
-                      <Button>{t("dashboard.addFirstAccount")}</Button>
+                      <Button>{locale === "zh-CN" ? "接入第一个公众号" : "Connect Your First Account"}</Button>
                     </Link>
                   }
                 />
@@ -359,7 +359,7 @@ export function DashboardPage() {
                 description="Kick off a manual workflow from the workspace or run an account to populate task history."
                 action={
                   <Link href="/workspace">
-                    <Button>Open Workspace</Button>
+                    <Button>{locale === "zh-CN" ? "打开调试工作台" : "Open Debug Workspace"}</Button>
                   </Link>
                 }
               />

@@ -217,7 +217,7 @@ const dictionaries: Record<AppLocale, Record<string, string>> = {
     "settings.notifications": "通知",
     "settings.notificationsDesc": "通知规则还没有独立的后端接口。",
     "settings.billing": "计费",
-    "settings.billingDesc": "计费管理不在当前后端能力范围内。",
+    "settings.billingDesc": "开发中.....",
     "settings.audit": "审核与合规",
     "settings.auditDesc": "审核逻辑已存在于任务和草稿流里，但还没有独立设置接口。",
     "settings.systemInfo": "系统信息",

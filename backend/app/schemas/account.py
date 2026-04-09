@@ -3,6 +3,8 @@
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+from app.schemas.automation_plan import AutomationPlanCreateRequest, AutomationPlanSummary
+
 
 # =============================================================================
 # Enums
@@ -45,6 +47,9 @@ class AccountCreateRequest(BaseModel):
     publish_paused: bool = Field(default=False, description="是否暂停发布")
     max_posts_per_day: int | None = Field(default=None, ge=1, le=100, description="每日最大发布数")
     min_interval_minutes: int | None = Field(default=None, ge=1, le=1440, description="最小发布间隔（分钟）")
+
+
+    automation_plan: AutomationPlanCreateRequest | None = None
 
 
 class AccountUpdateRequest(BaseModel):
@@ -131,6 +136,14 @@ class AccountDetail(BaseModel):
     last_publish_status: str | None
     last_publish_error_message: str | None
     last_published_at: datetime | None
+    reference_source_count: int = 0
+    reference_source_enabled_count: int = 0
+    reference_source_last_sync_status: str | None = None
+    automation_plan_summary: AutomationPlanSummary | None = None
+    latest_ops_context: dict | None = None
+    latest_effective_mode: str | None = None
+    latest_allow_auto_publish: bool | None = None
+    latest_ops_degraded: bool = False
     created_at: datetime
     updated_at: datetime
     recent_tasks: list[AccountTaskSummary]
@@ -150,6 +163,7 @@ class AccountRunData(BaseModel):
     task_id: str
     status: str
     operation_mode: str
+    effective_mode: str | None = None
 
 
 class AccountListResponse(BaseModel):

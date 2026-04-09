@@ -22,6 +22,9 @@ const navItems = [
 
 function pathLabel(pathname: string): string {
   const item = navItems.find((entry) => pathname === entry.href || pathname.startsWith(`${entry.href}/`));
+  if (item?.href === "/workspace") {
+    return pathname.startsWith("/workspace") ? "__debug_workspace__" : item.labelKey;
+  }
   return item?.labelKey ?? "HotClaw";
 }
 
@@ -91,12 +94,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const session = useAppStore((state) => state.session);
   const mobileNavOpen = useAppStore((state) => state.mobileNavOpen);
   const setMobileNavOpen = useAppStore((state) => state.setMobileNavOpen);
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
 
   const title = useMemo(() => {
     const key = pathLabel(pathname);
+    if (key === "__debug_workspace__") {
+      return pathname.startsWith("/workspace") ? (locale === "zh-CN" ? "调试工作台" : "Debug Workspace") : "HotClaw";
+    }
     return key === "HotClaw" ? "HotClaw" : t(key);
-  }, [pathname, t]);
+  }, [locale, pathname, t]);
   const displayName = session?.displayName || "HotClaw Operator";
   const email = session?.email || "local-adapter@hotclaw.dev";
 
@@ -147,9 +153,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     ? "border border-brand-200 bg-brand-50 text-brand-700 shadow-sm"
                     : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
                 )}
-              >
+                >
                 <Icon name={item.icon} className="h-4 w-4" />
-                <span>{t(item.labelKey)}</span>
+                <span>{item.href === "/workspace" ? (locale === "zh-CN" ? "调试工作台" : "Debug Workspace") : t(item.labelKey)}</span>
               </Link>
             );
           })}

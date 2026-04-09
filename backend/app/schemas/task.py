@@ -58,19 +58,25 @@ class NodeRunData(BaseModel):
 
 class TaskDetailResponse(BaseModel):
     task_id: str
+    account_id: str | None = None
+    account_name: str | None = None
     status: str
     input_data: dict | None = None
     workflow_id: str
     result_data: dict | None = None
+    ops_context: dict | None = None
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
     elapsed_seconds: float | None = None
     total_tokens: int | None = None
+    error_message: str | None = None
 
 
 class TaskSummary(BaseModel):
     task_id: str
+    account_id: str | None = None
+    account_name: str | None = None
     positioning_summary: str
     status: str
     created_at: datetime

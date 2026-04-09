@@ -79,6 +79,24 @@ async def list_drafts(
         raise
 
 
+@router.get("/pending-count")
+async def get_pending_review_count(
+    account_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get count of pending review drafts for an account.
+
+    Can be filtered by account_id.
+    """
+    try:
+        count = await draft_service.get_pending_review_count(db, account_id)
+        return {"count": count, "account_id": account_id}
+    except Exception as e:
+        logger.error("draft_pending_count_error", error=str(e))
+        raise
+
+
 @router.get("/{draft_id}", response_model=DraftDetail)
 async def get_draft(
     draft_id: int,
@@ -216,24 +234,6 @@ async def rerun_draft(
         raise
     except Exception as e:
         logger.error("draft_rerun_error", draft_id=draft_id, error=str(e))
-        raise
-
-
-@router.get("/pending-count")
-async def get_pending_review_count(
-    account_id: str | None = Query(None),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    Get count of pending review drafts for an account.
-
-    Can be filtered by account_id.
-    """
-    try:
-        count = await draft_service.get_pending_review_count(db, account_id)
-        return {"count": count, "account_id": account_id}
-    except Exception as e:
-        logger.error("draft_pending_count_error", error=str(e))
         raise
 
 

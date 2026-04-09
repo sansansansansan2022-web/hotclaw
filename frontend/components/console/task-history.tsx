@@ -17,7 +17,7 @@ function taskTone(status: string): "success" | "warning" | "danger" | "muted" {
   return "muted";
 }
 
-export function TaskHistoryPage() {
+export function TaskHistoryPage({ initialAccountId }: { initialAccountId?: string | null }) {
   const { locale, t, taskStatusLabel } = useI18n();
   const pushToast = useAppStore((state) => state.pushToast);
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
@@ -29,7 +29,7 @@ export function TaskHistoryPage() {
     try {
       setLoading(true);
       setError(null);
-      const response = await listTasks(1, 100, status === "all" ? undefined : status);
+      const response = await listTasks(1, 100, status === "all" ? undefined : status, initialAccountId ?? undefined);
       setTasks(response.tasks);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t("tasks.loadError"));
@@ -40,7 +40,7 @@ export function TaskHistoryPage() {
 
   useEffect(() => {
     void load();
-  }, [status]);
+  }, [initialAccountId, status]);
 
   const stats = useMemo(() => {
     const completed = tasks.filter((task) => task.status === "completed").length;
@@ -55,14 +55,14 @@ export function TaskHistoryPage() {
       pushToast({
         tone: "success",
         title: t("tasks.rerunQueued"),
-        message: locale === "zh-CN" ? `任务 ${created.task_id} 已再次开始运行。` : `Task ${created.task_id} is running again.`,
+        message: locale === "zh-CN" ? `任务 ${created.task_id} 已重新进入队列。` : `Task ${created.task_id} is queued again.`,
       });
       await load();
     } catch (rerunError) {
       pushToast({
         tone: "danger",
         title: t("tasks.rerunFailed"),
-        message: rerunError instanceof Error ? rerunError.message : (locale === "zh-CN" ? "发生了意外错误" : "Unexpected error"),
+        message: rerunError instanceof Error ? rerunError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error",
       });
     }
   };
@@ -70,17 +70,30 @@ export function TaskHistoryPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow={t("tasks.eyebrow")}
-        title={t("tasks.title")}
-        description={t("tasks.description")}
+        eyebrow={initialAccountId ? (locale === "zh-CN" ? "账号任务历史" : "Account Task History") : t("tasks.eyebrow")}
+        title={initialAccountId ? (locale === "zh-CN" ? "本账号任务" : "Account Tasks") : t("tasks.title")}
+        description={
+          initialAccountId
+            ? locale === "zh-CN"
+              ? "只展示这个账号上下文里产生的任务记录，让任务重新回到账号工作区语义。"
+              : "Show only the task records created inside this account context so tasks stay anchored to the account workspace."
+            : t("tasks.description")
+        }
         actions={
-          <Select value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="all">{t("tasks.allStatuses")}</option>
-            <option value="pending">{taskStatusLabel("pending")}</option>
-            <option value="running">{taskStatusLabel("running")}</option>
-            <option value="completed">{taskStatusLabel("completed")}</option>
-            <option value="failed">{taskStatusLabel("failed")}</option>
-          </Select>
+          <div className="flex flex-wrap items-center gap-3">
+            {initialAccountId ? (
+              <Link href={`/accounts/${initialAccountId}`}>
+                <Button variant="secondary">{locale === "zh-CN" ? "返回账号" : "Back to Account"}</Button>
+              </Link>
+            ) : null}
+            <Select value={status} onChange={(event) => setStatus(event.target.value)}>
+              <option value="all">{t("tasks.allStatuses")}</option>
+              <option value="pending">{taskStatusLabel("pending")}</option>
+              <option value="running">{taskStatusLabel("running")}</option>
+              <option value="completed">{taskStatusLabel("completed")}</option>
+              <option value="failed">{taskStatusLabel("failed")}</option>
+            </Select>
+          </div>
         }
       />
 
@@ -98,6 +111,7 @@ export function TaskHistoryPage() {
         <Table
           columns={[
             locale === "zh-CN" ? "任务" : "Task",
+            locale === "zh-CN" ? "所属账号" : "Account",
             locale === "zh-CN" ? "状态" : "Status",
             locale === "zh-CN" ? "创建时间" : "Created",
             locale === "zh-CN" ? "耗时" : "Duration",
@@ -112,6 +126,15 @@ export function TaskHistoryPage() {
                   <p className="text-sm font-semibold text-slate-900">{task.task_id}</p>
                   <p className="mt-1 text-sm text-slate-500">{truncate(task.positioning_summary, 96)}</p>
                 </div>
+              </td>
+              <td className="px-5 py-4">
+                {task.account_id ? (
+                  <Link href={`/accounts/${task.account_id}`} className="inline-flex items-center gap-2 text-sm font-medium text-brand-700 hover:text-brand-800">
+                    <Badge tone="brand">{task.account_name || task.account_id}</Badge>
+                  </Link>
+                ) : (
+                  <Badge tone="muted">{locale === "zh-CN" ? "全局调试" : "Global Debug"}</Badge>
+                )}
               </td>
               <td className="px-5 py-4">
                 <Badge tone={taskTone(task.status)}>{taskStatusLabel(task.status)}</Badge>
@@ -135,7 +158,16 @@ export function TaskHistoryPage() {
           ))}
         </Table>
       ) : (
-        <EmptyState title={t("tasks.emptyTitle")} description={t("tasks.emptyDesc")} />
+        <EmptyState
+          title={initialAccountId ? (locale === "zh-CN" ? "这个账号还没有任务" : "No account tasks yet") : t("tasks.emptyTitle")}
+          description={
+            initialAccountId
+              ? locale === "zh-CN"
+                ? "从账号工作台或账号详情页点击“立即运行”后，这里会出现该账号的任务记录。"
+                : "Run the account from its workspace or detail page and its task records will appear here."
+              : t("tasks.emptyDesc")
+          }
+        />
       )}
     </div>
   );
