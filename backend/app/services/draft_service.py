@@ -93,7 +93,10 @@ class DraftService:
             selected_topic=selected_topic[:500] if selected_topic else None,
             summary=summary[:500] if summary else None,
             content_markdown=main_content,
-            content_html=content.get("content_html"),
+            content_html=article_assembler_service.ensure_content_html(
+                content.get("content_html"),
+                main_content,
+            ),
             word_count=self._count_words(main_content),
             tags=content.get("tags"),
             structure=content.get("structure"),
@@ -175,6 +178,10 @@ class DraftService:
         if not isinstance(task_result_data, dict):
             task_result_data = {}
         task_result_data = article_assembler_service.normalize_result_data(task_result_data)
+        content_html = article_assembler_service.ensure_content_html(
+            draft.content_html,
+            draft.content_markdown,
+        )
 
         return {
             "id": draft.id,
@@ -186,7 +193,7 @@ class DraftService:
             "selected_topic": draft.selected_topic,
             "summary": draft.summary,
             "content_markdown": draft.content_markdown,
-            "content_html": draft.content_html,
+            "content_html": content_html,
             "word_count": draft.word_count,
             "tags": draft.tags,
             "draft_status": draft.draft_status,

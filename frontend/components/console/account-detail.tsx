@@ -80,7 +80,7 @@ function getWeChatConnectionSummary(config: WeChatConfigDetail | null) {
 }
 
 export function AccountDetailPage({ accountId }: { accountId: string }) {
-  const { operationModeLabel, taskStatusLabel, publishStatusLabel } = useI18n();
+  const { locale, operationModeLabel, taskStatusLabel, publishStatusLabel } = useI18n();
   const pushToast = useAppStore((state) => state.pushToast);
   const [detail, setDetail] = useState<AccountDetail | null>(null);
   const [wechatConfig, setWeChatConfig] = useState<WeChatConfigDetail | null>(null);
@@ -101,7 +101,7 @@ export function AccountDetailPage({ accountId }: { accountId: string }) {
       setPendingCount(pendingRes.count);
       setWeChatConfig(await getWeChatConfig(accountId).catch(() => null));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Unable to load account detail.");
+      setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载账号详情。" : "Unable to load account detail.");
     } finally {
       setLoading(false);
     }
@@ -137,15 +137,18 @@ export function AccountDetailPage({ accountId }: { accountId: string }) {
       const response = await runAccount(accountId);
       pushToast({
         tone: "success",
-        title: "Account run queued",
-        message: `Task ${response.task_id} started inside this account context.`,
+        title: locale === "zh-CN" ? "账号运行已排队" : "Account run queued",
+        message:
+          locale === "zh-CN"
+            ? `任务 ${response.task_id} 已在当前账号上下文中启动。`
+            : `Task ${response.task_id} started inside this account context.`,
       });
       await load();
     } catch (runError) {
       pushToast({
         tone: "danger",
-        title: "Run failed",
-        message: runError instanceof Error ? runError.message : "Unexpected error.",
+        title: locale === "zh-CN" ? "运行失败" : "Run failed",
+        message: runError instanceof Error ? runError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error.",
       });
     }
   };
@@ -156,15 +159,18 @@ export function AccountDetailPage({ accountId }: { accountId: string }) {
         await enableAccount(accountId);
         pushToast({
           tone: "success",
-          title: "Account enabled",
-          message: "The scheduler can use this account again.",
+          title: locale === "zh-CN" ? "账号已启用" : "Account enabled",
+          message: locale === "zh-CN" ? "调度器现在可以再次使用这个账号。" : "The scheduler can use this account again.",
         });
       } else {
         await disableAccount(accountId);
         pushToast({
           tone: "warning",
-          title: "Account disabled",
-          message: "Automations and scheduled runs for this account are now paused.",
+          title: locale === "zh-CN" ? "账号已停用" : "Account disabled",
+          message:
+            locale === "zh-CN"
+              ? "这个账号的自动化与定时运行现在都已暂停。"
+              : "Automations and scheduled runs for this account are now paused.",
         });
       }
       setConfirmDisable(false);
@@ -172,8 +178,8 @@ export function AccountDetailPage({ accountId }: { accountId: string }) {
     } catch (toggleError) {
       pushToast({
         tone: "danger",
-        title: "Status change failed",
-        message: toggleError instanceof Error ? toggleError.message : "Unexpected error.",
+        title: locale === "zh-CN" ? "状态更新失败" : "Status change failed",
+        message: toggleError instanceof Error ? toggleError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error.",
       });
     }
   };
@@ -221,7 +227,11 @@ export function AccountDetailPage({ accountId }: { accountId: string }) {
       {loading ? (
         <SkeletonRows rows={5} />
       ) : error ? (
-        <ErrorState title="Account detail failed to load" description={error} retry={() => void load()} />
+        <ErrorState
+          title={locale === "zh-CN" ? "账号详情加载失败" : "Account detail failed to load"}
+          description={error}
+          retry={() => void load()}
+        />
       ) : detail ? (
         <>
           <div className="flex flex-wrap items-center gap-2">

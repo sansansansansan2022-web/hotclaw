@@ -124,6 +124,8 @@ class TestDraftService:
         )
         assert draft.draft_status == "draft"
         assert draft.publish_status == "not_published"
+        assert draft.content_html
+        assert "<h1>" in draft.content_html
 
     @pytest.mark.asyncio
     async def test_full_auto_auto_publish(self, db_session, account, task):
@@ -191,3 +193,10 @@ class TestDraftService:
             db_session, page=1, page_size=10, draft_status="pending_review"
         )
         assert all(d.draft_status == "pending_review" for d in drafts)
+
+    @pytest.mark.asyncio
+    async def test_get_draft_detail_renders_html_when_missing(self, db_session, pending_draft):
+        detail = await draft_service.get_draft_detail(pending_draft.id, db_session)
+
+        assert detail["content_html"]
+        assert "<h1>" in detail["content_html"]

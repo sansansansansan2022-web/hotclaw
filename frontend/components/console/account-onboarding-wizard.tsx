@@ -10,6 +10,7 @@ import {
   testAccountWeChatConfig,
   testWeChatConnection,
 } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import type {
   AccountCreateRequest,
   AccountOnboardingPath,
@@ -132,6 +133,7 @@ function buildReviewDraft(
 
 export function AccountOnboardingWizard() {
   const router = useRouter();
+  const { locale } = useI18n();
   const pushToast = useAppStore((state) => state.pushToast);
 
   const [path, setPath] = useState<AccountOnboardingPath | null>(null);
@@ -204,14 +206,17 @@ export function AccountOnboardingWizard() {
     if (!wechatDraft.app_id.trim() || !wechatDraft.app_secret.trim()) {
       pushToast({
         tone: "warning",
-        title: "Credentials required",
-        message: "Enter AppID and AppSecret before testing the official account connection.",
+        title: locale === "zh-CN" ? "需要凭证" : "Credentials required",
+        message:
+          locale === "zh-CN"
+            ? "测试公众号连接前，请先填写 AppID 和 AppSecret。"
+            : "Enter AppID and AppSecret before testing the official account connection.",
       });
       return;
     }
 
     try {
-      setBusyLabel("Testing WeChat connection...");
+      setBusyLabel(locale === "zh-CN" ? "正在测试微信连接..." : "Testing WeChat connection...");
       setError(null);
       const result = await testWeChatConnection({
         app_id: wechatDraft.app_id.trim(),
@@ -220,15 +225,26 @@ export function AccountOnboardingWizard() {
       setWeChatTestResult({ success: result.success, message: result.message });
       pushToast({
         tone: result.success ? "success" : "warning",
-        title: result.success ? "Connection successful" : "Connection failed",
+        title: result.success
+          ? locale === "zh-CN"
+            ? "连接成功"
+            : "Connection successful"
+          : locale === "zh-CN"
+            ? "连接失败"
+            : "Connection failed",
         message: result.message,
       });
     } catch (testError) {
-      const message = testError instanceof Error ? testError.message : "Unable to test the WeChat connection.";
+      const message =
+        testError instanceof Error
+          ? testError.message
+          : locale === "zh-CN"
+            ? "无法测试微信连接。"
+            : "Unable to test the WeChat connection.";
       setWeChatTestResult({ success: false, message });
       pushToast({
         tone: "danger",
-        title: "Connection test failed",
+        title: locale === "zh-CN" ? "连接测试失败" : "Connection test failed",
         message,
       });
     } finally {
@@ -238,7 +254,7 @@ export function AccountOnboardingWizard() {
 
   const analyzeExisting = async () => {
     try {
-      setBusyLabel("Analyzing historical articles...");
+      setBusyLabel(locale === "zh-CN" ? "正在分析历史文章..." : "Analyzing historical articles...");
       setError(null);
       const analysis = await analyzeExistingAccount({
         account_name: existingInput.accountName.trim(),
@@ -249,7 +265,13 @@ export function AccountOnboardingWizard() {
       setExistingReview(buildReviewDraft(analysis, existingInput.accountName.trim()));
       setStep("existing_review");
     } catch (analysisError) {
-      setError(analysisError instanceof Error ? analysisError.message : "Unable to analyze existing account content.");
+      setError(
+        analysisError instanceof Error
+          ? analysisError.message
+          : locale === "zh-CN"
+            ? "无法分析已有账号内容。"
+            : "Unable to analyze existing account content.",
+      );
     } finally {
       setBusyLabel(null);
     }
@@ -296,7 +318,11 @@ export function AccountOnboardingWizard() {
 
   const attachWeChatConfig = async (accountId: string) => {
     if (wechatDraft.mode === "skip_for_now") {
-      return { connected: false, failed: false, message: "Skipped during onboarding." };
+      return {
+        connected: false,
+        failed: false,
+        message: locale === "zh-CN" ? "已在接入流程中跳过。" : "Skipped during onboarding.",
+      };
     }
 
     try {
@@ -322,7 +348,12 @@ export function AccountOnboardingWizard() {
       return {
         connected: false,
         failed: true,
-        message: wechatError instanceof Error ? wechatError.message : "Unable to finish WeChat onboarding.",
+        message:
+          wechatError instanceof Error
+            ? wechatError.message
+            : locale === "zh-CN"
+              ? "无法完成微信接入。"
+              : "Unable to finish WeChat onboarding.",
       };
     }
   };
@@ -333,12 +364,16 @@ export function AccountOnboardingWizard() {
     const positioning = isExisting ? existingReview?.positioning.trim() : newDraft.positioning.trim();
 
     if (!accountName || !positioning) {
-      setError("Account name and positioning are required before creating the account.");
+      setError(
+        locale === "zh-CN"
+          ? "创建账号前必须填写账号名称和定位。"
+          : "Account name and positioning are required before creating the account.",
+      );
       return;
     }
 
     try {
-      setBusyLabel("Creating account...");
+      setBusyLabel(locale === "zh-CN" ? "正在创建账号..." : "Creating account...");
       setError(null);
 
       const payload: AccountCreateRequest = isExisting
@@ -356,7 +391,6 @@ export function AccountOnboardingWizard() {
           }
         : {
             name: newDraft.name.trim(),
-            category: newDraft.positioning.trim(),
             positioning: newDraft.positioning.trim(),
             audience: newDraft.audience.trim() || undefined,
             tone_style: newDraft.toneStyle.trim() || undefined,
@@ -375,14 +409,20 @@ export function AccountOnboardingWizard() {
       if (wechatResult.failed) {
         pushToast({
           tone: "warning",
-          title: "Official account connection incomplete",
-          message: `${wechatResult.message} The account was still created and can continue in content-only mode.`,
+          title: locale === "zh-CN" ? "公众号连接未完成" : "Official account connection incomplete",
+          message:
+            locale === "zh-CN"
+              ? `${wechatResult.message} 账号仍然已经创建完成，并且可以先以仅内容模式继续使用。`
+              : `${wechatResult.message} The account was still created and can continue in content-only mode.`,
         });
       } else if (wechatResult.connected) {
         pushToast({
           tone: "success",
-          title: "Official account connected",
-          message: "The account was created and validated against the real WeChat configuration.",
+          title: locale === "zh-CN" ? "公众号已连接" : "Official account connected",
+          message:
+            locale === "zh-CN"
+              ? "账号已创建完成，并且已经通过真实微信配置校验。"
+              : "The account was created and validated against the real WeChat configuration.",
         });
       }
 

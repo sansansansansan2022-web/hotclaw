@@ -40,10 +40,10 @@ function syncTone(status: string): "success" | "warning" | "danger" | "muted" {
   return "muted";
 }
 
-function sourceTypeLabel(sourceType: ReferenceSourceType): string {
-  if (sourceType === "wechat_account") return "WeChat Account";
-  if (sourceType === "article_url") return "Article URL";
-  return "Pasted Article";
+function sourceTypeLabel(sourceType: ReferenceSourceType, locale: "en" | "zh-CN"): string {
+  if (sourceType === "wechat_account") return locale === "zh-CN" ? "公众号 / 站点" : "WeChat Account";
+  if (sourceType === "article_url") return locale === "zh-CN" ? "文章 URL" : "Article URL";
+  return locale === "zh-CN" ? "粘贴文章" : "Pasted Article";
 }
 
 interface ReferenceSourcesState {
@@ -60,7 +60,7 @@ const initialDraft: CreateReferenceSourceRequest = {
 };
 
 export function ReferenceSourcesPage({ accountId }: { accountId: string }) {
-  const { locale } = useI18n();
+  const { locale, token } = useI18n();
   const pushToast = useAppStore((state) => state.pushToast);
   const [data, setData] = useState<ReferenceSourcesState | null>(null);
   const [draft, setDraft] = useState<CreateReferenceSourceRequest>(initialDraft);
@@ -79,7 +79,7 @@ export function ReferenceSourcesPage({ accountId }: { accountId: string }) {
         sources: list.sources,
       });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Unable to load reference sources.");
+      setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载参考源。" : "Unable to load reference sources.");
     } finally {
       setLoading(false);
     }
@@ -137,7 +137,7 @@ export function ReferenceSourcesPage({ accountId }: { accountId: string }) {
       pushToast({
         tone: "danger",
         title: locale === "zh-CN" ? "创建失败" : "Create failed",
-        message: createError instanceof Error ? createError.message : "Unexpected error.",
+        message: createError instanceof Error ? createError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error.",
       });
     } finally {
       setSubmitting(false);
@@ -166,7 +166,7 @@ export function ReferenceSourcesPage({ accountId }: { accountId: string }) {
       pushToast({
         tone: "danger",
         title: locale === "zh-CN" ? "状态更新失败" : "Status update failed",
-        message: toggleError instanceof Error ? toggleError.message : "Unexpected error.",
+        message: toggleError instanceof Error ? toggleError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error.",
       });
     } finally {
       setActingId(null);
@@ -187,7 +187,7 @@ export function ReferenceSourcesPage({ accountId }: { accountId: string }) {
       pushToast({
         tone: "danger",
         title: locale === "zh-CN" ? "同步失败" : "Sync failed",
-        message: syncError instanceof Error ? syncError.message : "Unexpected error.",
+        message: syncError instanceof Error ? syncError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error.",
       });
     } finally {
       setActingId(null);
@@ -198,7 +198,15 @@ export function ReferenceSourcesPage({ accountId }: { accountId: string }) {
     <div className="space-y-8">
       <PageHeader
         eyebrow={locale === "zh-CN" ? "参考源系统" : "Reference Source System"}
-        title={data?.account.name ? `${data.account.name} Reference Sources` : "Reference Sources"}
+        title={
+          data?.account.name
+            ? locale === "zh-CN"
+              ? `${data.account.name} 参考源`
+              : `${data.account.name} Reference Sources`
+            : locale === "zh-CN"
+              ? "参考源"
+              : "Reference Sources"
+        }
         description={
           locale === "zh-CN"
             ? "把当前账号参考的公众号、文章 URL 和粘贴文章，管理成真实可追踪的账号资产。"
@@ -276,18 +284,20 @@ export function ReferenceSourcesPage({ accountId }: { accountId: string }) {
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-sm font-semibold text-slate-900">{source.name}</p>
-                            <Badge tone="info">{sourceTypeLabel(source.source_type)}</Badge>
-                            <Badge tone={syncTone(source.sync_status)}>{source.sync_status}</Badge>
-                            <Badge tone={source.is_enabled ? "success" : "muted"}>{source.is_enabled ? "enabled" : "disabled"}</Badge>
+                            <Badge tone="info">{sourceTypeLabel(source.source_type, locale)}</Badge>
+                            <Badge tone={syncTone(source.sync_status)}>{token(source.sync_status)}</Badge>
+                            <Badge tone={source.is_enabled ? "success" : "muted"}>
+                              {source.is_enabled ? (locale === "zh-CN" ? "已启用" : "Enabled") : locale === "zh-CN" ? "已停用" : "Disabled"}
+                            </Badge>
                           </div>
                           <p className="mt-3 text-sm leading-6 text-slate-600">
                             {source.source_type === "pasted_article" ? truncate(source.source_value, 220) : source.source_value}
                           </p>
                           {source.notes ? <p className="mt-2 text-sm text-slate-500">{source.notes}</p> : null}
                           <div className="mt-3 flex flex-wrap gap-3 text-xs uppercase tracking-[0.14em] text-slate-400">
-                            <span>{`articles ${source.article_count}`}</span>
-                            <span>{`updated ${formatDateTime(source.updated_at)}`}</span>
-                            <span>{`last sync ${formatDateTime(source.last_synced_at)}`}</span>
+                            <span>{locale === "zh-CN" ? `文章 ${source.article_count}` : `Articles ${source.article_count}`}</span>
+                            <span>{locale === "zh-CN" ? `更新于 ${formatDateTime(source.updated_at)}` : `Updated ${formatDateTime(source.updated_at)}`}</span>
+                            <span>{locale === "zh-CN" ? `上次同步 ${formatDateTime(source.last_synced_at)}` : `Last sync ${formatDateTime(source.last_synced_at)}`}</span>
                           </div>
                           {source.latest_error_message ? (
                             <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
