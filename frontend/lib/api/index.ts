@@ -61,6 +61,8 @@ interface ApiEnvelope<T> {
   details?: Record<string, unknown> | null;
 }
 
+const LOCAL_DEV_API_ORIGIN = "http://127.0.0.1:8000";
+
 export class ApiError extends Error {
   status: number;
   code?: number;
@@ -83,7 +85,82 @@ function normalizeOrigin(origin?: string): string | null {
 }
 
 function getRelativeApiOrigin(): string {
-  return "";
+  return process.env.NODE_ENV === "production" ? "" : LOCAL_DEV_API_ORIGIN;
+}
+
+function getEnvelopeErrorMessage<T>(envelope: ApiEnvelope<T>): string {
+  const dataMessage =
+    envelope.data && typeof envelope.data === "object" && "message" in envelope.data
+      ? (envelope.data as { message?: unknown }).message
+      : undefined;
+
+  if (typeof dataMessage === "string" && dataMessage.trim()) {
+    return dataMessage;
+  }
+
+  if (typeof envelope.message === "string" && envelope.message.trim()) {
+    return envelope.message;
+  }
+
+  return "Request failed";
+}
+
+function formatErrorDetail(detail: unknown): string | undefined {
+  if (typeof detail === "string" && detail.trim()) {
+    return detail;
+  }
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === "string" && item.trim()) {
+          return item;
+        }
+
+        if (item && typeof item === "object") {
+          const record = item as Record<string, unknown>;
+          const location = Array.isArray(record.loc)
+            ? record.loc
+                .map((part) => String(part).trim())
+                .filter(Boolean)
+                .join(".")
+            : "";
+          const message =
+            (typeof record.msg === "string" && record.msg.trim() && record.msg) ||
+            (typeof record.message === "string" && record.message.trim() && record.message) ||
+            "";
+          if (!message) {
+            return "";
+          }
+          return location ? `${location}: ${message}` : message;
+        }
+
+        return "";
+      })
+      .filter(Boolean);
+
+    return messages.length ? messages.join("; ") : undefined;
+  }
+
+  if (detail && typeof detail === "object") {
+    const record = detail as Record<string, unknown>;
+    const message =
+      (typeof record.message === "string" && record.message.trim() && record.message) ||
+      (typeof record.detail === "string" && record.detail.trim() && record.detail) ||
+      (typeof record.error === "string" && record.error.trim() && record.error) ||
+      undefined;
+    if (message) {
+      return message;
+    }
+
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return undefined;
+    }
+  }
+
+  return undefined;
 }
 
 function resolveApiOrigin(): ApiOriginDebugInfo {
@@ -123,7 +200,13 @@ function logApiOriginOnce(info: ApiOriginDebugInfo): void {
   console.info("[HotClaw][api-origin]", { origin: label, source: info.source });
 
   if (info.source === "relative") {
-    console.warn("[HotClaw][api-origin] NEXT_PUBLIC_HOTCLAW_API_ORIGIN is unset. Falling back to same-origin /api proxy.");
+    if (info.origin) {
+      console.warn(
+        `[HotClaw][api-origin] NEXT_PUBLIC_HOTCLAW_API_ORIGIN is unset. Falling back to direct dev API origin ${info.origin}.`,
+      );
+    } else {
+      console.warn("[HotClaw][api-origin] NEXT_PUBLIC_HOTCLAW_API_ORIGIN is unset. Falling back to same-origin /api proxy.");
+    }
   }
 }
 
@@ -198,20 +281,21 @@ async function request<T>(path: string, init?: RequestInit, root: ApiRoot = "v1"
   if (!response.ok) {
     const detail =
       body && typeof body === "object" && "detail" in body
-        ? (body as { detail?: string }).detail
+        ? (body as { detail?: unknown }).detail
         : undefined;
+    const formattedDetail = formatErrorDetail(detail);
     const message =
-      detail ||
+      formattedDetail ||
       (body && typeof body === "object" && "message" in body
         ? String((body as { message?: string }).message ?? "Request failed")
         : response.statusText || "Request failed");
-    throw new ApiError(message, response.status);
+    throw new ApiError(message, response.status, undefined, detail);
   }
 
   if (body && typeof body === "object" && "code" in body) {
     const envelope = body as ApiEnvelope<T>;
     if (envelope.code !== 0) {
-      throw new ApiError(envelope.message || "Request failed", response.status, envelope.code, envelope.details);
+      throw new ApiError(getEnvelopeErrorMessage(envelope), response.status, envelope.code, envelope.details);
     }
     return normalizePayload(envelope.data);
   }

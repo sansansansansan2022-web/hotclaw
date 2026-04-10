@@ -291,6 +291,8 @@ def test_article_assembler_builds_final_content():
     assert assembled["selected_topic"] == "self-doubt"
     assert "## Name the feeling" in assembled["content_markdown"]
     assert "## Closing" not in assembled["content_markdown"]
+    assert assembled["content_html"]
+    assert "<h1>When self-doubt takes over</h1>" in assembled["content_html"]
     assert assembled["structure"]["sections"][0]["heading"] == "Name the feeling"
     assert assembled["word_count"] > 0
 
@@ -314,6 +316,7 @@ def test_article_assembler_normalizes_legacy_content_shape():
     assert result["content"]["selected_topic"] == "reader confidence"
     assert result["content"]["title_candidates"] == ["A stronger title"]
     assert result["content"]["summary"]
+    assert result["content"]["content_html"]
 
 
 @pytest.mark.asyncio
@@ -481,9 +484,11 @@ async def test_run_task_structured_result_still_creates_draft(db_session, monkey
     draft = draft_result.scalar_one()
     assert draft.title == "When self-doubt takes over"
     assert draft.summary == "A calm article about dealing with self-doubt."
+    assert draft.content_html
     assert draft.structure is not None
     assert draft.word_count > 0
 
     detail = await draft_service.get_draft_detail(draft.id, db_session)
+    assert detail["content_html"]
     assert detail["outline_plan"]["article_goal"] == "Help the reader regulate self-doubt."
     assert detail["section_drafts"]["section_drafts"][0]["section_id"] == "s1"

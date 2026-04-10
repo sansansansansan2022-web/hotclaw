@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import re
 from copy import deepcopy
+from html import escape
 from typing import Any
+
+from app.services.reference_digest_service import reference_digest_service
 
 
 class ArticleAssemblerService:
@@ -45,6 +48,11 @@ class ArticleAssemblerService:
 
         return {
             "article_goal": self._clean_text(outline_plan.get("article_goal")),
+            "why_this_topic": self._clean_text(outline_plan.get("why_this_topic")),
+            "strategic_angle": self._clean_text(outline_plan.get("strategic_angle")),
+            "reference_basis": self._clean_text(outline_plan.get("reference_basis")),
+            "target_reader": self._clean_text(outline_plan.get("target_reader")),
+            "content_lane": self._clean_text(outline_plan.get("content_lane")),
             "target_reader_takeaway": self._clean_text(outline_plan.get("target_reader_takeaway")),
             "opening_hook": self._clean_text(outline_plan.get("opening_hook")),
             "emotional_arc": self._clean_text(outline_plan.get("emotional_arc")),
@@ -207,44 +215,19 @@ class ArticleAssemblerService:
         limit: int = 3,
     ) -> dict[str, Any]:
         """Build a stable, lightweight reference style summary for content agents."""
-        account_context = account_context if isinstance(account_context, dict) else {}
-        ops_context = ops_context if isinstance(ops_context, dict) else {}
-
-        preferred_ids = [
-            str(item).strip()
-            for item in ((ops_context.get("run_strategy") or {}).get("preferred_reference_source_ids") or [])
-            if str(item).strip()
-        ]
-        source_items = account_context.get("reference_source_briefs")
-        if not isinstance(source_items, list):
-            source_items = account_context.get("reference_sources") or []
-        normalized_sources = self._normalize_reference_sources(source_items)
-        selected_sources = self._prioritize_reference_sources(normalized_sources, preferred_ids, limit=limit)
-
-        style_takeaways: list[str] = []
-        structure_takeaways: list[str] = []
-        for source in selected_sources:
-            style_text = source.get("style_clues") or source.get("notes")
-            if style_text:
-                style_takeaways.append(f"{source['name']}: {style_text}")
-            structure_text = source.get("preview") or source.get("resolved_title")
-            if structure_text:
-                structure_takeaways.append(f"{source['name']}: {structure_text}")
-
-        usage_rules = [
-            "Borrow framing, pacing, and voice cues from the references, but do not copy sentences or facts.",
-            "Let preferred reference sources influence hook shape, section progression, and closing pressure.",
-            "If a reference cue conflicts with the chosen topic, keep the topic accurate and only absorb the writing pattern.",
-        ]
-
+        digest = reference_digest_service.build_reference_digest(
+            account_context=account_context,
+            ops_context=ops_context,
+            limit=limit,
+        )
         return {
-            "source_count": len(normalized_sources),
-            "selected_source_ids": [source["id"] for source in selected_sources if source.get("id")],
-            "preferred_source_names": [source["name"] for source in selected_sources if source.get("name")],
-            "style_takeaways": style_takeaways[:limit],
-            "structure_takeaways": structure_takeaways[:limit],
-            "usage_rules": usage_rules,
-            "sources": selected_sources,
+            "source_count": digest.get("source_count", 0),
+            "selected_source_ids": digest.get("selected_source_ids", []),
+            "preferred_source_names": digest.get("preferred_source_names", []),
+            "style_takeaways": digest.get("style_takeaways", []),
+            "structure_takeaways": digest.get("structure_takeaways", []),
+            "usage_rules": digest.get("usage_rules", []),
+            "sources": digest.get("source_digests", []),
         }
 
     def assemble_article(
@@ -304,6 +287,7 @@ class ArticleAssemblerService:
                 body_parts.append(ending_cta)
 
         content_markdown = "\n\n".join(part for part in body_parts if part).strip()
+        content_html = self.ensure_content_html(existing_content.get("content_html"), content_markdown)
         summary = (
             self._clean_text(existing_content.get("summary"))
             or self._build_summary_from_outline(outline_plan)
@@ -318,7 +302,7 @@ class ArticleAssemblerService:
             "selected_title": selected_title,
             "summary": summary,
             "content_markdown": content_markdown,
-            "content_html": existing_content.get("content_html"),
+            "content_html": content_html,
             "structure": {"sections": structure_sections},
             "tags": tags,
             "word_count": self.count_words(content_markdown),
@@ -388,6 +372,7 @@ class ArticleAssemblerService:
         content_markdown = self._clean_text(
             content.get("content_markdown") or content.get("content")
         )
+        content_html = self.ensure_content_html(content.get("content_html"), content_markdown)
         summary = (
             self._clean_text(content.get("summary"))
             or self._summarize_markdown(content_markdown)
@@ -405,7 +390,7 @@ class ArticleAssemblerService:
             "selected_title": selected_title,
             "summary": summary,
             "content_markdown": content_markdown,
-            "content_html": content.get("content_html"),
+            "content_html": content_html,
             "structure": structure,
             "tags": tags,
             "word_count": content.get("word_count") or self.count_words(content_markdown),
@@ -422,9 +407,10 @@ class ArticleAssemblerService:
 
         revised = dict(assembled)
         revised["content_markdown"] = rewrite_content
-        revised_html = self._clean_text(
+        revised_html = self.ensure_content_html(
             (result_data.get("rewrite_result") or {}).get("revised_content_html")
-            or (result_data.get("rewrite_result") or {}).get("content_html")
+            or (result_data.get("rewrite_result") or {}).get("content_html"),
+            rewrite_content,
         )
         if revised_html:
             revised["content_html"] = revised_html
@@ -615,6 +601,93 @@ class ArticleAssemblerService:
             return ""
         text = re.sub(r"\s+", " ", text)
         return text[:220].strip()
+
+    def ensure_content_html(self, content_html: Any, content_markdown: Any) -> str | None:
+        html = self._clean_text(content_html)
+        if html:
+            return html
+
+        markdown = self._clean_text(content_markdown)
+        if not markdown:
+            return None
+
+        return self._markdown_to_html(markdown)
+
+    def _markdown_to_html(self, markdown: str) -> str:
+        normalized = markdown.replace("\r\n", "\n").strip()
+        if not normalized:
+            return ""
+
+        blocks: list[str] = []
+        paragraph_lines: list[str] = []
+        list_items: list[str] = []
+        list_tag: str | None = None
+
+        def flush_paragraph() -> None:
+            if not paragraph_lines:
+                return
+            blocks.append(
+                f"<p>{'<br/>'.join(self._render_inline_markdown(line) for line in paragraph_lines)}</p>"
+            )
+            paragraph_lines.clear()
+
+        def flush_list() -> None:
+            nonlocal list_tag
+            if not list_items or not list_tag:
+                return
+            blocks.append(
+                f"<{list_tag}>"
+                + "".join(f"<li>{item}</li>" for item in list_items)
+                + f"</{list_tag}>"
+            )
+            list_items.clear()
+            list_tag = None
+
+        for raw_line in normalized.split("\n"):
+            line = raw_line.strip()
+            if not line:
+                flush_paragraph()
+                flush_list()
+                continue
+
+            heading_match = re.match(r"^(#{1,3})\s+(.+)$", line)
+            if heading_match:
+                flush_paragraph()
+                flush_list()
+                level = len(heading_match.group(1))
+                blocks.append(
+                    f"<h{level}>{self._render_inline_markdown(heading_match.group(2))}</h{level}>"
+                )
+                continue
+
+            unordered_match = re.match(r"^[-*]\s+(.+)$", line)
+            ordered_match = re.match(r"^\d+\.\s+(.+)$", line)
+            if unordered_match or ordered_match:
+                flush_paragraph()
+                next_tag = "ul" if unordered_match else "ol"
+                if list_tag and list_tag != next_tag:
+                    flush_list()
+                list_tag = next_tag
+                list_items.append(
+                    self._render_inline_markdown(
+                        (unordered_match or ordered_match).group(1)  # type: ignore[union-attr]
+                    )
+                )
+                continue
+
+            flush_list()
+            paragraph_lines.append(line)
+
+        flush_paragraph()
+        flush_list()
+        return "".join(blocks)
+
+    def _render_inline_markdown(self, text: str) -> str:
+        rendered = escape(text, quote=False)
+        rendered = re.sub(r"`([^`]+)`", r"<code>\1</code>", rendered)
+        rendered = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", rendered)
+        rendered = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"<em>\1</em>", rendered)
+        return rendered
 
     def _normalize_tags(self, raw_tags: Any, selected_topic: str, outline_plan: Any) -> list[str]:
         tags = self._normalize_string_list(raw_tags)

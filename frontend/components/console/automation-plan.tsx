@@ -96,7 +96,7 @@ function buildScheduleConfig(
 }
 
 export function AutomationPlanPage({ accountId }: { accountId: string }) {
-  const { operationModeLabel } = useI18n();
+  const { locale, operationModeLabel, t, token } = useI18n();
   const pushToast = useAppStore((state) => state.pushToast);
   const [data, setData] = useState<AutomationPlanPageState | null>(null);
   const [form, setForm] = useState<UpdateAutomationPlanRequest | null>(null);
@@ -112,7 +112,7 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
       setData({ account, plan });
       setForm(buildInitialForm(plan));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Unable to load automation plan.");
+      setError(loadError instanceof Error ? loadError.message : t("automationPlan.loadError"));
     } finally {
       setLoading(false);
     }
@@ -122,18 +122,36 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
     void load();
   }, [accountId]);
 
+  const formatDisplayDateTime = (value?: string | null) => {
+    if (!value) return t("automationPlan.notAvailable");
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat(locale === "zh-CN" ? "zh-CN" : "en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date);
+  };
+
   const scheduleSummary = useMemo(() => {
-    if (!form) return "Manual only";
-    if (form.schedule_type === "none" || !form.schedule_type) return "Manual only";
+    if (!form) return t("automationPlan.manualOnly");
+    if (form.schedule_type === "none" || !form.schedule_type) return t("automationPlan.manualOnly");
     const config = buildScheduleConfig(form.schedule_type, form.schedule_config);
     if (form.schedule_type === "daily") {
-      return `Daily at ${getTimeValue(config)}`;
+      return t("automationPlan.dailyAt", { time: getTimeValue(config) });
     }
     if (form.schedule_type === "weekly") {
-      return `Weekly on ${String(config?.weekday || "mon").toUpperCase()} at ${getTimeValue(config)}`;
+      return t("automationPlan.weeklyAt", {
+        weekday: token(String(config?.weekday || "mon")),
+        time: getTimeValue(config),
+      });
     }
-    return `Monthly on day ${getMonthlyDayValue(config)} at ${getTimeValue(config)}`;
-  }, [form]);
+    return t("automationPlan.monthlyAt", {
+      day: getMonthlyDayValue(config),
+      time: getTimeValue(config),
+    });
+  }, [form, t, token]);
 
   const handleSave = async () => {
     if (!form) return;
@@ -153,16 +171,16 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
 
       pushToast({
         tone: "success",
-        title: "Automation plan saved",
-        message: "The account runtime posture now reads from this plan first.",
+        title: t("automationPlan.savedTitle"),
+        message: t("automationPlan.savedMessage"),
       });
       setData((current) => (current ? { ...current, plan: saved } : current));
       setForm(buildInitialForm(saved));
     } catch (saveError) {
       pushToast({
         tone: "danger",
-        title: "Save failed",
-        message: saveError instanceof Error ? saveError.message : "Unexpected error.",
+        title: t("automationPlan.saveFailedTitle"),
+        message: saveError instanceof Error ? saveError.message : t("automationPlan.unexpectedError"),
       });
     } finally {
       setSaving(false);
@@ -176,16 +194,20 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow="Automation Plan"
-        title={data?.account.name ? `${data.account.name} Automation Plan` : "Automation Plan"}
-        description="Manage the active automation-plan object that controls how this account runs, schedules, and protects publishing."
+        eyebrow={t("automationPlan.eyebrow")}
+        title={
+          data?.account.name
+            ? t("automationPlan.titleWithAccount", { name: data.account.name })
+            : t("automationPlan.title")
+        }
+        description={t("automationPlan.description")}
         actions={
           <>
             <Link href={`/accounts/${accountId}`}>
-              <Button variant="secondary">Back to Account</Button>
+              <Button variant="secondary">{t("automationPlan.backToAccount")}</Button>
             </Link>
             <Link href={`/accounts/${accountId}/workspace`}>
-              <Button variant="secondary">Back to Workspace</Button>
+              <Button variant="secondary">{t("automationPlan.backToWorkspace")}</Button>
             </Link>
           </>
         }
@@ -194,50 +216,50 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
       {loading ? (
         <SkeletonRows rows={6} />
       ) : error ? (
-        <ErrorState title="Automation plan failed to load" description={error} retry={() => void load()} />
+        <ErrorState title={t("automationPlan.loadFailed")} description={error} retry={() => void load()} />
       ) : data && form ? (
         <>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="brand">Current Account</Badge>
+            <Badge tone="brand">{t("automationPlan.currentAccount")}</Badge>
             <Badge tone="muted">{data.account.name}</Badge>
             <Badge tone="muted">{accountId}</Badge>
             <Badge tone={data.plan.config_source === "plan" ? "success" : "warning"}>
-              {data.plan.config_source === "plan" ? "plan-backed" : "legacy fallback"}
+              {data.plan.config_source === "plan" ? t("automationPlan.planBacked") : t("automationPlan.legacyFallback")}
             </Badge>
           </div>
 
           {data.plan.config_source === "legacy_fallback" ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              This account is still using a legacy fallback summary. Saving once will materialize the dedicated automation-plan record.
+              {t("automationPlan.legacyBanner")}
             </div>
           ) : null}
 
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
             <StatCard
-              label="Plan Type"
+              label={t("automationPlan.stat.planType")}
               value={operationModeLabel(planType)}
               hint={scheduleSummary}
               tone="brand"
               icon={<Icon name="workspace" className="h-6 w-6" />}
             />
             <StatCard
-              label="Plan Status"
-              value={form.is_enabled ? "Enabled" : "Disabled"}
-              hint={runStrategy}
+              label={t("automationPlan.stat.planStatus")}
+              value={form.is_enabled ? t("automationPlan.enabled") : t("automationPlan.disabled")}
+              hint={token(runStrategy)}
               tone={form.is_enabled ? "success" : "muted"}
               icon={<Icon name="check" className="h-6 w-6" />}
             />
             <StatCard
-              label="Auto Publish"
-              value={form.auto_publish_enabled ? "Allowed" : "Off"}
-              hint={form.publish_review_required ? "Human review still required" : "Can publish without human review"}
+              label={t("automationPlan.stat.autoPublish")}
+              value={form.auto_publish_enabled ? t("automationPlan.allowed") : t("automationPlan.off")}
+              hint={form.publish_review_required ? t("automationPlan.reviewRequired") : t("automationPlan.reviewOptional")}
               tone={form.auto_publish_enabled ? "warning" : "muted"}
               icon={<Icon name="publish" className="h-6 w-6" />}
             />
             <StatCard
-              label="Next Run"
-              value={formatDateTime(data.plan.next_run_at)}
-              hint={`Timezone ${form.timezone || "Asia/Shanghai"}`}
+              label={t("automationPlan.stat.nextRun")}
+              value={formatDisplayDateTime(data.plan.next_run_at)}
+              hint={t("automationPlan.timezoneHint", { timezone: form.timezone || "Asia/Shanghai" })}
               tone="info"
               icon={<Icon name="history" className="h-6 w-6" />}
             />
@@ -245,13 +267,13 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
 
           <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
             <Card
-              title="Plan Configuration"
-              description="Phase 4 keeps one active plan per account and focuses on making runtime posture manageable."
+              title={t("automationPlan.config.title")}
+              description={t("automationPlan.config.description")}
             >
               <div className="grid gap-5">
                 <div className="grid gap-5 md:grid-cols-2">
                   <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Plan Type</label>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">{t("automationPlan.label.planType")}</label>
                     <Select
                       value={planType}
                       onChange={(event) =>
@@ -277,7 +299,7 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                     </Select>
                   </div>
                   <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Run Strategy</label>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">{t("automationPlan.label.runStrategy")}</label>
                     <Select
                       value={runStrategy}
                       onChange={(event) =>
@@ -286,9 +308,9 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                         )
                       }
                     >
-                      <option value="manual_only">manual_only</option>
-                      <option value="scheduled">scheduled</option>
-                      <option value="hybrid">hybrid</option>
+                      <option value="manual_only">{token("manual_only")}</option>
+                      <option value="scheduled">{token("scheduled")}</option>
+                      <option value="hybrid">{token("hybrid")}</option>
                     </Select>
                   </div>
                 </div>
@@ -302,7 +324,7 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                         setForm((current) => (current ? { ...current, is_enabled: event.target.checked } : current))
                       }
                     />
-                    Enable plan
+                    {t("automationPlan.label.enablePlan")}
                   </label>
                   <label className="flex items-center gap-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-700">
                     <input
@@ -314,7 +336,7 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                         )
                       }
                     />
-                    Allow auto publish
+                    {t("automationPlan.label.allowAutoPublish")}
                   </label>
                 </div>
 
@@ -328,12 +350,12 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                       )
                     }
                   />
-                  Require human review before publish
+                  {t("automationPlan.label.requireReview")}
                 </label>
 
                 <div className="grid gap-5 md:grid-cols-2">
                   <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Schedule Type</label>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">{t("automationPlan.label.scheduleType")}</label>
                     <Select
                       value={scheduleType}
                       onChange={(event) =>
@@ -351,14 +373,14 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                         )
                       }
                     >
-                      <option value="none">none</option>
-                      <option value="daily">daily</option>
-                      <option value="weekly">weekly</option>
-                      <option value="monthly">monthly</option>
+                      <option value="none">{token("none")}</option>
+                      <option value="daily">{token("daily")}</option>
+                      <option value="weekly">{token("weekly")}</option>
+                      <option value="monthly">{token("monthly")}</option>
                     </Select>
                   </div>
                   <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Timezone</label>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">{t("automationPlan.label.timezone")}</label>
                     <Input
                       value={form.timezone ?? "Asia/Shanghai"}
                       onChange={(event) =>
@@ -373,7 +395,7 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                   <div className="grid gap-5 md:grid-cols-3">
                     {scheduleType === "weekly" ? (
                       <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-700">Weekday</label>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">{t("automationPlan.label.weekday")}</label>
                         <Select
                           value={getWeekdayValue(form.schedule_config)}
                           onChange={(event) =>
@@ -390,19 +412,19 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                             )
                           }
                         >
-                          <option value="mon">MON</option>
-                          <option value="tue">TUE</option>
-                          <option value="wed">WED</option>
-                          <option value="thu">THU</option>
-                          <option value="fri">FRI</option>
-                          <option value="sat">SAT</option>
-                          <option value="sun">SUN</option>
+                          <option value="mon">{token("mon")}</option>
+                          <option value="tue">{token("tue")}</option>
+                          <option value="wed">{token("wed")}</option>
+                          <option value="thu">{token("thu")}</option>
+                          <option value="fri">{token("fri")}</option>
+                          <option value="sat">{token("sat")}</option>
+                          <option value="sun">{token("sun")}</option>
                         </Select>
                       </div>
                     ) : null}
                     {scheduleType === "monthly" ? (
                       <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-700">Day</label>
+                        <label className="mb-2 block text-sm font-medium text-slate-700">{t("automationPlan.label.day")}</label>
                         <Input
                           type="number"
                           min={1}
@@ -425,7 +447,7 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                       </div>
                     ) : null}
                     <div>
-                      <label className="mb-2 block text-sm font-medium text-slate-700">Time</label>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">{t("automationPlan.label.time")}</label>
                       <Input
                         type="time"
                         value={getTimeValue(form.schedule_config)}
@@ -449,7 +471,7 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
 
                 <div className="grid gap-5 md:grid-cols-2">
                   <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Max Posts Per Day</label>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">{t("automationPlan.label.maxPostsPerDay")}</label>
                     <Input
                       type="number"
                       min={1}
@@ -468,7 +490,7 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                     />
                   </div>
                   <div>
-                    <label className="mb-2 block text-sm font-medium text-slate-700">Min Interval Minutes</label>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">{t("automationPlan.label.minIntervalMinutes")}</label>
                     <Input
                       type="number"
                       min={1}
@@ -489,51 +511,51 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-700">Notes</label>
+                  <label className="mb-2 block text-sm font-medium text-slate-700">{t("automationPlan.label.notes")}</label>
                   <Textarea
                     value={form.notes ?? ""}
                     onChange={(event) =>
                       setForm((current) => (current ? { ...current, notes: event.target.value } : current))
                     }
-                    placeholder="For example: keep manual review enabled until the first successful content cycle."
+                    placeholder={t("automationPlan.notesPlaceholder")}
                   />
                 </div>
               </div>
             </Card>
 
             <Card
-              title="Plan Preview"
-              description="This is the summary that the workspace and runtime paths will now prefer."
+              title={t("automationPlan.preview.title")}
+              description={t("automationPlan.preview.description")}
             >
               <div className="space-y-4 text-sm text-slate-600">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <p className="font-semibold text-slate-900">Visible Schedule</p>
+                  <p className="font-semibold text-slate-900">{t("automationPlan.preview.visibleSchedule")}</p>
                   <p className="mt-2">{scheduleSummary}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <p className="font-semibold text-slate-900">Runtime Signals</p>
-                  <p className="mt-2">{`Last run: ${formatDateTime(data.plan.last_run_at)}`}</p>
-                  <p className="mt-1">{`Latest status: ${data.plan.latest_status ?? "unknown"}`}</p>
+                  <p className="font-semibold text-slate-900">{t("automationPlan.preview.runtimeSignals")}</p>
+                  <p className="mt-2">{t("automationPlan.preview.lastRun", { time: formatDisplayDateTime(data.plan.last_run_at) })}</p>
+                  <p className="mt-1">{t("automationPlan.preview.latestStatus", { status: token(data.plan.latest_status ?? "unknown") })}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                  <p className="font-semibold text-slate-900">Publish Safeguards</p>
+                  <p className="font-semibold text-slate-900">{t("automationPlan.preview.publishSafeguards")}</p>
                   <p className="mt-2">
                     {form.publish_review_required
-                      ? "Human review still stays in front of publishing."
-                      : "Publishing can proceed without an extra human review gate."}
+                      ? t("automationPlan.preview.reviewStillRequired")
+                      : t("automationPlan.preview.reviewNotRequired")}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-3 pt-2">
                   <Button onClick={() => void handleSave()} disabled={saving}>
                     <Icon name="check" className="h-4 w-4" />
-                    {saving ? "Saving..." : "Save Plan"}
+                    {saving ? t("automationPlan.saving") : t("automationPlan.save")}
                   </Button>
                   <Button
                     variant="secondary"
                     disabled={saving}
                     onClick={() => setForm(buildInitialForm(data.plan))}
                   >
-                    Reset to Current
+                    {t("automationPlan.reset")}
                   </Button>
                 </div>
               </div>
@@ -542,8 +564,8 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
 
           {!data.plan.id ? (
             <EmptyState
-              title="This will become the first stored plan"
-              description="The account is still using a legacy fallback summary. The first save will create the dedicated automation-plan record."
+              title={t("automationPlan.firstPlanTitle")}
+              description={t("automationPlan.firstPlanDesc")}
             />
           ) : null}
         </>
