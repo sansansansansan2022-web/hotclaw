@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8145/api/v1/drafts/9/confirm-publish",
+    "json": null
+  },
+  "response": {
+    "status_code": 400,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_5knLJqQLJllS"
+    },
+    "body": {
+      "code": 9002,
+      "message": "draft 9 cannot confirm-publish in status 'approved'",
+      "data": null,
+      "details": {
+        "draft_id": 9,
+        "current_status": "approved",
+        "operation": "confirm-publish"
+      }
+    },
+    "body_text": "{\"code\":9002,\"message\":\"draft 9 cannot confirm-publish in status 'approved'\",\"data\":null,\"details\":{\"draft_id\":9,\"current_status\":\"approved\",\"operation\":\"confirm-publish\"}}"
+  },
+  "expected_status": 500,
+  "status_matches_expectation": false
+}

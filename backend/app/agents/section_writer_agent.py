@@ -7,9 +7,11 @@ from typing import Any
 
 import litellm
 
-from app.agents.base import BaseAgent, AgentResult
+from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
 from app.services.article_assembler_service import article_assembler_service
+from app.services.query_planner_service import query_planner_service
+from app.services.reference_digest_service import reference_digest_service
 
 
 class SectionWriterAgent(BaseAgent):
@@ -29,6 +31,9 @@ class SectionWriterAgent(BaseAgent):
             "hot_topics": {"type": "object"},
             "account_context": {"type": "object"},
             "ops_context": {"type": "object"},
+            "query_plan": {"type": "object"},
+            "reference_digest": {"type": "object"},
+            "source_candidates": {"type": "array"},
         },
         "required": ["outline_plan", "titles"],
     }
@@ -61,11 +66,12 @@ Return strict JSON only.
 
 Requirements:
 - The selected_topic and selected_title are locked. Do not widen or swap them for a neighboring theme.
-- Respect account tone, audience, automation plan summary, preferred content lane, and reference-source cues.
+- Respect account tone, audience, lane, reference digest, and source-scout context.
 - Each section must fulfill its own purpose, not just restate the article theme in new words.
 - Keep sections scannable and mobile-friendly, but do not sound like a checklist.
 - Reduce AI tone: no generic comfort-talk, no padded summaries, no rigid 'first/second/finally' scaffolding.
 - Make each section carry concrete movement through observation, contrast, scene, example, or action.
+- When evidence_refs are present, let them shape emphasis and texture, but do not fabricate facts.
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
@@ -93,13 +99,9 @@ Requirements:
                 custom_llm_provider="dashscope",
             )
             content = response.choices[0].message.content
-            data = self._parse_json(content)
-            normalized = self._normalize_section_drafts(data)
+            normalized = self._normalize_section_drafts(self._parse_json(content))
             if not self._section_drafts_match_topic(normalized, selected_topic, selected_title):
-                fallback_result = await self.fallback(
-                    RuntimeError("section topic drift detected"),
-                    input_data,
-                )
+                fallback_result = await self.fallback(RuntimeError("section topic drift detected"), input_data)
                 if fallback_result and fallback_result.is_success:
                     return fallback_result
             return self._success(normalized)
@@ -131,7 +133,9 @@ Requirements:
                 f"In '{title}', this section turns toward {heading.lower()} with a clear job to do.",
             ]
             if topic:
-                paragraphs.append(f"Keep the discussion anchored in {topic}, but move it forward instead of reintroducing the topic from zero.")
+                paragraphs.append(
+                    f"Keep the discussion anchored in {topic}, but move it forward instead of reintroducing the topic from zero."
+                )
             if summary:
                 paragraphs.append(summary)
             for point in key_points[:3]:
@@ -163,34 +167,36 @@ Requirements:
         ops_context = input_data.get("ops_context") or {}
         titles = input_data.get("titles") or {}
         topics = input_data.get("topics") or {}
+        source_candidates = input_data.get("source_candidates") or []
 
         selected_title = article_assembler_service.extract_selected_title(titles)
         selected_topic = article_assembler_service.extract_selected_topic(topics, titles)
         outline_summary = article_assembler_service.summarize_outline_plan(outline)
-        preferred_lane = (ops_context.get("run_strategy") or {}).get("preferred_content_lane")
-        preferred_source_ids = (ops_context.get("run_strategy") or {}).get("preferred_reference_source_ids") or []
-        reference_context = article_assembler_service.build_reference_source_context(
-            account_context,
-            ops_context,
-        )
+        query_plan = self._resolve_query_plan(input_data)
+        reference_digest = self._resolve_reference_digest(input_data, query_plan)
         account_snapshot = {
             "account_name": account_context.get("account_name") or "unknown",
             "positioning": account_context.get("positioning") or profile.get("positioning_raw") or "",
             "audience": account_context.get("audience") or profile.get("target_audience") or "",
             "tone_style": account_context.get("tone_style") or profile.get("tone") or "",
             "content_strategy": account_context.get("content_strategy") or "",
-            "preferred_content_lane": preferred_lane or "",
+            "preferred_content_lane": (query_plan.get("lane") or {}).get("label") or "",
         }
         ops_snapshot = {
             "effective_mode": (ops_context.get("run_strategy") or {}).get("effective_mode") or "",
-            "preferred_content_lane": preferred_lane or "",
+            "preferred_content_lane": (query_plan.get("lane") or {}).get("label") or "",
             "avoid_recent_topics": (ops_context.get("run_strategy") or {}).get("avoid_recent_topics") or [],
-            "preferred_reference_source_ids": preferred_source_ids,
+            "preferred_reference_source_ids": (ops_context.get("run_strategy") or {}).get("preferred_reference_source_ids") or [],
         }
         article_blueprint = {
             "selected_topic": selected_topic,
             "selected_title": selected_title,
             "article_goal": outline_summary.get("article_goal"),
+            "why_this_topic": outline_summary.get("why_this_topic"),
+            "strategic_angle": outline_summary.get("strategic_angle"),
+            "reference_basis": outline_summary.get("reference_basis"),
+            "target_reader": outline_summary.get("target_reader"),
+            "content_lane": outline_summary.get("content_lane"),
             "target_reader_takeaway": outline_summary.get("target_reader_takeaway"),
             "opening_hook": outline_summary.get("opening_hook"),
             "ending_cta": outline_summary.get("ending_cta"),
@@ -208,6 +214,7 @@ Requirements:
                 "- Follow each section's purpose and key_points closely. If a key point is weak, deepen it with observation or contrast instead of drifting away.",
                 "- The first section should inherit the energy of opening_hook. The last section should set up or echo ending_cta without sounding like a conclusion template.",
                 "- Use the preferred content lane and preferred reference-source cues to shape framing, cadence, and emphasis.",
+                "- Use source-candidate texture to make the writing feel grounded, but do not copy or fabricate facts.",
                 "- Do not repeat what the previous section already established. Each new section must add something meaningfully new.",
                 "- Avoid these anti-patterns: empty background explanation, hollow motivational sentences, over-symmetry, 'first/second/finally', 'in conclusion/to sum up', and summary after summary.",
                 "- Every section should contain concrete movement: a scene, a sharp observation, a contrast, a mini-example, or a usable action.",
@@ -218,8 +225,14 @@ Requirements:
                 "OPS SNAPSHOT",
                 article_assembler_service.to_pretty_json(ops_snapshot),
                 "",
+                "QUERY PLAN",
+                article_assembler_service.to_pretty_json(query_plan),
+                "",
                 "REFERENCE STYLE BRIEF",
-                article_assembler_service.to_pretty_json(reference_context),
+                article_assembler_service.to_pretty_json(reference_digest),
+                "",
+                "SOURCE CANDIDATES",
+                article_assembler_service.to_pretty_json(source_candidates[:5] if isinstance(source_candidates, list) else []),
                 "",
                 "ARTICLE BLUEPRINT",
                 article_assembler_service.to_pretty_json(article_blueprint),
@@ -232,6 +245,40 @@ Requirements:
                 "",
                 "Return JSON with section_drafts. Each section_draft must include section_id, heading, summary, content_markdown, word_count, evidence_refs.",
             ]
+        )
+
+    def _resolve_query_plan(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        query_plan = input_data.get("query_plan")
+        if isinstance(query_plan, dict):
+            return query_plan
+        return query_planner_service.build_plan(
+            profile=input_data.get("profile") or {},
+            account_context=input_data.get("account_context") or {},
+            ops_context=input_data.get("ops_context") or {},
+            selected_topic=article_assembler_service.extract_selected_topic(
+                input_data.get("topics"), input_data.get("titles")
+            ),
+            selected_title=article_assembler_service.extract_selected_title(input_data.get("titles")),
+            hot_topics=input_data.get("hot_topics") or {},
+        )
+
+    def _resolve_reference_digest(
+        self,
+        input_data: dict[str, Any],
+        query_plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        reference_digest = input_data.get("reference_digest")
+        if isinstance(reference_digest, dict):
+            return reference_digest
+        return reference_digest_service.build_reference_digest(
+            account_context=input_data.get("account_context") or {},
+            ops_context=input_data.get("ops_context") or {},
+            query_plan=query_plan,
+            source_candidates=input_data.get("source_candidates") or [],
+            selected_topic=article_assembler_service.extract_selected_topic(
+                input_data.get("topics"), input_data.get("titles")
+            ),
+            selected_title=article_assembler_service.extract_selected_title(input_data.get("titles")),
         )
 
     def _parse_json(self, content: str) -> dict[str, Any]:
@@ -348,5 +395,4 @@ Requirements:
             weights[index] = 1.1
 
         weight_sum = sum(weights) or float(section_count)
-        targets = [max(180, int(estimated_word_count * weight / weight_sum)) for weight in weights]
-        return targets
+        return [max(180, int(estimated_word_count * weight / weight_sum)) for weight in weights]

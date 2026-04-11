@@ -63,6 +63,14 @@ export interface TaskDetail {
   completed_at: string | null;
   elapsed_seconds: number | null;
   total_tokens: number | null;
+  latest_draft?: {
+    id: number;
+    account_id: string | null;
+    title: string;
+    draft_status: DraftStatus;
+    publish_status: PublishStatus;
+    updated_at: string | null;
+  } | null;
 }
 
 export interface TaskProgressData {
@@ -83,6 +91,9 @@ export interface TaskStatusResponse {
 export interface TaskResultData {
   input?: { positioning: string };
   profile?: AccountProfile;
+  query_plan?: QueryPlanInsight | Record<string, unknown> | null;
+  reference_digest?: ReferenceDigestInsight | Record<string, unknown> | null;
+  source_candidates?: SourceCandidateInsight[] | Record<string, unknown> | null;
   style_profile?: StyleProfile | Record<string, unknown> | null;
   retrieved_memories?: ContentMemory[] | Record<string, unknown> | null;
   outline_plan?: OutlinePlan | Record<string, unknown> | null;
@@ -127,6 +138,62 @@ export interface HotTopic {
   heat_score?: number;
   summary?: string;
   relevance_score?: number;
+}
+
+export interface QueryPlanInsight {
+  lane?: {
+    id?: string | null;
+    label?: string | null;
+    input_hint?: string | null;
+    reason?: string | null;
+  } | null;
+  selected_topic?: string | null;
+  selected_title?: string | null;
+  primary_queries?: string[] | null;
+  secondary_queries?: string[] | null;
+  source_preferences?: string[] | null;
+  banned_angles?: string[] | null;
+  account_keywords?: string[] | null;
+  search_terms?: string[] | null;
+}
+
+export interface SourceCandidateInsight {
+  source_id?: string | null;
+  source_type?: string | null;
+  source_name?: string | null;
+  source_title: string;
+  url?: string | null;
+  snippet?: string | null;
+  fit_score?: number | null;
+  origin?: string | null;
+  why_selected?: string | null;
+}
+
+export interface ReferenceDigestSource {
+  source_id?: string | null;
+  source_type?: string | null;
+  source_name?: string | null;
+  source_title?: string | null;
+  style_brief?: string | null;
+  structure_brief?: string | null;
+  useful_points?: string[] | null;
+  snippet?: string | null;
+  origin?: string | null;
+  fit_score?: number | null;
+}
+
+export interface ReferenceDigestInsight {
+  summary?: string | null;
+  source_count?: number | null;
+  selected_source_ids?: string[] | null;
+  preferred_source_names?: string[] | null;
+  style_takeaways?: string[] | null;
+  structure_takeaways?: string[] | null;
+  useful_points?: string[] | null;
+  usage_rules?: string[] | null;
+  source_digests?: ReferenceDigestSource[] | null;
+  source_snippets?: Array<Record<string, unknown>> | null;
+  raw?: Record<string, unknown> | null;
 }
 
 export interface TopicCandidate {
@@ -796,6 +863,9 @@ export interface WeChatPublishStatus {
   error_code?: string;
   error_message?: string;
   url?: string;
+  simulated?: boolean;
+  simulation_source?: string | null;
+  provider?: string | null;
   started_at?: string;
   finished_at?: string;
   published_at?: string;
@@ -810,7 +880,12 @@ export interface WeChatPublishResult {
   published_at: string | null;
   wechat_media_id?: string;
   wechat_publish_id?: string;
+  publish_record_id?: number;
+  decision?: PublishDecisionResult;
   error?: string;
+  simulated?: boolean;
+  simulation_source?: string | null;
+  provider?: string | null;
 }
 
 export interface PublishRecord {
@@ -828,13 +903,20 @@ export interface PublishRecord {
   trigger_type: string;
   publish_attempt: number;
   retry_count: number;
+  parent_record_id?: number | null;
   error_code?: string;
   error_message?: string;
+  request_snapshot?: string | null;
+  response_snapshot?: string | null;
+  simulated?: boolean;
+  simulation_source?: string | null;
+  provider?: string | null;
   started_at?: string;
   published_at?: string;
   finished_at?: string;
   last_checked_at?: string;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface PublishRecordListResponse {

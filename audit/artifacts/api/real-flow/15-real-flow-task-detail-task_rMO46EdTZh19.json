@@ -1,0 +1,127 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8146/api/v1/tasks/task_rMO46EdTZh19",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_GuAItjCdu70a"
+    },
+    "body": {
+      "code": 0,
+      "message": "ok",
+      "data": {
+        "task_id": "task_rMO46EdTZh19",
+        "account_id": "acct_R53frdBFJ0kJ",
+        "account_name": "Audit real-flow-1775899578",
+        "status": "pending",
+        "input_data": {
+          "positioning": "HotClaw audit positioning real-flow-1775899578",
+          "ops_context": {
+            "generated_at": "2026-04-11T09:26:18.697150+00:00",
+            "trigger": {
+              "source": "manual",
+              "requested_plan_type": "semi_auto"
+            },
+            "account_health": {
+              "status": "attention",
+              "issues": [
+                "Reference sources are still sparse."
+              ]
+            },
+            "operation_stage": "style_learning",
+            "run_strategy": {
+              "allow_run": true,
+              "requested_mode": "semi_auto",
+              "effective_mode": "semi_auto",
+              "allow_auto_publish": false,
+              "preferred_reference_source_ids": [],
+              "avoid_recent_topics": [],
+              "preferred_content_lane": "HotClaw audit positioning real-flow-1775899578",
+              "degraded_from": null,
+              "degrade_reason": null
+            },
+            "ops_notes": [
+              "Reference sources are still sparse, so this run should stay conservative."
+            ],
+            "signals": {
+              "enabled_reference_source_count": 0,
+              "pending_review_count": 0,
+              "recent_failed_publish_count": 0,
+              "recent_success_publish_count": 0,
+              "recent_failed_task_count": 0,
+              "preferred_content_lane": "HotClaw audit positioning real-flow-1775899578",
+              "recent_task_count": 0,
+              "recent_draft_count": 0,
+              "recent_publish_count": 0
+            },
+            "fallback_used": true,
+            "account_summary": {
+              "account_id": "acct_R53frdBFJ0kJ",
+              "account_name": "Audit real-flow-1775899578"
+            }
+          }
+        },
+        "workflow_id": "default_pipeline",
+        "result_data": null,
+        "ops_context": {
+          "generated_at": "2026-04-11T09:26:18.697150+00:00",
+          "trigger": {
+            "source": "manual",
+            "requested_plan_type": "semi_auto"
+          },
+          "account_health": {
+            "status": "attention",
+            "issues": [
+              "Reference sources are still sparse."
+            ]
+          },
+          "operation_stage": "style_learning",
+          "run_strategy": {
+            "allow_run": true,
+            "requested_mode": "semi_auto",
+            "effective_mode": "semi_auto",
+            "allow_auto_publish": false,
+            "preferred_reference_source_ids": [],
+            "avoid_recent_topics": [],
+            "preferred_content_lane": "HotClaw audit positioning real-flow-1775899578",
+            "degraded_from": null,
+            "degrade_reason": null
+          },
+          "ops_notes": [
+            "Reference sources are still sparse, so this run should stay conservative."
+          ],
+          "signals": {
+            "enabled_reference_source_count": 0,
+            "pending_review_count": 0,
+            "recent_failed_publish_count": 0,
+            "recent_success_publish_count": 0,
+            "recent_failed_task_count": 0,
+            "preferred_content_lane": "HotClaw audit positioning real-flow-1775899578",
+            "recent_task_count": 0,
+            "recent_draft_count": 0,
+            "recent_publish_count": 0
+          },
+          "fallback_used": true,
+          "account_summary": {
+            "account_id": "acct_R53frdBFJ0kJ",
+            "account_name": "Audit real-flow-1775899578"
+          }
+        },
+        "error_message": null,
+        "created_at": "2026-04-11T09:26:18",
+        "started_at": null,
+        "completed_at": null,
+        "elapsed_seconds": null,
+        "total_tokens": 0,
+        "latest_draft": null
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"ok\",\"data\":{\"task_id\":\"task_rMO46EdTZh19\",\"account_id\":\"acct_R53frdBFJ0kJ\",\"account_name\":\"Audit real-flow-1775899578\",\"status\":\"pending\",\"input_data\":{\"positioning\":\"HotClaw audit positioning real-flow-1775899578\",\"ops_context\":{\"generated_at\":\"2026-04-11T09:26:18.697150+00:00\",\"trigger\":{\"source\":\"manual\",\"requested_plan_type\":\"semi_auto\"},\"account_health\":{\"status\":\"attention\",\"issues\":[\"Reference sources are still sparse.\"]},\"operation_stage\":\"style_learning\",\"run_strategy\":{\"allow_run\":true,\"requested_mode\":\"semi_auto\",\"effective_mode\":\"semi_auto\",\"allow_auto_publish\":false,\"preferred_reference_source_ids\":[],\"avoid_recent_topics\":[],\"preferred_content_lane\":\"HotClaw audit positioning real-flow-1775899578\",\"degraded_from\":null,\"degrade_reason\":null},\"ops_notes\":[\"Reference sources are still sparse, so this run should stay conservative.\"],\"signals\":{\"enabled_reference_source_count\":0,\"pending_review_count\":0,\"recent_failed_publish_count\":0,\"recent_success_publish_count\":0,\"recent_failed_task_count\":0,\"preferred_content_lane\":\"HotClaw audit positioning real-flow-1775899578\",\"recent_task_count\":0,\"recent_draft_count\":0,\"recent_publish_count\":0},\"fallback_used\":true,\"account_summary\":{\"account_id\":\"acct_R53frdBFJ0kJ\",\"account_name\":\"Audit real-flow-1775899578\"}}},\"workflow_id\":\"default_pipeline\",\"result_data\":null,\"ops_context\":{\"generated_at\":\"2026-04-11T09:26:18.697150+00:00\",\"trigger\":{\"source\":\"manual\",\"requested_plan_type\":\"semi_auto\"},\"account_health\":{\"status\":\"attention\",\"issues\":[\"Reference sources are still sparse.\"]},\"operation_stage\":\"style_learning\",\"run_strategy\":{\"allow_run\":true,\"requested_mode\":\"semi_auto\",\"effective_mode\":\"semi_auto\",\"allow_auto_publish\":false,\"preferred_reference_source_ids\":[],\"avoid_recent_topics\":[],\"preferred_content_lane\":\"HotClaw audit positioning real-flow-1775899578\",\"degraded_from\":null,\"degrade_reason\":null},\"ops_notes\":[\"Reference sources are still sparse, so this run should stay conservative.\"],\"signals\":{\"enabled_reference_source_count\":0,\"pending_review_count\":0,\"recent_failed_publish_count\":0,\"recent_success_publish_count\":0,\"recent_failed_task_count\":0,\"preferred_content_lane\":\"HotClaw audit positioning real-flow-1775899578\",\"recent_task_count\":0,\"recent_draft_count\":0,\"recent_publish_count\":0},\"fallback_used\":true,\"account_summary\":{\"account_id\":\"acct_R53frdBFJ0kJ\",\"account_name\":\"Audit real-flow-1775899578\"}},\"error_message\":null,\"created_at\":\"2026-04-11T09:26:18\",\"started_at\":null,\"completed_at\":null,\"elapsed_seconds\":null,\"total_tokens\":0,\"latest_draft\":null}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

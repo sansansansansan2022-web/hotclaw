@@ -324,20 +324,16 @@ class DraftService:
         existing_record_id: int | None = None,
     ) -> tuple[ArticleDraftModel, dict]:
         """Compatibility wrapper around the dedicated WeChat publish service."""
-        from app.services.publish_decision_service import PublishDecisionError
         from app.services.wechat_publish_service import wechat_publish_service
 
-        try:
-            result = await wechat_publish_service.publish_draft_to_wechat(
-                draft_id,
-                operator=confirmed_by,
-                source_mode=source_mode,
-                trigger_type=trigger_type,
-                existing_record_id=existing_record_id,
-                db=db,
-            )
-        except PublishDecisionError as exc:
-            raise DraftPublishError(draft_id, exc.message) from exc
+        result = await wechat_publish_service.publish_draft_to_wechat(
+            draft_id,
+            operator=confirmed_by,
+            source_mode=source_mode,
+            trigger_type=trigger_type,
+            existing_record_id=existing_record_id,
+            db=db,
+        )
         draft = await self.get_draft(draft_id, db)
         return draft, {
             "success": result.success,
@@ -349,6 +345,9 @@ class DraftService:
             "decision": result.decision,
             "error_code": result.error_code,
             "error_message": result.error_message,
+            "simulated": result.simulated,
+            "simulation_source": result.simulation_source,
+            "provider": result.provider,
         }
 
     async def _handle_publish_failure(
@@ -518,11 +517,17 @@ class DraftService:
         db: AsyncSession
     ) -> WeChatPublishRecordModel | None:
         """Get WeChat publish record for a draft."""
-        stmt = select(WeChatPublishRecordModel).where(
-            WeChatPublishRecordModel.draft_id == draft_id
-        ).order_by(desc(WeChatPublishRecordModel.created_at))
+        stmt = (
+            select(WeChatPublishRecordModel)
+            .where(WeChatPublishRecordModel.draft_id == draft_id)
+            .order_by(
+                desc(WeChatPublishRecordModel.created_at),
+                desc(WeChatPublishRecordModel.id),
+            )
+            .limit(1)
+        )
         result = await db.execute(stmt)
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def discard_draft(
         self, draft_id: int, db: AsyncSession

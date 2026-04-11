@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8147/api/v1/tasks?page=1&page_size=20&account_id=acct_fVK3C9aZZRZ-",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_SDcHX_WW_kYH"
+    },
+    "body": {
+      "code": 0,
+      "message": "ok",
+      "data": {
+        "tasks": [],
+        "pagination": {
+          "page": 1,
+          "page_size": 20,
+          "total": 0
+        }
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"ok\",\"data\":{\"tasks\":[],\"pagination\":{\"page\":1,\"page_size\":20,\"total\":0}}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

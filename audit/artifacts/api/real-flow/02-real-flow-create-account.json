@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8146/api/v1/accounts",
+    "json": {
+      "name": "Audit real-flow-1775908002",
+      "positioning": "HotClaw audit positioning real-flow-1775908002",
+      "operation_mode": "semi_auto",
+      "auto_run_enabled": false,
+      "auto_publish_enabled": false,
+      "is_active": true,
+      "posting_frequency": "daily",
+      "posting_time": "09:00"
+    }
+  },
+  "response": {
+    "status_code": 201,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_e1G9KQ4UNffb"
+    },
+    "body": {
+      "account_id": "acct_cVBNl21JrEU4",
+      "name": "Audit real-flow-1775908002",
+      "is_active": true,
+      "operation_mode": "semi_auto"
+    },
+    "body_text": "{\"account_id\":\"acct_cVBNl21JrEU4\",\"name\":\"Audit real-flow-1775908002\",\"is_active\":true,\"operation_mode\":\"semi_auto\"}"
+  },
+  "expected_status": 201,
+  "status_matches_expectation": true
+}

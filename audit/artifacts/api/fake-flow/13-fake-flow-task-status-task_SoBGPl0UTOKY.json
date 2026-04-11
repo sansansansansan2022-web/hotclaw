@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8145/api/v1/tasks/task_SoBGPl0UTOKY/status",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_JMdhMSxuqExP"
+    },
+    "body": {
+      "code": 0,
+      "message": "ok",
+      "data": {
+        "task_id": "task_SoBGPl0UTOKY",
+        "status": "completed",
+        "current_node": null,
+        "progress": {
+          "total_nodes": 11,
+          "completed_nodes": 0,
+          "current_node_index": 0
+        },
+        "started_at": "2026-04-11T09:26:09.890620",
+        "elapsed_seconds": 0.003009
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"ok\",\"data\":{\"task_id\":\"task_SoBGPl0UTOKY\",\"status\":\"completed\",\"current_node\":null,\"progress\":{\"total_nodes\":11,\"completed_nodes\":0,\"current_node_index\":0},\"started_at\":\"2026-04-11T09:26:09.890620\",\"elapsed_seconds\":0.003009}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

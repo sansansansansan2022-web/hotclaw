@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8146/api/v1/drafts?page=1&page_size=50&account_id=acct_cVBNl21JrEU4",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr__X_wdbhlEBY9"
+    },
+    "body": {
+      "drafts": [],
+      "pagination": {
+        "page": 1,
+        "page_size": 50,
+        "total": 0,
+        "total_pages": 0
+      }
+    },
+    "body_text": "{\"drafts\":[],\"pagination\":{\"page\":1,\"page_size\":50,\"total\":0,\"total_pages\":0}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import OperationalError
 
 from app.core.config import settings
 from app.core.logger import setup_logging, get_logger
@@ -111,8 +112,21 @@ async def lifespan(app: FastAPI):
     # Initialize default system configs
     from app.db.session import async_session_factory
     from app.services.system_config_service import init_default_configs
-    async with async_session_factory() as db:
-        await init_default_configs(db)
+    try:
+        async with async_session_factory() as db:
+            await init_default_configs(db)
+    except OperationalError as exc:
+        if "system_configs" in str(exc):
+            logger.error(
+                "startup_schema_missing",
+                missing_table="system_configs",
+                hint="Run `python -m alembic upgrade head` before starting the backend.",
+            )
+            raise RuntimeError(
+                "Database schema is not initialized. Run `python -m alembic upgrade head` in "
+                "`backend/` before starting the backend."
+            ) from exc
+        raise
     logger.info("system_configs_initialized")
 
     # Start Account Scheduler

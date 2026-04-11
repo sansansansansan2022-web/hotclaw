@@ -114,6 +114,9 @@ class PublishRecordRead(BaseModel):
     trigger_type: str
     attempt_count: int
     retry_count: int
+    simulated: bool = False
+    simulation_source: str | None = None
+    provider: str | None = None
     last_error_code: str | None = None
     last_error_message: str | None = None
     started_at: datetime | None = None
@@ -148,3 +151,6 @@ class PublishResult(BaseModel):
     error_message: str | None = None
     decision: dict | None = None
     published_at: datetime | None = None
+    simulated: bool = False
+    simulation_source: str | None = None
+    provider: str | None = None

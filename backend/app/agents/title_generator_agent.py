@@ -1,56 +1,43 @@
-"""Title generator agent: generates candidate titles for each topic.
+"""Title generator agent for source-backed topic candidates."""
 
-Calls LLM to generate and score title proposals.
-
-【标题生成智能体】
-职责：生成标题候选
-不负责：审核、发布
-"""
+from __future__ import annotations
 
 import json
+from typing import Any
+
 import litellm
-from app.agents.base import BaseAgent, AgentResult
+
+from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
+from app.services.article_assembler_service import article_assembler_service
+from app.services.query_planner_service import query_planner_service
 
 
 class TitleGeneratorAgent(BaseAgent):
-    """
-    标题生成智能体
-
-    Agent Contract:
-    - input: profile, topics, account_context (optional)
-    - output: selected_topic, titles: list[{text, style, score, reasoning}]
-    - supported_skills: []
-    """
+    """Generate title candidates for the strongest topic package."""
 
     agent_id = "title_generator_agent"
-    name = "标题生成智能体"
-    description = "为选题生成多个候选标题并评分"
+    name = "Title Generator"
+    description = "Generate title candidates grounded in strategy and reference cues."
 
-    # Agent Contract
     input_schema = {
         "type": "object",
         "properties": {
-            "profile": {
-                "type": "object",
-                "description": "账号画像"
-            },
-            "topics": {
-                "type": "object",
-                "description": "候选选题列表 {topics: [...]}"
-            },
-            "account_context": {
-                "type": "object",
-                "description": "账号上下文（可选）"
-            }
+            "profile": {"type": "object"},
+            "topics": {"type": "object"},
+            "account_context": {"type": "object"},
+            "ops_context": {"type": "object"},
+            "query_plan": {"type": "object"},
+            "reference_digest": {"type": "object"},
+            "source_candidates": {"type": "array"},
         },
-        "required": ["profile", "topics"]
+        "required": ["profile", "topics"],
     }
 
     output_schema = {
         "type": "object",
         "properties": {
-            "selected_topic": {"type": "string", "description": "选中的选题标题"},
+            "selected_topic": {"type": "string"},
             "titles": {
                 "type": "array",
                 "items": {
@@ -59,48 +46,27 @@ class TitleGeneratorAgent(BaseAgent):
                         "text": {"type": "string"},
                         "style": {"type": "string"},
                         "score": {"type": "number"},
-                        "reasoning": {"type": "string"}
-                    }
-                }
-            }
-        }
+                        "reasoning": {"type": "string"},
+                    },
+                },
+            },
+        },
     }
 
-    supported_skills = []
+    default_system_prompt = """You are a WeChat title strategist.
 
-    default_system_prompt = """\
-你是一位精通微信公众号爆款标题的写作专家，深谙读者点击心理和平台推荐机制。
+Choose the strongest topic candidate and generate 4-6 titles that feel click-worthy without losing credibility.
+Return strict JSON only.
 
-## 任务
-为估计吸引力最高的候选选题生成 4-6 个风格各异的候选标题，并给出评分和理由。
-
-## 输入
-- profile (object): 账号画像数据
-- topics (object): 候选选题列表（选择 estimated_appeal 最高的选题）
-
-## 输出要求
-必须输出 JSON 对象，包含：
-- selected_topic (string): 选中的选题标题
-- titles (array): 4-6 个候选标题，每个包含：
-  - text (string): 标题文本，长度 15-30 字
-  - style (string): 标题风格类型（悬念型/数字型/故事型/反问型/警告型/实用型）
-  - score (float): 标题评分 1-10
-  - reasoning (string): 评分理由，说明该标题的吸引力所在
-
-## 约束
-- 标题必须符合账号调性（profile.tone），不要过度标题党
-- 长度控制在 15-30 个中文字符
-- 风格需多样化，至少覆盖 3 种不同类型
-- 不使用误导性、虚假性标题
-- 按 score 降序排列
-- 评分标准：好奇心激发度(30%)、与内容匹配度(25%)、情绪驱动力(25%)、可信度(20%)"""
+Rules:
+- Titles must reflect the chosen topic package, account voice, and source-backed angle.
+- Avoid empty shock-value or titles that could belong to any account.
+- Show style diversity, but keep the title promises compatible with the outline the team will later write.
+"""
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
-        profile = input_data.get("profile", {})
-        topics = input_data.get("topics", {})
-        topic_list = topics.get("topics", []) if isinstance(topics, dict) else []
-        system_prompt = context.get("system_prompt") or self.default_system_prompt
-        user_prompt = self._build_user_prompt(profile, topic_list)
+        system_prompt = self.get_system_prompt(context)
+        user_prompt = self._build_user_prompt(input_data)
 
         try:
             model = settings.llm_model_name
@@ -119,62 +85,118 @@ class TitleGeneratorAgent(BaseAgent):
                 custom_llm_provider="dashscope",
             )
             content = response.choices[0].message.content
-
-            # 解析 JSON
-            data = self._parse_json(content)
-            return self._success(data)
-
-        except json.JSONDecodeError as e:
-            return self._failure(code="JSON_PARSE_ERROR", message=f"JSON 解析失败: {str(e)}")
-        except Exception as e:
-            return self._failure(code="LLM_ERROR", message=str(e))
-
-    def _build_user_prompt(self, profile: dict, topic_list: list) -> str:
-        """构建用户提示词"""
-        tone = profile.get("tone", "中性")
-        domain = profile.get("domain", "未知")
-
-        prompt_parts = [
-            "请为以下选题生成 4-6 个候选标题。",
-            "",
-            "## 账号信息",
-            f"- 主领域: {domain}",
-            f"- 内容调性: {tone}",
-        ]
-
-        if topic_list:
-            # 选择吸引力最高的选题
-            sorted_topics = sorted(topic_list, key=lambda x: x.get("estimated_appeal", 0), reverse=True)
-            prompt_parts.append("")
-            prompt_parts.append("## 候选选题（按吸引力降序）")
-            for i, topic in enumerate(sorted_topics[:3], 1):
-                title = topic.get("title", "")
-                appeal = topic.get("estimated_appeal", 0)
-                hook = topic.get("hook", "")
-                prompt_parts.append(f"{i}. {title} (预估吸引力: {appeal:.2f}, 钩子类型: {hook})")
-
-        prompt_parts.append("")
-        prompt_parts.append("请输出标题方案。")
-
-        return "\n".join(prompt_parts)
-
-    def _parse_json(self, content: str) -> dict:
-        """解析 LLM 返回的 JSON，处理 markdown 代码块"""
-        content = content.strip()
-        if content.startswith("```"):
-            parts = content.split("```")
-            if len(parts) >= 2:
-                content = parts[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
-        return json.loads(content)
+            return self._success(self._normalize_titles(self._parse_json(content), input_data))
+        except json.JSONDecodeError as exc:
+            return self._failure("JSON_PARSE_ERROR", f"Failed to parse title JSON: {exc}")
+        except Exception as exc:
+            return self._failure("LLM_ERROR", str(exc))
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
-        topics = input_data.get("topics", {})
-        topic_list = topics.get("topics", []) if isinstance(topics, dict) else []
-        title = topic_list[0]["title"] if topic_list else "默认标题"
-        return self._success({
-            "selected_topic": title,
-            "titles": [{"text": title, "style": "default", "score": 5.0, "reasoning": "降级：直接使用选题标题"}],
-        })
+        selected_topic = self._pick_topic(input_data.get("topics") or {})
+        return self._success(
+            {
+                "selected_topic": selected_topic,
+                "titles": [
+                    {
+                        "text": selected_topic or "Untitled",
+                        "style": "direct",
+                        "score": 5.0,
+                        "reasoning": "Fallback uses the strongest topic title directly.",
+                    }
+                ],
+            }
+        )
+
+    def _build_user_prompt(self, input_data: dict[str, Any]) -> str:
+        profile = input_data.get("profile") or {}
+        topics = input_data.get("topics") or {}
+        account_context = input_data.get("account_context") or {}
+        ops_context = input_data.get("ops_context") or {}
+        query_plan = input_data.get("query_plan")
+        if not isinstance(query_plan, dict):
+            query_plan = query_planner_service.build_plan(
+                profile=profile,
+                account_context=account_context,
+                ops_context=ops_context,
+            )
+        reference_digest = input_data.get("reference_digest") or {}
+
+        sorted_topics = self._sorted_topics(topics)
+        topic_package = sorted_topics[:3]
+        account_snapshot = {
+            "account_name": account_context.get("account_name") or "unknown",
+            "positioning": account_context.get("positioning") or profile.get("positioning_raw") or "",
+            "tone_style": account_context.get("tone_style") or profile.get("tone") or "",
+            "audience": account_context.get("audience") or profile.get("target_audience") or "",
+            "preferred_content_lane": (query_plan.get("lane") or {}).get("label") or "",
+        }
+
+        return "\n".join(
+            [
+                "Generate title candidates for the strongest topic package.",
+                "",
+                "ACCOUNT SNAPSHOT",
+                article_assembler_service.to_pretty_json(account_snapshot),
+                "",
+                "QUERY PLAN",
+                article_assembler_service.to_pretty_json(query_plan),
+                "",
+                "REFERENCE DIGEST",
+                article_assembler_service.to_pretty_json(reference_digest),
+                "",
+                "TOPIC CANDIDATES",
+                article_assembler_service.to_pretty_json(topic_package),
+                "",
+                "RETURN CONTRACT",
+                "- Return JSON with selected_topic and titles.",
+                "- titles must include text, style, score, reasoning.",
+                "- Generate 4-6 options with real style diversity, but keep them consistent with the chosen topic package.",
+            ]
+        )
+
+    def _sorted_topics(self, topics: dict[str, Any]) -> list[dict[str, Any]]:
+        items = topics.get("topics") if isinstance(topics.get("topics"), list) else []
+        normalized = [item for item in items if isinstance(item, dict)]
+        normalized.sort(key=lambda item: float(item.get("estimated_appeal") or 0.0), reverse=True)
+        return normalized
+
+    def _pick_topic(self, topics: dict[str, Any]) -> str:
+        sorted_topics = self._sorted_topics(topics)
+        if sorted_topics:
+            return str(sorted_topics[0].get("title") or "").strip()
+        return ""
+
+    def _normalize_titles(self, data: dict[str, Any], input_data: dict[str, Any]) -> dict[str, Any]:
+        selected_topic = str(data.get("selected_topic") or self._pick_topic(input_data.get("topics") or {})).strip()
+        raw_titles = data.get("titles") if isinstance(data, dict) else None
+        normalized_titles: list[dict[str, Any]] = []
+        if isinstance(raw_titles, list):
+            for item in raw_titles:
+                if not isinstance(item, dict):
+                    continue
+                text = str(item.get("text") or item.get("title") or "").strip()
+                if not text:
+                    continue
+                normalized_titles.append(
+                    {
+                        "text": text,
+                        "style": str(item.get("style") or "").strip(),
+                        "score": float(item.get("score") or 0.0),
+                        "reasoning": str(item.get("reasoning") or "").strip(),
+                    }
+                )
+        return {
+            "selected_topic": selected_topic,
+            "titles": normalized_titles,
+        }
+
+    def _parse_json(self, content: str) -> dict[str, Any]:
+        text = content.strip()
+        if text.startswith("```"):
+            parts = text.split("```")
+            if len(parts) >= 2:
+                text = parts[1]
+                if text.startswith("json"):
+                    text = text[4:]
+                text = text.strip()
+        return json.loads(text)

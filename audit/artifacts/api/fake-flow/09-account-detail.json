@@ -1,0 +1,78 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8145/api/v1/accounts/acct_-fXGVc5EhN1-",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_KBule2HCgA1l"
+    },
+    "body": {
+      "account_id": "acct_-fXGVc5EhN1-",
+      "name": "Audit fake-flow-1775907984",
+      "category": null,
+      "positioning": "HotClaw audit positioning fake-flow-1775907984",
+      "audience": null,
+      "tone_style": null,
+      "posting_frequency": "daily",
+      "posting_time": "09:00",
+      "content_strategy": null,
+      "reference_accounts": null,
+      "operation_mode": "semi_auto",
+      "auto_run_enabled": false,
+      "auto_publish_enabled": false,
+      "is_active": true,
+      "publish_paused": false,
+      "max_posts_per_day": null,
+      "min_interval_minutes": null,
+      "last_run_at": null,
+      "next_run_at": null,
+      "last_run_status": "never_run",
+      "last_error_message": null,
+      "last_publish_status": null,
+      "last_publish_error_message": null,
+      "last_published_at": null,
+      "reference_source_count": 0,
+      "reference_source_enabled_count": 0,
+      "reference_source_last_sync_status": null,
+      "automation_plan_summary": {
+        "id": 12,
+        "account_id": "acct_-fXGVc5EhN1-",
+        "config_source": "plan",
+        "plan_type": "semi_auto",
+        "is_enabled": false,
+        "run_strategy": "hybrid",
+        "schedule_type": "daily",
+        "schedule_config": {
+          "time": "09:00"
+        },
+        "schedule_summary": "Daily at 09:00 (Asia/Shanghai)",
+        "auto_publish_enabled": false,
+        "publish_review_required": true,
+        "max_posts_per_day": null,
+        "min_interval_minutes": null,
+        "timezone": "Asia/Shanghai",
+        "next_run_at": null,
+        "last_run_at": null,
+        "notes": null,
+        "latest_status": "never_run",
+        "is_active_plan": true,
+        "created_at": "2026-04-11T11:46:24",
+        "updated_at": "2026-04-11T11:46:24"
+      },
+      "latest_ops_context": null,
+      "latest_effective_mode": null,
+      "latest_allow_auto_publish": null,
+      "latest_ops_degraded": false,
+      "created_at": "2026-04-11T11:46:24",
+      "updated_at": "2026-04-11T11:46:24",
+      "recent_tasks": []
+    },
+    "body_text": "{\"account_id\":\"acct_-fXGVc5EhN1-\",\"name\":\"Audit fake-flow-1775907984\",\"category\":null,\"positioning\":\"HotClaw audit positioning fake-flow-1775907984\",\"audience\":null,\"tone_style\":null,\"posting_frequency\":\"daily\",\"posting_time\":\"09:00\",\"content_strategy\":null,\"reference_accounts\":null,\"operation_mode\":\"semi_auto\",\"auto_run_enabled\":false,\"auto_publish_enabled\":false,\"is_active\":true,\"publish_paused\":false,\"max_posts_per_day\":null,\"min_interval_minutes\":null,\"last_run_at\":null,\"next_run_at\":null,\"last_run_status\":\"never_run\",\"last_error_message\":null,\"last_publish_status\":null,\"last_publish_error_message\":null,\"last_published_at\":null,\"reference_source_count\":0,\"reference_source_enabled_count\":0,\"reference_source_last_sync_status\":null,\"automation_plan_summary\":{\"id\":12,\"account_id\":\"acct_-fXGVc5EhN1-\",\"config_source\":\"plan\",\"plan_type\":\"semi_auto\",\"is_enabled\":false,\"run_strategy\":\"hybrid\",\"schedule_type\":\"daily\",\"schedule_config\":{\"time\":\"09:00\"},\"schedule_summary\":\"Daily at 09:00 (Asia/Shanghai)\",\"auto_publish_enabled\":false,\"publish_review_required\":true,\"max_posts_per_day\":null,\"min_interval_minutes\":null,\"timezone\":\"Asia/Shanghai\",\"next_run_at\":null,\"last_run_at\":null,\"notes\":null,\"latest_status\":\"never_run\",\"is_active_plan\":true,\"created_at\":\"2026-04-11T11:46:24\",\"updated_at\":\"2026-04-11T11:46:24\"},\"latest_ops_context\":null,\"latest_effective_mode\":null,\"latest_allow_auto_publish\":null,\"latest_ops_degraded\":false,\"created_at\":\"2026-04-11T11:46:24\",\"updated_at\":\"2026-04-11T11:46:24\",\"recent_tasks\":[]}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

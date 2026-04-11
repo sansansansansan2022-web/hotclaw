@@ -2,6 +2,11 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+API_ORIGIN="${HOTCLAW_API_ORIGIN:-${NEXT_PUBLIC_HOTCLAW_API_ORIGIN:-http://127.0.0.1:8000}}"
+API_ORIGIN="${API_ORIGIN%/}"
+
+export HOTCLAW_API_ORIGIN="$API_ORIGIN"
+export NEXT_PUBLIC_HOTCLAW_API_ORIGIN="$API_ORIGIN"
 
 echo "============================================"
 echo "  HotClaw - Pixel Editorial Office"
@@ -28,6 +33,9 @@ if [ ! -d ".venv" ]; then
 fi
 source .venv/bin/activate
 pip install -e ".[dev]" -q 2>/dev/null || echo "[WARN] pip install had warnings, continuing..."
+echo "  Applying backend database migrations..."
+python3 -m alembic upgrade head
+python3 -m alembic stamp head
 
 # Install frontend dependencies
 echo "[2/4] Installing frontend dependencies..."
@@ -49,14 +57,26 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 # Start backend
-echo "[3/4] Starting backend server on http://localhost:8000 ..."
+echo "[3/4] Starting backend server on $API_ORIGIN ..."
 cd "$SCRIPT_DIR/backend"
 source .venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload &
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload &
 BACKEND_PID=$!
 
 # Wait for backend
-sleep 3
+echo "  Waiting for backend health endpoint..."
+BACKEND_READY=0
+for _ in $(seq 1 30); do
+    if curl -fsS "$API_ORIGIN/api/v1/health" >/dev/null 2>&1; then
+        BACKEND_READY=1
+        break
+    fi
+    sleep 1
+done
+
+if [ "$BACKEND_READY" -ne 1 ]; then
+    echo "[WARN] Backend health check did not respond within 30 seconds. Frontend will still be started."
+fi
 
 # Start frontend
 echo "[4/4] Starting frontend server on http://localhost:3000 ..."
@@ -67,9 +87,9 @@ FRONTEND_PID=$!
 echo ""
 echo "============================================"
 echo "  HotClaw is running!"
-echo "  Backend:  http://localhost:8000"
+echo "  Backend:  $API_ORIGIN"
 echo "  Frontend: http://localhost:3000"
-echo "  API Docs: http://localhost:8000/docs"
+echo "  API Docs: $API_ORIGIN/docs"
 echo "============================================"
 echo ""
 echo "Press Ctrl+C to stop all services."

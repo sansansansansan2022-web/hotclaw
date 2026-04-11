@@ -1,5 +1,6 @@
 """TaskService.run_task critical state management tests."""
 
+import asyncio
 from datetime import datetime, timezone, timedelta
 
 import pytest
@@ -111,3 +112,48 @@ async def test_run_task_updates_account_status_on_failure(db_session, monkeypatc
     saved_account = refreshed.scalar_one()
     assert saved_account.last_run_status == "failed"
     assert saved_account.last_error_message == "boom"
+
+
+@pytest.mark.asyncio
+async def test_run_task_marks_timeout_with_terminal_state(db_session, monkeypatch):
+    """Timeout path should record a terminal failed state with execution metadata."""
+    account = AccountModel(
+        id="acc-timeout",
+        name="A",
+        positioning="P",
+        operation_mode="semi_auto",
+        auto_run_enabled=True,
+        is_active=True,
+        posting_frequency="daily",
+        last_run_status="running",
+    )
+    task = TaskModel(
+        id="task-timeout",
+        workflow_id="default_pipeline",
+        status="pending",
+        input_data={"positioning": "x"},
+        account_id=account.id,
+    )
+    db_session.add_all([account, task])
+    await db_session.commit()
+
+    async def _slow_run(*args, **kwargs):
+        await asyncio.sleep(0.05)
+        return {"content": "never reached"}
+
+    monkeypatch.setattr("app.services.task_service.orchestrator_engine.run", _slow_run)
+    monkeypatch.setattr(task_service, "_get_task_timeout_seconds", lambda: 0.01)
+
+    await task_service.run_task(task.id, db_session)
+
+    refreshed_task = await db_session.get(TaskModel, task.id)
+    refreshed_account = await db_session.get(AccountModel, account.id)
+
+    assert refreshed_task is not None
+    assert refreshed_task.status == "failed"
+    assert refreshed_task.completed_at is not None
+    assert "timed out" in (refreshed_task.error_message or "")
+    assert isinstance(refreshed_task.result_data, dict)
+    assert refreshed_task.result_data["execution_meta"]["timed_out"] is True
+    assert refreshed_account is not None
+    assert refreshed_account.last_run_status == "failed"

@@ -200,10 +200,14 @@ class PublishRecordService:
         stmt = (
             select(WeChatPublishRecordModel)
             .where(WeChatPublishRecordModel.draft_id == draft_id)
-            .order_by(desc(WeChatPublishRecordModel.created_at))
+            .order_by(
+                desc(WeChatPublishRecordModel.created_at),
+                desc(WeChatPublishRecordModel.id),
+            )
+            .limit(1)
         )
         result = await db.execute(stmt)
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def get_latest_for_account(
         self,
@@ -214,7 +218,10 @@ class PublishRecordService:
         stmt = (
             select(WeChatPublishRecordModel)
             .where(WeChatPublishRecordModel.account_id == account_id)
-            .order_by(desc(WeChatPublishRecordModel.created_at))
+            .order_by(
+                desc(WeChatPublishRecordModel.created_at),
+                desc(WeChatPublishRecordModel.id),
+            )
             .limit(limit)
         )
         result = await db.execute(stmt)
@@ -224,18 +231,61 @@ class PublishRecordService:
         stmt = (
             select(WeChatPublishRecordModel)
             .where(WeChatPublishRecordModel.draft_id == draft_id)
-            .order_by(desc(WeChatPublishRecordModel.created_at))
+            .order_by(
+                desc(WeChatPublishRecordModel.created_at),
+                desc(WeChatPublishRecordModel.id),
+            )
         )
         result = await db.execute(stmt)
         return list(result.scalars().all())
 
     async def has_active_publishing(self, draft_id: int, db: AsyncSession) -> bool:
-        stmt = select(WeChatPublishRecordModel).where(
-            WeChatPublishRecordModel.draft_id == draft_id,
-            WeChatPublishRecordModel.publish_status.in_(list(self.ACTIVE_STATUSES)),
+        stmt = (
+            select(WeChatPublishRecordModel.id)
+            .where(
+                WeChatPublishRecordModel.draft_id == draft_id,
+                WeChatPublishRecordModel.publish_status.in_(list(self.ACTIVE_STATUSES)),
+            )
+            .order_by(
+                desc(WeChatPublishRecordModel.created_at),
+                desc(WeChatPublishRecordModel.id),
+            )
+            .limit(1)
         )
         result = await db.execute(stmt)
         return result.scalar_one_or_none() is not None
+
+    def get_simulation_metadata(self, record: WeChatPublishRecordModel | None) -> dict[str, Any]:
+        if record is None:
+            return {
+                "simulated": False,
+                "simulation_source": None,
+                "provider": None,
+            }
+
+        snapshot_parts = [
+            str(record.request_snapshot or ""),
+            str(record.response_snapshot or ""),
+            str(record.error_code or ""),
+            str(record.media_id or ""),
+            str(record.publish_id or ""),
+            str(record.article_id or ""),
+            str(record.wechat_draft_id or ""),
+        ]
+        combined = " ".join(snapshot_parts).lower()
+
+        if "e2e_fake" in combined or "simulated=true" in combined or "provider=fake" in combined:
+            return {
+                "simulated": True,
+                "simulation_source": "e2e_fake",
+                "provider": "fake",
+            }
+
+        return {
+            "simulated": False,
+            "simulation_source": None,
+            "provider": "wechat",
+        }
 
     async def sync_draft_status(self, draft_id: int, db: AsyncSession) -> dict[str, Any]:
         draft_result = await db.execute(select(ArticleDraftModel).where(ArticleDraftModel.id == draft_id))

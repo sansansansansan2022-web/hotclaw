@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8146/api/v1/tasks/task_rMO46EdTZh19/status",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_UpplhAz43BqC"
+    },
+    "body": {
+      "code": 0,
+      "message": "ok",
+      "data": {
+        "task_id": "task_rMO46EdTZh19",
+        "status": "pending",
+        "current_node": null,
+        "progress": {
+          "total_nodes": 11,
+          "completed_nodes": 0,
+          "current_node_index": 0
+        },
+        "started_at": null,
+        "elapsed_seconds": null
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"ok\",\"data\":{\"task_id\":\"task_rMO46EdTZh19\",\"status\":\"pending\",\"current_node\":null,\"progress\":{\"total_nodes\":11,\"completed_nodes\":0,\"current_node_index\":0},\"started_at\":null,\"elapsed_seconds\":null}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

@@ -6,10 +6,14 @@ import type {
   EvaluationSummary,
   OutlinePlan,
   OutlineSection,
+  QueryPlanInsight,
+  ReferenceDigestInsight,
+  ReferenceDigestSource,
   ReviewIssueDetail,
   ReviewResult,
   RewriteResult,
   SectionDraft,
+  SourceCandidateInsight,
   StyleProfile,
 } from "@/types";
 
@@ -50,6 +54,16 @@ function asStringArray(value: unknown): string[] {
   return value
     .map((item) => asString(item))
     .filter((item): item is string => Boolean(item));
+}
+
+function asRecordArray<T>(value: unknown, mapper: (record: Record<string, unknown>, index: number) => T | null): T[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item, index) => {
+      const record = asRecord(item);
+      return record ? mapper(record, index) : null;
+    })
+    .filter((item): item is T => Boolean(item));
 }
 
 function arrayFromKeys(record: Record<string, unknown> | null, keys: string[]): unknown[] {
@@ -111,6 +125,96 @@ export function normalizeContentMemories(value: unknown): ContentMemory[] {
   return source
     .map((item, index) => mapMemoryItem(item, index))
     .filter((item): item is ContentMemory => Boolean(item));
+}
+
+export function normalizeQueryPlan(value: unknown): QueryPlanInsight | null {
+  const record = asRecord(value);
+  if (!record) return null;
+
+  return {
+    lane: asRecord(record.lane)
+      ? {
+          id: asString(asRecord(record.lane)?.id),
+          label: asString(asRecord(record.lane)?.label),
+          input_hint: asString(asRecord(record.lane)?.input_hint),
+          reason: asString(asRecord(record.lane)?.reason),
+        }
+      : null,
+    selected_topic: asString(record.selected_topic),
+    selected_title: asString(record.selected_title),
+    primary_queries: asStringArray(record.primary_queries),
+    secondary_queries: asStringArray(record.secondary_queries),
+    source_preferences: asStringArray(record.source_preferences),
+    banned_angles: asStringArray(record.banned_angles),
+    account_keywords: asStringArray(record.account_keywords),
+    search_terms: asStringArray(record.search_terms),
+  };
+}
+
+export function normalizeSourceCandidates(value: unknown): SourceCandidateInsight[] {
+  const source = Array.isArray(value)
+    ? value
+    : arrayFromKeys(asRecord(value), ["source_candidates", "sources", "items"]);
+
+  const normalized: SourceCandidateInsight[] = [];
+  source
+    .map((item) => asRecord(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .forEach((record) => {
+      const sourceTitle = asString(record.source_title) ?? asString(record.title);
+      if (!sourceTitle) return;
+      normalized.push({
+        source_id: asString(record.source_id),
+        source_type: asString(record.source_type),
+        source_name: asString(record.source_name) ?? asString(record.source),
+        source_title: sourceTitle,
+        url: asString(record.url),
+        snippet: asString(record.snippet) ?? asString(record.summary),
+        fit_score: asNumber(record.fit_score),
+        origin: asString(record.origin),
+        why_selected: asString(record.why_selected),
+      });
+    });
+  return normalized;
+}
+
+function mapReferenceDigestSource(record: Record<string, unknown>): ReferenceDigestSource | null {
+  const sourceTitle = asString(record.source_title) ?? asString(record.title) ?? asString(record.source_name);
+  if (!sourceTitle) return null;
+  return {
+    source_id: asString(record.source_id),
+    source_type: asString(record.source_type),
+    source_name: asString(record.source_name),
+    source_title: sourceTitle,
+    style_brief: asString(record.style_brief),
+    structure_brief: asString(record.structure_brief),
+    useful_points: asStringArray(record.useful_points),
+    snippet: asString(record.snippet),
+    origin: asString(record.origin),
+    fit_score: asNumber(record.fit_score),
+  };
+}
+
+export function normalizeReferenceDigest(value: unknown): ReferenceDigestInsight | null {
+  const record = asRecord(value);
+  if (!record) return null;
+
+  const sourceDigests = asRecordArray(record.source_digests, (item) => mapReferenceDigestSource(item));
+  return {
+    summary: asString(record.summary),
+    source_count: asNumber(record.source_count),
+    selected_source_ids: asStringArray(record.selected_source_ids),
+    preferred_source_names: asStringArray(record.preferred_source_names),
+    style_takeaways: asStringArray(record.style_takeaways),
+    structure_takeaways: asStringArray(record.structure_takeaways),
+    useful_points: asStringArray(record.useful_points),
+    usage_rules: asStringArray(record.usage_rules),
+    source_digests: sourceDigests,
+    source_snippets: Array.isArray(record.source_snippets)
+      ? record.source_snippets.filter((item): item is Record<string, unknown> => isRecord(item))
+      : [],
+    raw: record,
+  };
 }
 
 function mapOutlineSection(value: unknown, index: number): OutlineSection | null {

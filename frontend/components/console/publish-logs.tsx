@@ -111,7 +111,12 @@ export function PublishLogsPage() {
               </td>
               <td className="px-5 py-4 text-sm text-slate-600">{row.accountName}</td>
               <td className="px-5 py-4">
-                <Badge tone={publishTone(row.publish_status)}>{publishStatusLabel(row.publish_status)}</Badge>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge tone={publishTone(row.publish_status)}>{publishStatusLabel(row.publish_status)}</Badge>
+                  {row.simulated ? (
+                    <Badge tone="warning">{locale === "zh-CN" ? "模拟" : "Simulated"}</Badge>
+                  ) : null}
+                </div>
               </td>
               <td className="px-5 py-4 text-sm text-slate-600">
                 {locale === "zh-CN" ? `第 ${row.publish_attempt} 次尝试` : `Attempt ${row.publish_attempt}`}

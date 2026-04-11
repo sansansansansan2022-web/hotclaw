@@ -7,6 +7,10 @@ echo   HotClaw - Pixel Editorial Office
 echo ============================================
 echo.
 
+set "API_ORIGIN=http://127.0.0.1:8000"
+set "HOTCLAW_API_ORIGIN=%API_ORIGIN%"
+set "NEXT_PUBLIC_HOTCLAW_API_ORIGIN=%API_ORIGIN%"
+
 :: Check Python
 where python >nul 2>&1
 if %errorlevel% neq 0 (
@@ -34,6 +38,19 @@ pip install -e ".[dev]" -q 2>nul
 if %errorlevel% neq 0 (
     echo [WARN] pip install had warnings, continuing...
 )
+echo   Applying backend database migrations...
+python -m alembic upgrade head
+if %errorlevel% neq 0 (
+    echo [ERROR] alembic upgrade head failed.
+    pause
+    exit /b 1
+)
+python -m alembic stamp head
+if %errorlevel% neq 0 (
+    echo [ERROR] alembic stamp head failed.
+    pause
+    exit /b 1
+)
 
 :: Install frontend dependencies
 echo [2/4] Installing frontend dependencies...
@@ -45,12 +62,26 @@ if not exist "node_modules" (
 )
 
 :: Start backend
-echo [3/4] Starting backend server on http://localhost:8000 ...
+echo [3/4] Starting backend server on %API_ORIGIN% ...
 cd /d "%~dp0backend"
-start "HotClaw Backend" cmd /k ".venv\Scripts\activate.bat && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+start "HotClaw Backend" cmd /k ".venv\Scripts\activate.bat && uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
 
-:: Wait a moment for backend to start
-timeout /t 3 /nobreak >nul
+:: Wait for backend health check so frontend rewrite/direct origin is ready
+echo   Waiting for backend health endpoint...
+set "BACKEND_READY="
+for /l %%I in (1,1,30) do (
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; try { $response = Invoke-WebRequest -UseBasicParsing '%API_ORIGIN%/api/v1/health' -TimeoutSec 2; if ($response.StatusCode -eq 200) { exit 0 } } catch { }; exit 1" >nul 2>&1
+    if not errorlevel 1 (
+        set "BACKEND_READY=1"
+        goto backend_ready
+    )
+    timeout /t 1 /nobreak >nul
+)
+
+:backend_ready
+if not defined BACKEND_READY (
+    echo [WARN] Backend health check did not respond within 30 seconds. Frontend will still be started.
+)
 
 :: Start frontend
 echo [4/4] Starting frontend server on http://localhost:3000 ...
@@ -63,9 +94,9 @@ timeout /t 5 /nobreak >nul
 echo.
 echo ============================================
 echo   HotClaw is running!
-echo   Backend:  http://localhost:8000
+echo   Backend:  %API_ORIGIN%
 echo   Frontend: http://localhost:3000
-echo   API Docs: http://localhost:8000/docs
+echo   API Docs: %API_ORIGIN%/docs
 echo ============================================
 echo.
 echo Press any key to open the browser...

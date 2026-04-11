@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8145/api/v1/publish-records/8/sync-status",
+    "json": null
+  },
+  "response": {
+    "status_code": 500,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": null
+    },
+    "body": {
+      "code": 5000,
+      "message": "internal server error",
+      "data": null,
+      "details": {
+        "error": "WeChat API error 40013: invalid appid rid: 69da3495-248ee62e-194bf584"
+      }
+    },
+    "body_text": "{\"code\":5000,\"message\":\"internal server error\",\"data\":null,\"details\":{\"error\":\"WeChat API error 40013: invalid appid rid: 69da3495-248ee62e-194bf584\"}}"
+  }
+}

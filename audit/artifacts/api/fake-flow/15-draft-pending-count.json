@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8145/api/v1/drafts/pending-count?account_id=acct_-fXGVc5EhN1-",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_1mNY530znE_K"
+    },
+    "body": {
+      "count": 1,
+      "account_id": "acct_-fXGVc5EhN1-"
+    },
+    "body_text": "{\"count\":1,\"account_id\":\"acct_-fXGVc5EhN1-\"}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

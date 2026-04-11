@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8145/api/v1/accounts",
+    "json": {
+      "name": "Audit fake-flow-1775907984",
+      "positioning": "HotClaw audit positioning fake-flow-1775907984",
+      "operation_mode": "semi_auto",
+      "auto_run_enabled": false,
+      "auto_publish_enabled": false,
+      "is_active": true,
+      "posting_frequency": "daily",
+      "posting_time": "09:00"
+    }
+  },
+  "response": {
+    "status_code": 201,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_Fh6OhEeZ93VQ"
+    },
+    "body": {
+      "account_id": "acct_-fXGVc5EhN1-",
+      "name": "Audit fake-flow-1775907984",
+      "is_active": true,
+      "operation_mode": "semi_auto"
+    },
+    "body_text": "{\"account_id\":\"acct_-fXGVc5EhN1-\",\"name\":\"Audit fake-flow-1775907984\",\"is_active\":true,\"operation_mode\":\"semi_auto\"}"
+  },
+  "expected_status": 201,
+  "status_matches_expectation": true
+}

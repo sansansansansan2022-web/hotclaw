@@ -20,9 +20,9 @@ export function Badge({
   tone = "neutral",
   className,
   children,
-}: {
+  ...props
+}: React.HTMLAttributes<HTMLSpanElement> & {
   tone?: Tone;
-  className?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -32,6 +32,7 @@ export function Badge({
         toneStyles[tone],
         className,
       )}
+      {...props}
     >
       {children}
     </span>

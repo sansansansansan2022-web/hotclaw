@@ -1,0 +1,41 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8147/api/v1/drafts?page=1&page_size=50&account_id=acct_fVK3C9aZZRZ-",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_vbXI_th0jJfh"
+    },
+    "body": {
+      "drafts": [
+        {
+          "id": 10,
+          "task_id": "task_GcQEyP4QPkU3",
+          "account_id": "acct_fVK3C9aZZRZ-",
+          "title": "HotClaw E2E Golden Draft",
+          "selected_topic": "HotClaw E2E Golden Path Topic",
+          "draft_status": "pending_review",
+          "publish_status": "not_published",
+          "publish_review_required": true,
+          "source_type": "semi_auto_task",
+          "word_count": 28,
+          "created_at": "2026-04-11T11:51:23",
+          "updated_at": "2026-04-11T11:51:23"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "page_size": 50,
+        "total": 1,
+        "total_pages": 1
+      }
+    },
+    "body_text": "{\"drafts\":[{\"id\":10,\"task_id\":\"task_GcQEyP4QPkU3\",\"account_id\":\"acct_fVK3C9aZZRZ-\",\"title\":\"HotClaw E2E Golden Draft\",\"selected_topic\":\"HotClaw E2E Golden Path Topic\",\"draft_status\":\"pending_review\",\"publish_status\":\"not_published\",\"publish_review_required\":true,\"source_type\":\"semi_auto_task\",\"word_count\":28,\"created_at\":\"2026-04-11T11:51:23\",\"updated_at\":\"2026-04-11T11:51:23\"}],\"pagination\":{\"page\":1,\"page_size\":50,\"total\":1,\"total_pages\":1}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

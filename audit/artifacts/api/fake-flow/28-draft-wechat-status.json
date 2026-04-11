@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8145/api/v1/drafts/5/wechat-status",
+    "json": null
+  },
+  "response": {
+    "status_code": 500,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": null
+    },
+    "body": {
+      "code": 5000,
+      "message": "internal server error",
+      "data": null,
+      "details": {
+        "error": "Multiple rows were found when one or none was required"
+      }
+    },
+    "body_text": "{\"code\":5000,\"message\":\"internal server error\",\"data\":null,\"details\":{\"error\":\"Multiple rows were found when one or none was required\"}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": false
+}

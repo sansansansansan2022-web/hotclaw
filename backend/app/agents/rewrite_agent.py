@@ -10,6 +10,8 @@ import litellm
 from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
 from app.services.article_assembler_service import article_assembler_service
+from app.services.query_planner_service import query_planner_service
+from app.services.reference_digest_service import reference_digest_service
 
 
 class RewriteAgent(BaseAgent):
@@ -32,6 +34,9 @@ class RewriteAgent(BaseAgent):
             "review_results": {"type": "array"},
             "ops_context": {"type": "object"},
             "account_context": {"type": "object"},
+            "query_plan": {"type": "object"},
+            "reference_digest": {"type": "object"},
+            "source_candidates": {"type": "array"},
         },
         "required": ["assembled_article"],
     }
@@ -83,8 +88,7 @@ Requirements:
                 custom_llm_provider="dashscope",
             )
             content = response.choices[0].message.content
-            data = self._parse_json(content)
-            return self._success(self._normalize_rewrite(data))
+            return self._success(self._normalize_rewrite(self._parse_json(content)))
         except json.JSONDecodeError as exc:
             return self._failure("JSON_PARSE_ERROR", f"Failed to parse rewrite JSON: {exc}")
         except Exception as exc:
@@ -103,21 +107,19 @@ Requirements:
         review_results = input_data.get("review_results") or []
         outline_plan = input_data.get("outline_plan") or {}
         section_drafts = input_data.get("section_drafts") or {}
-        ops_context = input_data.get("ops_context") or {}
-        account_context = input_data.get("account_context") or {}
-        reference_context = article_assembler_service.build_reference_source_context(
-            account_context,
-            ops_context,
-        )
+        source_candidates = input_data.get("source_candidates") or []
+        query_plan = self._resolve_query_plan(input_data)
+        reference_digest = self._resolve_reference_digest(input_data, query_plan)
         outline_summary = article_assembler_service.summarize_outline_plan(outline_plan)
         section_summary = article_assembler_service.summarize_section_drafts(section_drafts)
         review_focus = self._collect_review_focus(style_review, structure_review, review_results)
+        account_context = input_data.get("account_context") or {}
         account_snapshot = {
             "account_name": account_context.get("account_name") or "unknown",
             "tone_style": account_context.get("tone_style") or "",
             "positioning": account_context.get("positioning") or "",
             "audience": account_context.get("audience") or "",
-            "preferred_content_lane": (ops_context.get("run_strategy") or {}).get("preferred_content_lane") or "",
+            "preferred_content_lane": (query_plan.get("lane") or {}).get("label") or "",
         }
 
         return "\n".join(
@@ -138,13 +140,19 @@ Requirements:
                 "OPS SNAPSHOT",
                 article_assembler_service.to_pretty_json(
                     {
-                        "effective_mode": (ops_context.get("run_strategy") or {}).get("effective_mode") or "",
-                        "preferred_content_lane": (ops_context.get("run_strategy") or {}).get("preferred_content_lane") or "",
+                        "effective_mode": (input_data.get("ops_context") or {}).get("run_strategy", {}).get("effective_mode") or "",
+                        "preferred_content_lane": (query_plan.get("lane") or {}).get("label") or "",
                     }
                 ),
                 "",
+                "QUERY PLAN",
+                article_assembler_service.to_pretty_json(query_plan),
+                "",
                 "REFERENCE STYLE BRIEF",
-                article_assembler_service.to_pretty_json(reference_context),
+                article_assembler_service.to_pretty_json(reference_digest),
+                "",
+                "SOURCE CANDIDATES",
+                article_assembler_service.to_pretty_json(source_candidates[:5] if isinstance(source_candidates, list) else []),
                 "",
                 "ARTICLE",
                 article_assembler_service.to_pretty_json(
@@ -175,6 +183,39 @@ Requirements:
             ]
         )
 
+    def _resolve_query_plan(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        query_plan = input_data.get("query_plan")
+        if isinstance(query_plan, dict):
+            return query_plan
+        return query_planner_service.build_plan(
+            profile=input_data.get("profile") or {},
+            account_context=input_data.get("account_context") or {},
+            ops_context=input_data.get("ops_context") or {},
+            selected_topic=article_assembler_service.extract_selected_topic(
+                input_data.get("topics"), input_data.get("titles")
+            ),
+            selected_title=article_assembler_service.extract_selected_title(input_data.get("titles")),
+        )
+
+    def _resolve_reference_digest(
+        self,
+        input_data: dict[str, Any],
+        query_plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        reference_digest = input_data.get("reference_digest")
+        if isinstance(reference_digest, dict):
+            return reference_digest
+        return reference_digest_service.build_reference_digest(
+            account_context=input_data.get("account_context") or {},
+            ops_context=input_data.get("ops_context") or {},
+            query_plan=query_plan,
+            source_candidates=input_data.get("source_candidates") or [],
+            selected_topic=article_assembler_service.extract_selected_topic(
+                input_data.get("topics"), input_data.get("titles")
+            ),
+            selected_title=article_assembler_service.extract_selected_title(input_data.get("titles")),
+        )
+
     def _parse_json(self, content: str) -> dict[str, Any]:
         text = content.strip()
         if text.startswith("```"):
@@ -193,11 +234,7 @@ Requirements:
             or data.get("content")
             or ""
         ).strip()
-        revision_summary = str(
-            data.get("revision_summary")
-            or data.get("summary")
-            or ""
-        ).strip()
+        revision_summary = str(data.get("revision_summary") or data.get("summary") or "").strip()
         fixed_issues = [
             str(item).strip()
             for item in (data.get("fixed_issues") or [])
@@ -209,7 +246,11 @@ Requirements:
             if str(item).strip()
         ] if isinstance(data.get("changed_sections"), list) else []
 
-        used_rewrite = bool(revised_content_markdown) if not isinstance(data.get("used_rewrite"), bool) else data.get("used_rewrite")
+        used_rewrite = (
+            bool(revised_content_markdown)
+            if not isinstance(data.get("used_rewrite"), bool)
+            else data.get("used_rewrite")
+        )
         if not revision_summary:
             revision_summary = (
                 "Applied a single rewrite pass to tighten style and structure."

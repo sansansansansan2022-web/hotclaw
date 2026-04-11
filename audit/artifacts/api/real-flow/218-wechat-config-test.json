@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8146/api/v1/accounts/acct_cVBNl21JrEU4/wechat-config/test",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_WxppCgikH0hq"
+    },
+    "body": {
+      "code": 1,
+      "message": "WeChat API error 40013: invalid appid rid: 69da3579-3cb9d52e-0f512182",
+      "data": {
+        "success": false,
+        "message": "WeChat API error 40013: invalid appid rid: 69da3579-3cb9d52e-0f512182",
+        "tested_at": "2026-04-11T11:50:15.591257Z",
+        "token_expires_at": null
+      }
+    },
+    "body_text": "{\"code\":1,\"message\":\"WeChat API error 40013: invalid appid rid: 69da3579-3cb9d52e-0f512182\",\"data\":{\"success\":false,\"message\":\"WeChat API error 40013: invalid appid rid: 69da3579-3cb9d52e-0f512182\",\"tested_at\":\"2026-04-11T11:50:15.591257Z\",\"token_expires_at\":null}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

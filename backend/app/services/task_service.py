@@ -1,19 +1,22 @@
 """Task service: business logic for task lifecycle management."""
 
+import asyncio
 from datetime import datetime, timezone
 
 from sqlalchemy import select, desc, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.exceptions import TaskNotFoundError, TaskAlreadyRunningError, HotClawError
 from app.core.logger import get_logger
-from app.core.tracer import generate_task_id, set_task_id
+from app.core.tracer import generate_task_id, set_task_id, get_trace_id, generate_trace_id, set_trace_id
 from app.models.tables import TaskModel, TaskNodeRunModel
 from app.orchestrator.engine import orchestrator_engine
 from app.orchestrator.broadcaster import broadcaster
 from app.services.account_harness_service import account_harness_service
 from app.services.article_assembler_service import article_assembler_service
+from app.services.e2e_test_mode_service import e2e_test_mode_service
 
 logger = get_logger(__name__)
 
@@ -40,6 +43,10 @@ class TaskService:
     async def run_task(self, task_id: str, db: AsyncSession) -> None:
         """Run the orchestrator for a task. Called as a background coroutine."""
         task = await self._get_task(task_id, db)
+        set_task_id(task_id)
+        trace_id = get_trace_id() or generate_trace_id()
+        set_trace_id(trace_id)
+        task_timeout_seconds = self._get_task_timeout_seconds()
         # 仅允许 pending 任务进入执行，避免重复跑已完成/失败任务
         if task.status == "running":
             raise TaskAlreadyRunningError(task_id)
@@ -50,13 +57,75 @@ class TaskService:
                 details={"status": task.status},
             )
 
+        task.status = "running"
+        task.started_at = task.started_at or datetime.now(timezone.utc)
+        task.completed_at = None
+        task.error_message = None
+        db.add(task)
+        await db.commit()
+        logger.info(
+            "task_execution_started",
+            task_id=task.id,
+            account_id=task.account_id,
+            trace_id=trace_id,
+            timeout_seconds=task_timeout_seconds,
+        )
+
         try:
-            # Run the orchestrator
-            result_data = await orchestrator_engine.run(task, db)
+            generation_mode = await e2e_test_mode_service.get_generation_mode(db)
+            simulated = generation_mode == e2e_test_mode_service.MODE_FAKE_SUCCESS
+            simulation_source = "e2e_fake" if simulated else None
+            provider = "fake" if simulated else self._detect_provider()
+            if generation_mode == e2e_test_mode_service.MODE_FAKE_FAILURE:
+                raise RuntimeError(await e2e_test_mode_service.get_generation_failure_message(db))
+
+            if simulated:
+                input_data = task.input_data if isinstance(task.input_data, dict) else {}
+                result_data = e2e_test_mode_service.build_generation_result(
+                    task_id=task.id,
+                    account_id=task.account_id,
+                    positioning=str(input_data.get("positioning") or ""),
+                )
+                task.status = "completed"
+                task.completed_at = datetime.now(timezone.utc)
+                task.elapsed_seconds = (task.completed_at - task.started_at).total_seconds() if task.started_at else None
+                task.total_tokens = 0
+                db.add(task)
+                await db.flush()
+                await broadcaster.broadcast(
+                    task.id,
+                    "task_complete",
+                    {
+                        "task_id": task.id,
+                        "elapsed_seconds": task.elapsed_seconds,
+                    },
+                )
+                await broadcaster.close_task(task.id)
+            else:
+                result_data = await asyncio.wait_for(
+                    orchestrator_engine.run(task, db),
+                    timeout=task_timeout_seconds,
+                )
+
             result_data = article_assembler_service.normalize_result_data(result_data)
             if isinstance(result_data, dict) and isinstance(task.input_data, dict):
                 if "ops_context" not in result_data and isinstance(task.input_data.get("ops_context"), dict):
                     result_data["ops_context"] = task.input_data.get("ops_context")
+            result_data = self._attach_execution_meta(
+                result_data,
+                trace_id=trace_id,
+                timeout_seconds=task_timeout_seconds,
+                simulated=simulated,
+                simulation_source=simulation_source,
+                provider=provider,
+            )
+            if task.status != "completed":
+                task.status = "completed"
+            if task.completed_at is None:
+                task.completed_at = datetime.now(timezone.utc)
+            if task.started_at and task.completed_at:
+                task.elapsed_seconds = (task.completed_at - task.started_at).total_seconds()
+            task.error_message = None
             task.result_data = result_data
             db.add(task)
             await db.flush()
@@ -67,7 +136,16 @@ class TaskService:
 
             # Commit task result and draft together
             await db.commit()
-            logger.info("task_completed", task_id=task_id)
+            logger.info(
+                "task_completed",
+                task_id=task_id,
+                account_id=task.account_id,
+                trace_id=trace_id,
+                timeout_seconds=task_timeout_seconds,
+                degraded=self._is_degraded_result(result_data),
+                simulated=simulated,
+                provider=provider,
+            )
 
             # If this task is bound to an account, refresh the account's next_run_at
             if task.account_id:
@@ -76,15 +154,66 @@ class TaskService:
                 # account_service 仅 flush，这里补一次 commit 持久化账号状态
                 await db.commit()
 
+        except asyncio.TimeoutError:
+            timeout_message = f"task execution timed out after {task_timeout_seconds}s"
+            task.status = "failed"
+            task.error_message = timeout_message
+            task.completed_at = datetime.now(timezone.utc)
+            if task.started_at:
+                task.elapsed_seconds = (task.completed_at - task.started_at).total_seconds()
+            task.result_data = self._attach_execution_meta(
+                task.result_data if isinstance(task.result_data, dict) else {},
+                trace_id=trace_id,
+                timeout_seconds=task_timeout_seconds,
+                simulated=False,
+                simulation_source=None,
+                provider=self._detect_provider(),
+                timed_out=True,
+            )
+            db.add(task)
+            await db.commit()
+            logger.error(
+                "task_timed_out",
+                task_id=task_id,
+                account_id=task.account_id,
+                trace_id=trace_id,
+                timeout_seconds=task_timeout_seconds,
+            )
+
+            if task.account_id:
+                await self._update_account_run_status(task.account_id, db, "failed", timeout_message)
+                await db.commit()
+
+            await broadcaster.broadcast(task_id, "task_error", {
+                "task_id": task_id,
+                "error": timeout_message,
+            })
+            await broadcaster.close_task(task_id)
+
         except Exception as e:
             task.status = "failed"
             task.error_message = str(e)
             task.completed_at = datetime.now(timezone.utc)
             if task.started_at:
                 task.elapsed_seconds = (task.completed_at - task.started_at).total_seconds()
+            task.result_data = self._attach_execution_meta(
+                task.result_data if isinstance(task.result_data, dict) else {},
+                trace_id=trace_id,
+                timeout_seconds=task_timeout_seconds,
+                simulated=False,
+                simulation_source=None,
+                provider=self._detect_provider(),
+            )
             db.add(task)
             await db.commit()
-            logger.error("task_failed", task_id=task_id, error=str(e))
+            logger.error(
+                "task_failed",
+                task_id=task_id,
+                account_id=task.account_id,
+                trace_id=trace_id,
+                timeout_seconds=task_timeout_seconds,
+                error=str(e),
+            )
 
             # If this task is bound to an account, update the account's run status
             if task.account_id:
@@ -315,6 +444,52 @@ class TaskService:
         except Exception as e:
             # Draft creation failure should not fail the task
             logger.error("draft_creation_failed", task_id=task.id, error=str(e))
+
+    def _get_task_timeout_seconds(self) -> int:
+        node_count = max(orchestrator_engine.get_workflow_node_count(), 1)
+        per_node_budget = settings.agent_timeout * node_count + 30
+        bounded_total_budget = settings.agent_timeout + settings.llm_timeout + 30
+        return max(min(per_node_budget, bounded_total_budget), settings.agent_timeout + 30)
+
+    def _detect_provider(self) -> str:
+        model_name = settings.llm_model_name.strip()
+        if "/" in model_name:
+            return model_name.split("/", 1)[0]
+        return "dashscope"
+
+    def _is_degraded_result(self, result_data: dict | None) -> bool:
+        if not isinstance(result_data, dict):
+            return False
+        content_pipeline = result_data.get("content_pipeline")
+        return bool(isinstance(content_pipeline, dict) and content_pipeline.get("degraded"))
+
+    def _attach_execution_meta(
+        self,
+        result_data: dict | None,
+        *,
+        trace_id: str,
+        timeout_seconds: int,
+        simulated: bool,
+        simulation_source: str | None,
+        provider: str | None,
+        timed_out: bool = False,
+    ) -> dict:
+        payload = dict(result_data or {})
+        existing = payload.get("execution_meta")
+        execution_meta = dict(existing) if isinstance(existing, dict) else {}
+        execution_meta.update(
+            {
+                "trace_id": trace_id,
+                "task_timeout_seconds": timeout_seconds,
+                "simulated": simulated,
+                "simulation_source": simulation_source,
+                "provider": provider,
+                "timed_out": timed_out,
+                "degraded": self._is_degraded_result(payload),
+            }
+        )
+        payload["execution_meta"] = execution_meta
+        return payload
 
 
 task_service = TaskService()

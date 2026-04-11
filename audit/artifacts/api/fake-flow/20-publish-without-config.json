@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8145/api/v1/drafts/5/publish-to-wechat",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_g5cLuIQpYYi_"
+    },
+    "body": {
+      "code": 9004,
+      "message": "failed to publish draft 5: WeChat config is missing for account acct_8qYSoCMNn82T.",
+      "data": {
+        "draft_id": 5,
+        "publish_status": "failed",
+        "error": "failed to publish draft 5: WeChat config is missing for account acct_8qYSoCMNn82T."
+      }
+    },
+    "body_text": "{\"code\":9004,\"message\":\"failed to publish draft 5: WeChat config is missing for account acct_8qYSoCMNn82T.\",\"data\":{\"draft_id\":5,\"publish_status\":\"failed\",\"error\":\"failed to publish draft 5: WeChat config is missing for account acct_8qYSoCMNn82T.\"}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

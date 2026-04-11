@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8145/api/v1/drafts/9/publish-to-wechat",
+    "json": null
+  },
+  "response": {
+    "status_code": 502,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_Eug6RJAx7Z1p"
+    },
+    "body": {
+      "code": 9004,
+      "message": "failed to publish draft 9: Audit fake publish failure",
+      "data": {
+        "draft_id": 9,
+        "publish_status": "failed",
+        "error": "failed to publish draft 9: Audit fake publish failure"
+      }
+    },
+    "body_text": "{\"code\":9004,\"message\":\"failed to publish draft 9: Audit fake publish failure\",\"data\":{\"draft_id\":9,\"publish_status\":\"failed\",\"error\":\"failed to publish draft 9: Audit fake publish failure\"}}"
+  },
+  "expected_status": 502,
+  "status_matches_expectation": true
+}

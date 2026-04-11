@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8145/api/v1/drafts/9/retry-publish",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_y4lCMYpJusaz"
+    },
+    "body": {
+      "code": 0,
+      "message": "Retry publish initiated successfully",
+      "data": {
+        "draft_id": 9,
+        "draft_status": "published",
+        "publish_status": "published",
+        "published_at": "2026-04-11T11:46:28.188768",
+        "wechat_media_id": "e2e-media-8",
+        "wechat_publish_id": "e2e-publish-8",
+        "publish_record_id": 8,
+        "simulated": true,
+        "simulation_source": "e2e_fake",
+        "provider": "fake"
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"Retry publish initiated successfully\",\"data\":{\"draft_id\":9,\"draft_status\":\"published\",\"publish_status\":\"published\",\"published_at\":\"2026-04-11T11:46:28.188768\",\"wechat_media_id\":\"e2e-media-8\",\"wechat_publish_id\":\"e2e-publish-8\",\"publish_record_id\":8,\"simulated\":true,\"simulation_source\":\"e2e_fake\",\"provider\":\"fake\"}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

@@ -198,7 +198,7 @@ export function AccountDetailPage({ accountId }: { accountId: string }) {
                 Open Workspace
               </Button>
             </Link>
-            <Button variant="secondary" onClick={() => void runNow()}>
+            <Button data-testid="account-detail-run-button" variant="secondary" onClick={() => void runNow()}>
               <Icon name="play" className="h-4 w-4" />
               Run Now
             </Button>

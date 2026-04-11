@@ -7,9 +7,11 @@ from typing import Any
 
 import litellm
 
-from app.agents.base import BaseAgent, AgentResult
+from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
 from app.services.article_assembler_service import article_assembler_service
+from app.services.query_planner_service import query_planner_service
+from app.services.reference_digest_service import reference_digest_service
 
 
 class OutlinePlannerAgent(BaseAgent):
@@ -28,6 +30,9 @@ class OutlinePlannerAgent(BaseAgent):
             "titles": {"type": "object"},
             "account_context": {"type": "object"},
             "ops_context": {"type": "object"},
+            "query_plan": {"type": "object"},
+            "reference_digest": {"type": "object"},
+            "source_candidates": {"type": "array"},
         },
         "required": ["profile", "topics", "titles"],
     }
@@ -36,6 +41,11 @@ class OutlinePlannerAgent(BaseAgent):
         "type": "object",
         "properties": {
             "article_goal": {"type": "string"},
+            "why_this_topic": {"type": "string"},
+            "strategic_angle": {"type": "string"},
+            "reference_basis": {"type": "string"},
+            "target_reader": {"type": "string"},
+            "content_lane": {"type": "string"},
             "target_reader_takeaway": {"type": "string"},
             "opening_hook": {"type": "string"},
             "emotional_arc": {"type": "string"},
@@ -71,7 +81,8 @@ Return strict JSON only.
 
 Non-negotiable requirements:
 - The selected_topic and selected_title are locked. Do not swap to a neighboring topic, broader category, or a more familiar narrative.
-- Use the account voice, audience, preferred content lane, automation context, and reference-source cues.
+- Use the account voice, audience, preferred content lane, source-scout context, and reference digest together.
+- why_this_topic and strategic_angle must explain why this article deserves to exist for this account right now.
 - The opening_hook must pull the reader in fast with tension, scene, contradiction, or a pointed question.
 - Sections must have distinct jobs and a forward-moving relationship. Do not make them evenly padded talking points.
 - The ending_cta must land with emotion, judgment, or a specific next move. Do not end with a bland summary.
@@ -104,13 +115,9 @@ Non-negotiable requirements:
                 custom_llm_provider="dashscope",
             )
             content = response.choices[0].message.content
-            data = self._parse_json(content)
-            normalized = self._normalize_outline(data)
+            normalized = self._normalize_outline(self._parse_json(content), input_data)
             if not self._outline_matches_topic(normalized, selected_topic, selected_title):
-                fallback_result = await self.fallback(
-                    RuntimeError("outline topic drift detected"),
-                    input_data,
-                )
+                fallback_result = await self.fallback(RuntimeError("outline topic drift detected"), input_data)
                 if fallback_result and fallback_result.is_success:
                     return fallback_result
             return self._success(normalized)
@@ -124,16 +131,16 @@ Non-negotiable requirements:
         selected_topic = article_assembler_service.extract_selected_topic(
             input_data.get("topics"), input_data.get("titles")
         )
-        lane = (
-            (input_data.get("ops_context") or {})
-            .get("run_strategy", {})
-            .get("preferred_content_lane")
-        ) or "insight"
-        reference_context = article_assembler_service.build_reference_source_context(
-            input_data.get("account_context"),
-            input_data.get("ops_context"),
+        query_plan = self._resolve_query_plan(input_data)
+        reference_digest = self._resolve_reference_digest(input_data, query_plan)
+        lane = ((query_plan.get("lane") or {}).get("label")) or "insight"
+        target_reader = (
+            (input_data.get("account_context") or {}).get("audience")
+            or (input_data.get("profile") or {}).get("target_audience")
+            or "the account's core readers"
         )
-        reference_names = reference_context.get("preferred_source_names") or ["preferred references"]
+        reference_names = reference_digest.get("preferred_source_names") or ["preferred references"]
+        useful_points = reference_digest.get("useful_points") or []
 
         sections = [
             self._build_section(
@@ -155,7 +162,7 @@ Non-negotiable requirements:
                 "Translate the surface topic into the core pattern this account wants readers to notice",
                 [
                     f"Use the {lane} lane as the main angle.",
-                    "Move from scene to diagnosis so the article clearly advances.",
+                    useful_points[0] if useful_points else "Move from scene to diagnosis so the article clearly advances.",
                 ],
                 "Grounded and interpretive",
                 summary="Turn the opening tension into a sharper observation.",
@@ -168,7 +175,7 @@ Non-negotiable requirements:
                 "Add the reframing, contrast, or method that keeps the article from sounding obvious",
                 [
                     "Avoid repeating the diagnosis; introduce a sharper distinction, blind spot, or mindset shift.",
-                    "Let this section feel like the article's turning point, not just another parallel point.",
+                    useful_points[1] if len(useful_points) > 1 else "Let this section feel like the article's turning point, not just another parallel point.",
                 ],
                 "Sharper, still human",
                 summary="Create the section that makes the piece feel worth forwarding.",
@@ -190,7 +197,12 @@ Non-negotiable requirements:
             ),
         ]
         outline = {
-            "article_goal": f"Help readers understand and act on {selected_topic or selected_title}.",
+            "article_goal": f"Help {target_reader} understand and act on {selected_topic or selected_title}.",
+            "why_this_topic": "This topic is timely enough to matter and close enough to the account's lane to own.",
+            "strategic_angle": f"Use the {lane} lane to turn the topic into a sharper account-owned judgment.",
+            "reference_basis": ", ".join(reference_names[:2]),
+            "target_reader": str(target_reader),
+            "content_lane": lane,
             "target_reader_takeaway": "Leave with one clearer perspective and one doable action.",
             "opening_hook": f"Start from a vivid moment or contradiction around {selected_topic or selected_title}, not a background lecture.",
             "emotional_arc": "recognition -> diagnosis -> turn -> landing",
@@ -212,14 +224,11 @@ Non-negotiable requirements:
         selected_title = article_assembler_service.extract_selected_title(titles)
         selected_topic = article_assembler_service.extract_selected_topic(topics, titles)
         title_candidates = article_assembler_service.extract_title_candidates(titles)
-        preferred_lane = (ops_context.get("run_strategy") or {}).get("preferred_content_lane")
-        avoid_topics = (ops_context.get("run_strategy") or {}).get("avoid_recent_topics") or []
-        preferred_source_ids = (ops_context.get("run_strategy") or {}).get("preferred_reference_source_ids") or []
-        reference_context = article_assembler_service.build_reference_source_context(
-            account_context,
-            ops_context,
-        )
+        query_plan = self._resolve_query_plan(input_data)
+        reference_digest = self._resolve_reference_digest(input_data, query_plan)
         hot_items = hot_topics.get("hot_topics") if isinstance(hot_topics, dict) else []
+        source_candidates = input_data.get("source_candidates") or []
+
         account_snapshot = {
             "account_name": account_context.get("account_name") or "unknown",
             "positioning": account_context.get("positioning") or profile.get("positioning_raw") or "",
@@ -229,10 +238,10 @@ Non-negotiable requirements:
             "automation_plan_summary": account_context.get("automation_plan_summary") or "",
         }
         ops_snapshot = {
-            "preferred_content_lane": preferred_lane or "",
+            "preferred_content_lane": (query_plan.get("lane") or {}).get("label") or "",
             "effective_mode": (ops_context.get("run_strategy") or {}).get("effective_mode") or "",
-            "avoid_recent_topics": avoid_topics,
-            "preferred_reference_source_ids": preferred_source_ids,
+            "avoid_recent_topics": (ops_context.get("run_strategy") or {}).get("avoid_recent_topics") or [],
+            "preferred_reference_source_ids": (ops_context.get("run_strategy") or {}).get("preferred_reference_source_ids") or [],
         }
         topic_snapshot = {
             "selected_topic": selected_topic,
@@ -249,6 +258,8 @@ Non-negotiable requirements:
                 "PLANNING RULES",
                 "- Make the opening_hook immediately usable as the article's opening paragraph seed.",
                 f"- Stay locked to this exact topic/title pair: {selected_topic} / {selected_title}. If a section could fit another article, it is wrong.",
+                "- why_this_topic must explain the strategic value of writing now for this account.",
+                "- strategic_angle must say what judgment or tension makes this article feel owned by the account.",
                 "- Give each section a distinct job: hook, diagnosis, turn, landing. Merge or split only if the topic truly needs it.",
                 "- Sections should progress. Later sections must not feel like reordered duplicates of earlier ones.",
                 "- The ending_cta should feel like a landing sentence or action prompt, not a soft recap.",
@@ -260,14 +271,25 @@ Non-negotiable requirements:
                 "OPS SNAPSHOT",
                 article_assembler_service.to_pretty_json(ops_snapshot),
                 "",
+                "QUERY PLAN",
+                article_assembler_service.to_pretty_json(query_plan),
+                "",
                 "TOPIC PACKAGE",
                 article_assembler_service.to_pretty_json(topic_snapshot),
                 "",
                 "REFERENCE STYLE BRIEF",
-                article_assembler_service.to_pretty_json(reference_context),
+                article_assembler_service.to_pretty_json(reference_digest),
+                "",
+                "SOURCE CANDIDATES",
+                article_assembler_service.to_pretty_json(source_candidates[:5] if isinstance(source_candidates, list) else []),
                 "",
                 "RETURN CONTRACT",
                 "- article_goal: one sentence on what the article tries to do for the reader.",
+                "- why_this_topic: why this account should write this topic now.",
+                "- strategic_angle: the account-owned way into the topic.",
+                "- reference_basis: which source or digest pattern the outline is borrowing from.",
+                "- target_reader: who this outline is really written for.",
+                "- content_lane: the lane label that anchors the outline.",
                 "- target_reader_takeaway: what should remain after reading.",
                 "- opening_hook: 1-2 sentences, specific and non-generic.",
                 "- emotional_arc: short phrase showing how the article should move emotionally.",
@@ -276,8 +298,42 @@ Non-negotiable requirements:
                 "- estimated_word_count: practical long-form range for this topic.",
                 "- summary: one-line outline summary.",
                 "",
-                "Return JSON with article_goal, target_reader_takeaway, opening_hook, emotional_arc, sections, ending_cta, estimated_word_count, summary.",
+                "Return JSON with article_goal, why_this_topic, strategic_angle, reference_basis, target_reader, content_lane, target_reader_takeaway, opening_hook, emotional_arc, sections, ending_cta, estimated_word_count, summary.",
             ]
+        )
+
+    def _resolve_query_plan(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        query_plan = input_data.get("query_plan")
+        if isinstance(query_plan, dict):
+            return query_plan
+        return query_planner_service.build_plan(
+            profile=input_data.get("profile") or {},
+            account_context=input_data.get("account_context") or {},
+            ops_context=input_data.get("ops_context") or {},
+            selected_topic=article_assembler_service.extract_selected_topic(
+                input_data.get("topics"), input_data.get("titles")
+            ),
+            selected_title=article_assembler_service.extract_selected_title(input_data.get("titles")),
+            hot_topics=input_data.get("hot_topics") or {},
+        )
+
+    def _resolve_reference_digest(
+        self,
+        input_data: dict[str, Any],
+        query_plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        reference_digest = input_data.get("reference_digest")
+        if isinstance(reference_digest, dict):
+            return reference_digest
+        return reference_digest_service.build_reference_digest(
+            account_context=input_data.get("account_context") or {},
+            ops_context=input_data.get("ops_context") or {},
+            query_plan=query_plan,
+            source_candidates=input_data.get("source_candidates") or [],
+            selected_topic=article_assembler_service.extract_selected_topic(
+                input_data.get("topics"), input_data.get("titles")
+            ),
+            selected_title=article_assembler_service.extract_selected_title(input_data.get("titles")),
         )
 
     def _parse_json(self, content: str) -> dict[str, Any]:
@@ -291,7 +347,7 @@ Non-negotiable requirements:
                 text = text.strip()
         return json.loads(text)
 
-    def _normalize_outline(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_outline(self, data: dict[str, Any], input_data: dict[str, Any]) -> dict[str, Any]:
         sections = data.get("sections")
         normalized_sections: list[dict[str, Any]] = []
         if isinstance(sections, list):
@@ -317,8 +373,14 @@ Non-negotiable requirements:
                     )
                 )
 
+        query_plan = self._resolve_query_plan(input_data)
         return {
             "article_goal": str(data.get("article_goal") or "").strip(),
+            "why_this_topic": str(data.get("why_this_topic") or "").strip(),
+            "strategic_angle": str(data.get("strategic_angle") or "").strip(),
+            "reference_basis": str(data.get("reference_basis") or "").strip(),
+            "target_reader": str(data.get("target_reader") or "").strip(),
+            "content_lane": str(data.get("content_lane") or (query_plan.get("lane") or {}).get("label") or "").strip(),
             "target_reader_takeaway": str(data.get("target_reader_takeaway") or "").strip(),
             "opening_hook": str(data.get("opening_hook") or "").strip(),
             "emotional_arc": str(data.get("emotional_arc") or "").strip(),
@@ -336,6 +398,8 @@ Non-negotiable requirements:
     ) -> bool:
         combined_parts = [
             outline.get("article_goal"),
+            outline.get("why_this_topic"),
+            outline.get("strategic_angle"),
             outline.get("target_reader_takeaway"),
             outline.get("opening_hook"),
             outline.get("ending_cta"),

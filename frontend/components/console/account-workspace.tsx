@@ -547,7 +547,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
             <Link href={`/accounts/${accountId}`}>
               <Button variant="secondary">{copy.backToAccount}</Button>
             </Link>
-            <Button onClick={() => void runNow()} disabled={running}>
+            <Button data-testid="account-workspace-run-button" onClick={() => void runNow()} disabled={running}>
               <Icon name="play" className="h-4 w-4" />
               {running ? copy.running : copy.runNow}
             </Button>
@@ -898,7 +898,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
             {data.tasks.length ? (
               <Table columns={[copy.taskColumn, copy.statusColumn, copy.createdColumn, copy.durationColumn, copy.actionColumn]}>
                 {data.tasks.map((task) => (
-                  <tr key={task.task_id}>
+                  <tr key={task.task_id} data-testid={`task-row-${task.task_id}`}>
                     <td className="px-5 py-4">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">{task.task_id}</p>
@@ -910,12 +910,12 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                       </div>
                     </td>
                     <td className="px-5 py-4">
-                      <Badge tone={taskTone(task.status)}>{taskStatusLabel(task.status)}</Badge>
+                      <Badge data-testid={`task-status-${task.task_id}`} data-status={task.status} tone={taskTone(task.status)}>{taskStatusLabel(task.status)}</Badge>
                     </td>
                     <td className="px-5 py-4 text-sm text-slate-600">{formatDateTime(task.created_at)}</td>
                     <td className="px-5 py-4 text-sm text-slate-600">{formatDuration(task.elapsed_seconds)}</td>
                     <td className="px-5 py-4">
-                      <Link href={`/task/${task.task_id}`}>
+                      <Link href={`/task/${task.task_id}`} data-testid={`task-open-${task.task_id}`}>
                         <Button variant="secondary" size="sm">
                           {copy.inspect}
                         </Button>
@@ -944,7 +944,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                 ]}
               >
                 {pendingDrafts.map((draft) => (
-                  <tr key={draft.id}>
+                  <tr key={draft.id} data-testid={`draft-row-${draft.id}`}>
                     <td className="px-5 py-4">
                       <div>
                         <p className="text-sm font-semibold text-slate-900">{draft.title}</p>
@@ -956,14 +956,14 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                       </div>
                     </td>
                     <td className="px-5 py-4">
-                      <Badge tone={draftTone(draft.draft_status)}>{draftStatusLabel(draft.draft_status)}</Badge>
+                      <Badge data-testid={`draft-status-${draft.id}`} data-status={draft.draft_status} tone={draftTone(draft.draft_status)}>{draftStatusLabel(draft.draft_status)}</Badge>
                     </td>
                     <td className="px-5 py-4">
-                      <Badge tone={draftTone(draft.publish_status)}>{publishStatusLabel(draft.publish_status)}</Badge>
+                      <Badge data-testid={`draft-publish-status-${draft.id}`} data-status={draft.publish_status} tone={draftTone(draft.publish_status)}>{publishStatusLabel(draft.publish_status)}</Badge>
                     </td>
                     <td className="px-5 py-4 text-sm text-slate-600">{formatDateTime(draft.updated_at)}</td>
                     <td className="px-5 py-4">
-                      <Link href={`/drafts/${draft.id}`}>
+                      <Link href={`/drafts/${draft.id}`} data-testid={`draft-open-${draft.id}`}>
                         <Button variant="secondary" size="sm">
                           {copy.openDraft}
                         </Button>

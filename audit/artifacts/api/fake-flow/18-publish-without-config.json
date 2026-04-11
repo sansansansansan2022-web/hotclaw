@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8145/api/v1/drafts/9/publish-to-wechat",
+    "json": null
+  },
+  "response": {
+    "status_code": 409,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_gaukQE9eHpFw"
+    },
+    "body": {
+      "code": 9004,
+      "message": "WeChat config is missing for account acct_-fXGVc5EhN1-.",
+      "data": {
+        "draft_id": 9,
+        "publish_status": "failed",
+        "reason_code": "WECHAT_CONFIG_MISSING",
+        "decision": "BLOCK"
+      }
+    },
+    "body_text": "{\"code\":9004,\"message\":\"WeChat config is missing for account acct_-fXGVc5EhN1-.\",\"data\":{\"draft_id\":9,\"publish_status\":\"failed\",\"reason_code\":\"WECHAT_CONFIG_MISSING\",\"decision\":\"BLOCK\"}}"
+  },
+  "expected_status": 409,
+  "status_matches_expectation": true
+}

@@ -30,6 +30,7 @@ def serialize_config(config) -> dict:
 
 
 def serialize_publish_record(record) -> dict:
+    simulation_meta = publish_record_service.get_simulation_metadata(record)
     return PublishRecordRead(
         id=record.id,
         draft_id=record.draft_id,
@@ -44,6 +45,9 @@ def serialize_publish_record(record) -> dict:
         trigger_type=record.trigger_type,
         attempt_count=record.publish_attempt,
         retry_count=record.retry_count,
+        simulated=simulation_meta["simulated"],
+        simulation_source=simulation_meta["simulation_source"],
+        provider=simulation_meta["provider"],
         last_error_code=record.error_code,
         last_error_message=record.error_message,
         started_at=record.started_at,
@@ -53,6 +57,15 @@ def serialize_publish_record(record) -> dict:
         created_at=record.created_at,
         updated_at=record.updated_at,
     ).model_dump(mode="json")
+
+
+def serialize_connection_test_result(result) -> dict:
+    message = result.message or ("Connection successful" if result.success else "Connection failed")
+    return {
+        "code": 0 if result.success else 1,
+        "message": message,
+        "data": result.model_dump(mode="json"),
+    }
 
 
 @router.get("/accounts/{account_id}/wechat-config")
@@ -107,7 +120,7 @@ async def test_account_wechat_config(account_id: str, db: AsyncSession = Depends
     try:
         result = await wechat_config_service.test_connection(account_id, db)
         await db.commit()
-        return {"code": 0 if result.success else 1, "message": "ok", "data": result.model_dump(mode="json")}
+        return serialize_connection_test_result(result)
     except WeChatConfigServiceError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
@@ -115,7 +128,7 @@ async def test_account_wechat_config(account_id: str, db: AsyncSession = Depends
 @router.post("/wechat/test-connection")
 async def test_legacy_wechat_credentials(payload: WeChatTestConnectionRequest):
     result = await wechat_config_service.test_credentials(payload.app_id, payload.app_secret)
-    return {"code": 0 if result.success else 1, "message": "ok", "data": result.model_dump(mode="json")}
+    return serialize_connection_test_result(result)
 
 
 @router.get("/publish-records/{publish_record_id}")

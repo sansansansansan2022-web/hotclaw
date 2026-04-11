@@ -2,14 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { getTaskDetail, getTaskNodes } from "@/lib/api";
+import { getTaskDetail, getTaskNodes, rerunTask } from "@/lib/api";
 import {
   normalizeContentMemories,
   normalizeEvaluation,
   normalizeOutlinePlan,
+  normalizeQueryPlan,
+  normalizeReferenceDigest,
   normalizeReviewResults,
   normalizeRewriteResult,
   normalizeSectionDrafts,
+  normalizeSourceCandidates,
   normalizeStyleProfile,
 } from "@/lib/content-insights";
 import { useI18n } from "@/lib/i18n";
@@ -51,9 +54,11 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       setError(null);
       const [detailRes, nodesRes] = await Promise.all([getTaskDetail(taskId), getTaskNodes(taskId)]);
       setDetail(detailRes);
@@ -61,7 +66,9 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载任务详情。" : "Unable to load task detail.");
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
@@ -69,11 +76,24 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
     void load();
   }, [taskId]);
 
+  useEffect(() => {
+    if (!detail || !["pending", "running"].includes(detail.status)) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      void load(true);
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [detail, taskId]);
+
   const insights = useMemo(() => {
     const result = detail?.result_data;
     const sections = normalizeSectionDrafts(result?.section_drafts);
     return {
       memories: normalizeContentMemories(result?.retrieved_memories),
+      queryPlan: normalizeQueryPlan(result?.query_plan),
+      sourceCandidates: normalizeSourceCandidates(result?.source_candidates),
+      referenceDigest: normalizeReferenceDigest(result?.reference_digest),
       styleProfile: normalizeStyleProfile(result?.style_profile, result?.profile ?? null),
       outline: normalizeOutlinePlan(result?.outline_plan),
       sections: sections.length ? sections : fallbackSections(detail),
@@ -121,6 +141,19 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
                 </Link>
               </>
             ) : null}
+            <Button
+              variant="secondary"
+              data-testid="task-rerun-button"
+              disabled={detail?.status === "running"}
+              onClick={() => {
+                void (async () => {
+                  await rerunTask(taskId);
+                  await load();
+                })();
+              }}
+            >
+              {locale === "zh-CN" ? "重新运行" : "Rerun"}
+            </Button>
             <Link href="/tasks/history">
               <Button variant="secondary">{locale === "zh-CN" ? "返回任务历史" : "Back to History"}</Button>
             </Link>
@@ -203,6 +236,14 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
             >
               <dl className="grid gap-4 text-sm text-slate-600">
                 <div className="flex items-center justify-between gap-4">
+                  <dt className="text-slate-500">{locale === "zh-CN" ? "当前状态" : "Current Status"}</dt>
+                  <dd>
+                    <Badge data-testid="task-status-badge" data-status={detail.status} tone={taskTone(detail.status)}>
+                      {taskStatusLabel(detail.status)}
+                    </Badge>
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-4">
                   <dt className="text-slate-500">{locale === "zh-CN" ? "创建时间" : "Created"}</dt>
                   <dd>{formatDateTime(detail.created_at)}</dd>
                 </div>
@@ -216,13 +257,41 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
                 </div>
                 <div className="border-t border-slate-200 pt-4">
                   <dt className="text-slate-500">{locale === "zh-CN" ? "错误" : "Error"}</dt>
-                  <dd className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                  <dd data-testid="task-error-message" className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
                     {detail.error_message || (locale === "zh-CN" ? "没有终态错误。" : "No terminal error.")}
                   </dd>
                 </div>
               </dl>
             </Card>
           </div>
+
+          {detail.latest_draft ? (
+            <Card
+              title={locale === "zh-CN" ? "生成草稿" : "Generated Draft"}
+              description={locale === "zh-CN" ? "任务生成出的最新草稿与当前状态。" : "The latest draft produced by this task and its current state."}
+            >
+              <div
+                data-testid="task-generated-draft-region"
+                data-draft-id={detail.latest_draft.id}
+                className="flex flex-wrap items-center justify-between gap-4"
+              >
+                <div className="space-y-2">
+                  <p className="text-sm font-semibold text-slate-900">{detail.latest_draft.title}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge data-testid="task-generated-draft-status" data-status={detail.latest_draft.draft_status} tone={detail.latest_draft.draft_status === "published" || detail.latest_draft.draft_status === "approved" ? "success" : detail.latest_draft.draft_status === "pending_review" ? "warning" : "muted"}>
+                      {detail.latest_draft.draft_status}
+                    </Badge>
+                    <Badge data-testid="task-generated-publish-status" data-status={detail.latest_draft.publish_status} tone={detail.latest_draft.publish_status === "published" ? "success" : detail.latest_draft.publish_status === "failed" ? "danger" : detail.latest_draft.publish_status === "pending" ? "warning" : "muted"}>
+                      {detail.latest_draft.publish_status}
+                    </Badge>
+                  </div>
+                </div>
+                <Link href={`/drafts/${detail.latest_draft.id}`} data-testid="task-related-draft-link" data-draft-id={detail.latest_draft.id}>
+                  <Button variant="secondary">{locale === "zh-CN" ? "打开草稿" : "Open Draft"}</Button>
+                </Link>
+              </div>
+            </Card>
+          ) : null}
 
           {opsContext && runStrategy ? (
             <Card
@@ -304,6 +373,108 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
           </Card>
 
           <div className="space-y-6">
+            <InsightDisclosureCard
+              title="Source Layer"
+              description="Inspect the query plan, source scout candidates, and reusable reference digest before the writing stages."
+              badge={<Badge tone="info">{insights.sourceCandidates.length}</Badge>}
+              defaultOpen
+            >
+              <div className="grid gap-6 xl:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Query Plan</p>
+                  {insights.queryPlan ? (
+                    <div className="mt-3 space-y-3 text-sm text-slate-600">
+                      <div>
+                        <p className="font-semibold text-slate-900">
+                          {insights.queryPlan.lane?.label || "No lane"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {insights.queryPlan.lane?.reason || "No planner rationale recorded."}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Primary Queries</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(insights.queryPlan.primary_queries ?? []).map((query) => (
+                            <Badge key={query} tone="muted">
+                              {query}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Banned Angles</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(insights.queryPlan.banned_angles ?? []).map((angle) => (
+                            <Badge key={angle} tone="warning">
+                              {angle}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">No query plan returned.</p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Source Candidates</p>
+                  {insights.sourceCandidates.length ? (
+                    <div className="mt-3 space-y-3">
+                      {insights.sourceCandidates.slice(0, 5).map((source) => (
+                        <div key={`${source.source_id ?? source.source_title}`} className="rounded-2xl border border-slate-200/80 p-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-slate-900">{source.source_title}</p>
+                            <Badge tone="muted">{source.source_type || "source"}</Badge>
+                          </div>
+                          <p className="mt-2 text-xs text-slate-500">
+                            {source.source_name || "Unnamed source"}
+                            {typeof source.fit_score === "number" ? ` · fit ${source.fit_score.toFixed(2)}` : ""}
+                          </p>
+                          {source.why_selected ? (
+                            <p className="mt-2 text-sm leading-6 text-slate-600">{source.why_selected}</p>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">No source candidates returned.</p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Reference Digest</p>
+                  {insights.referenceDigest ? (
+                    <div className="mt-3 space-y-3 text-sm text-slate-600">
+                      <p>{insights.referenceDigest.summary || "No digest summary recorded."}</p>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Style Takeaways</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(insights.referenceDigest.style_takeaways ?? []).map((item) => (
+                            <Badge key={item} tone="brand">
+                              {item}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Useful Points</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {(insights.referenceDigest.useful_points ?? []).map((item) => (
+                            <Badge key={item} tone="muted">
+                              {item}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">No reference digest returned.</p>
+                  )}
+                </div>
+              </div>
+            </InsightDisclosureCard>
             <InsightDisclosureCard
               title={locale === "zh-CN" ? "检索到的历史文章" : "Retrieved Article Memories"}
               description={locale === "zh-CN" ? "查看这次任务引用了哪些历史文章记忆。" : "Inspect which historical article memories were retrieved for this run."}

@@ -30,9 +30,21 @@ function Resolve-NpmPath {
 }
 
 function Invoke-Checked([scriptblock]$Action, [string]$Label) {
-    & $Action
-    if ($LASTEXITCODE -ne 0) {
-        throw "$Label failed with exit code $LASTEXITCODE"
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = & $Action 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($null -ne $output) {
+        $output | ForEach-Object { Write-Host $_ }
+    }
+
+    if ($exitCode -ne 0) {
+        throw "$Label failed with exit code $exitCode"
     }
 }
 
@@ -125,8 +137,8 @@ if (-not $SkipStop -and (Test-Path $stopScript)) {
 
 Push-Location $backendDir
 try {
-    Invoke-Checked { & $backendPython -m alembic upgrade head } 'alembic upgrade head'
-    Invoke-Checked { & $backendPython -m alembic stamp head } 'alembic stamp head'
+    Invoke-Checked { & $backendPython -m alembic upgrade head 2>&1 | Write-Output } 'alembic upgrade head'
+    Invoke-Checked { & $backendPython -m alembic stamp head 2>&1 | Write-Output } 'alembic stamp head'
 } finally {
     Pop-Location
 }
@@ -142,7 +154,7 @@ Write-PidFile -Path (Join-Path $pidDir 'backend.pid.json') -Payload @{ name = 'b
 Push-Location $frontendDir
 try {
     if (-not $SkipBuild) {
-        Invoke-Checked { & $npmPath run build } 'npm run build'
+        Invoke-Checked { & $npmPath run build 2>&1 | Write-Output } 'npm run build'
     }
 } finally {
     Pop-Location

@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8145/api/v1/accounts/acct_-fXGVc5EhN1-/run",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_RWSbQIODakGT"
+    },
+    "body": {
+      "account_id": "acct_-fXGVc5EhN1-",
+      "task_id": "task_Uy3DbNgVFXnh",
+      "status": "pending",
+      "operation_mode": "semi_auto",
+      "effective_mode": "semi_auto"
+    },
+    "body_text": "{\"account_id\":\"acct_-fXGVc5EhN1-\",\"task_id\":\"task_Uy3DbNgVFXnh\",\"status\":\"pending\",\"operation_mode\":\"semi_auto\",\"effective_mode\":\"semi_auto\"}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

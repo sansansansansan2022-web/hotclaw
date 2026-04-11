@@ -67,7 +67,11 @@ DEFAULT_WORKFLOW_NODES = [
         "node_id": "hot_topic_analysis",
         "agent_id": "hot_topic_agent",
         "name": "Hot Topic Analysis",
-        "input_mapping": {"profile": "profile"},
+        "input_mapping": {
+            "profile": "profile",
+            "account_context": "account_context",
+            "ops_context": "ops_context",
+        },
         "output_key": "hot_topics",
         "required": True,
     },
@@ -80,6 +84,9 @@ DEFAULT_WORKFLOW_NODES = [
             "hot_topics": "hot_topics",
             "account_context": "account_context",
             "ops_context": "ops_context",
+            "query_plan": "query_plan",
+            "reference_digest": "reference_digest",
+            "source_candidates": "source_candidates",
         },
         "output_key": "topics",
         "required": True,
@@ -93,6 +100,9 @@ DEFAULT_WORKFLOW_NODES = [
             "topics": "topics",
             "account_context": "account_context",
             "ops_context": "ops_context",
+            "query_plan": "query_plan",
+            "reference_digest": "reference_digest",
+            "source_candidates": "source_candidates",
         },
         "output_key": "titles",
         "required": True,
@@ -108,6 +118,9 @@ DEFAULT_WORKFLOW_NODES = [
             "titles": "titles",
             "account_context": "account_context",
             "ops_context": "ops_context",
+            "query_plan": "query_plan",
+            "reference_digest": "reference_digest",
+            "source_candidates": "source_candidates",
         },
         "output_key": "outline_plan",
         "required": True,
@@ -124,6 +137,9 @@ DEFAULT_WORKFLOW_NODES = [
             "hot_topics": "hot_topics",
             "account_context": "account_context",
             "ops_context": "ops_context",
+            "query_plan": "query_plan",
+            "reference_digest": "reference_digest",
+            "source_candidates": "source_candidates",
         },
         "output_key": "section_drafts",
         "required": True,
@@ -158,6 +174,9 @@ DEFAULT_WORKFLOW_NODES = [
             "ops_context": "ops_context",
             "outline_plan": "outline_plan",
             "section_drafts": "section_drafts",
+            "query_plan": "query_plan",
+            "reference_digest": "reference_digest",
+            "source_candidates": "source_candidates",
         },
         "output_key": "style_review",
         "required": False,
@@ -175,6 +194,9 @@ DEFAULT_WORKFLOW_NODES = [
             "topics": "topics",
             "account_context": "account_context",
             "ops_context": "ops_context",
+            "query_plan": "query_plan",
+            "reference_digest": "reference_digest",
+            "source_candidates": "source_candidates",
         },
         "output_key": "structure_review",
         "required": False,
@@ -194,6 +216,9 @@ DEFAULT_WORKFLOW_NODES = [
             "review_results": "review_results",
             "account_context": "account_context",
             "ops_context": "ops_context",
+            "query_plan": "query_plan",
+            "reference_digest": "reference_digest",
+            "source_candidates": "source_candidates",
         },
         "output_key": "rewrite_result",
         "required": False,
@@ -250,10 +275,20 @@ class OrchestratorEngine:
                 effective_mode=(ops_context.get("run_strategy") or {}).get("effective_mode"),
             )
 
-        task.status = "running"
-        task.started_at = datetime.now(timezone.utc)
+        if task.status != "running":
+            task.status = "running"
+        task.started_at = task.started_at or datetime.now(timezone.utc)
         db.add(task)
         await db.flush()
+        logger.info(
+            "orchestrator_run_started",
+            task_id=task.id,
+            account_id=task.account_id,
+            trace_id=trace_id,
+            provider=self._provider_hint(),
+            model=self._model_hint(),
+            timeout=settings.agent_timeout,
+        )
 
         for idx, node_def in enumerate(DEFAULT_WORKFLOW_NODES):
             node_id = node_def["node_id"]
@@ -267,6 +302,7 @@ class OrchestratorEngine:
                 agent_id=node_def["agent_id"],
                 status="running",
                 started_at=datetime.now(timezone.utc),
+                model_used=self._model_used_for_node(node_def),
             )
             db.add(node_run)
             await db.flush()
@@ -287,6 +323,17 @@ class OrchestratorEngine:
                     "total": len(DEFAULT_WORKFLOW_NODES),
                     "started_at": node_run.started_at.isoformat() if node_run.started_at else None,
                 },
+            )
+            logger.info(
+                "node_execution_started",
+                task_id=task.id,
+                account_id=task.account_id,
+                node_id=node_id,
+                agent_id=node_def["agent_id"],
+                trace_id=trace_id,
+                provider=self._provider_hint_for_node(node_def),
+                model=self._model_used_for_node(node_def),
+                timeout=settings.agent_timeout if node_def.get("executor") != "service" else None,
             )
 
             try:
@@ -424,6 +471,19 @@ class OrchestratorEngine:
                 )
 
             await self._finalize_node(node_run, db)
+            logger.info(
+                "node_execution_finished",
+                task_id=task.id,
+                account_id=task.account_id,
+                node_id=node_id,
+                agent_id=node_def["agent_id"],
+                trace_id=trace_id,
+                status=node_run.status,
+                degraded=node_run.degraded,
+                elapsed_seconds=node_run.elapsed_seconds,
+                provider=self._provider_hint_for_node(node_def),
+                model=node_run.model_used,
+            )
             if node_run.status == "completed":
                 await broadcaster.broadcast(
                     task.id,
@@ -534,6 +594,7 @@ class OrchestratorEngine:
         logger.warning(
             "structured_content_pipeline_fallback",
             task_id=task_id,
+            trace_id=trace_id,
             reason=reason,
         )
 
@@ -631,6 +692,12 @@ class OrchestratorEngine:
         self, workspace: Workspace, node_def: dict[str, Any], data: dict[str, Any]
     ) -> None:
         node_id = node_def["node_id"]
+        if node_id == "hot_topic_analysis":
+            workspace.set(node_def["output_key"], data)
+            for key in ("query_plan", "source_candidates", "source_snippets", "reference_digest"):
+                if key in data:
+                    workspace.set(key, data.get(key))
+            return
         if node_id == "article_assembler":
             workspace.set(node_def["output_key"], data)
             workspace.set("content", data)
@@ -862,6 +929,28 @@ class OrchestratorEngine:
         if len(keys) <= 3:
             return f"keys: {', '.join(keys)}"
         return f"keys: {', '.join(keys[:3])}... ({len(keys)} total)"
+
+    def _provider_hint(self) -> str:
+        model_name = settings.llm_model_name.strip()
+        if "/" in model_name:
+            return model_name.split("/", 1)[0]
+        return "dashscope"
+
+    def _model_hint(self) -> str:
+        model_name = settings.llm_model_name.strip()
+        if "/" in model_name:
+            return model_name
+        return f"{self._provider_hint()}/{model_name}"
+
+    def _provider_hint_for_node(self, node_def: dict[str, Any]) -> str:
+        if node_def.get("executor") == "service":
+            return "service"
+        return self._provider_hint()
+
+    def _model_used_for_node(self, node_def: dict[str, Any]) -> str:
+        if node_def.get("executor") == "service":
+            return f"service:{node_def.get('service') or node_def['agent_id']}"
+        return self._model_hint()
 
 
 orchestrator_engine = OrchestratorEngine()

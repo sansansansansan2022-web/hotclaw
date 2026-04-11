@@ -1,6 +1,7 @@
 """Draft API endpoints."""
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -24,10 +25,22 @@ from app.schemas.draft import (
 )
 from app.schemas.wechat import PublishToWeChatRequest
 from app.services.draft_service import draft_service
+from app.services.publish_decision_service import PublishDecisionError
 from app.services.publish_record_service import publish_record_service, PublishRecordError
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/drafts", tags=["drafts"])
+
+
+def _json_error(status_code: int, code: int, message: str, data: dict | None = None) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "code": code,
+            "message": message,
+            "data": data,
+        },
+    )
 
 
 @router.get("", response_model=DraftListResponse)
@@ -277,26 +290,42 @@ async def publish_draft_to_wechat(
                 "wechat_publish_id": result.get("publish_id"),
                 "publish_record_id": result.get("publish_record_id"),
                 "decision": result.get("decision"),
+                "simulated": result.get("simulated", False),
+                "simulation_source": result.get("simulation_source"),
+                "provider": result.get("provider"),
             }
         }
-    except DraftPublishError as e:
-        logger.error("draft_wechat_publish_error", draft_id=draft_id, error=e.message)
-        return {
-            "code": 9004,
-            "message": e.message,
-            "data": {
+    except PublishDecisionError as e:
+        logger.warning("draft_wechat_publish_blocked", draft_id=draft_id, error=e.message, reason_code=e.reason_code)
+        await db.rollback()
+        return _json_error(
+            status.HTTP_409_CONFLICT,
+            9004,
+            e.message,
+            {
                 "draft_id": draft_id,
                 "publish_status": "failed",
-                "error": str(e)
-            }
-        }
+                "reason_code": e.reason_code,
+                "decision": e.decision,
+            },
+        )
+    except DraftPublishError as e:
+        logger.error("draft_wechat_publish_error", draft_id=draft_id, error=e.message)
+        await db.commit()
+        return _json_error(
+            status.HTTP_502_BAD_GATEWAY,
+            9004,
+            e.message,
+            {
+                "draft_id": draft_id,
+                "publish_status": "failed",
+                "error": str(e),
+            },
+        )
     except Exception as e:
         logger.error("draft_wechat_publish_unexpected_error", draft_id=draft_id, error=str(e))
-        return {
-            "code": 5000,
-            "message": f"Internal error: {str(e)}",
-            "data": None
-        }
+        await db.rollback()
+        return _json_error(status.HTTP_500_INTERNAL_SERVER_ERROR, 5000, f"Internal error: {str(e)}")
 
 
 @router.get("/{draft_id}/wechat-status")
@@ -320,6 +349,8 @@ async def get_wechat_publish_status(
                 }
             }
 
+        simulation_meta = publish_record_service.get_simulation_metadata(record)
+
         return {
             "code": 0,
             "message": "ok",
@@ -327,17 +358,26 @@ async def get_wechat_publish_status(
                 "has_record": True,
                 "record_id": record.id,
                 "draft_id": record.draft_id,
+                "account_id": record.account_id,
+                "task_id": record.task_id,
                 "wechat_draft_id": record.wechat_draft_id,
                 "media_id": record.media_id,
                 "publish_id": record.publish_id,
+                "article_id": record.article_id,
                 "publish_status": record.publish_status,
                 "source_mode": record.source_mode,
                 "trigger_type": record.trigger_type,
                 "publish_attempt": record.publish_attempt,
                 "retry_count": record.retry_count,
+                "parent_record_id": record.parent_record_id,
                 "error_code": record.error_code,
                 "error_message": record.error_message,
                 "url": record.url,
+                "request_snapshot": record.request_snapshot,
+                "response_snapshot": record.response_snapshot,
+                "simulated": simulation_meta["simulated"],
+                "simulation_source": simulation_meta["simulation_source"],
+                "provider": simulation_meta["provider"],
                 "started_at": record.started_at.isoformat() if record.started_at else None,
                 "finished_at": record.finished_at.isoformat() if record.finished_at else None,
                 "published_at": record.published_at.isoformat() if record.published_at else None,
@@ -370,18 +410,33 @@ async def list_draft_publish_records(
                 "records": [
                     {
                         "id": r.id,
+                        "draft_id": r.draft_id,
+                        "account_id": r.account_id,
+                        "task_id": r.task_id,
+                        "wechat_draft_id": r.wechat_draft_id,
+                        "media_id": r.media_id,
+                        "publish_id": r.publish_id,
+                        "article_id": r.article_id,
                         "publish_status": r.publish_status,
                         "source_mode": r.source_mode,
                         "trigger_type": r.trigger_type,
                         "publish_attempt": r.publish_attempt,
                         "retry_count": r.retry_count,
+                        "parent_record_id": r.parent_record_id,
                         "error_code": r.error_code,
                         "error_message": r.error_message,
                         "url": r.url,
+                        "request_snapshot": r.request_snapshot,
+                        "response_snapshot": r.response_snapshot,
+                        "simulated": publish_record_service.get_simulation_metadata(r)["simulated"],
+                        "simulation_source": publish_record_service.get_simulation_metadata(r)["simulation_source"],
+                        "provider": publish_record_service.get_simulation_metadata(r)["provider"],
                         "started_at": r.started_at.isoformat() if r.started_at else None,
+                        "last_checked_at": r.last_checked_at.isoformat() if r.last_checked_at else None,
                         "published_at": r.published_at.isoformat() if r.published_at else None,
                         "finished_at": r.finished_at.isoformat() if r.finished_at else None,
                         "created_at": r.created_at.isoformat() if r.created_at else None,
+                        "updated_at": r.updated_at.isoformat() if r.updated_at else None,
                     }
                     for r in records
                 ]
@@ -418,34 +473,53 @@ async def retry_publish_draft(
                 "published_at": draft.published_at.isoformat() if draft.published_at else None,
                 "wechat_media_id": result.get("media_id"),
                 "wechat_publish_id": result.get("publish_id"),
+                "publish_record_id": result.get("publish_record_id"),
+                "simulated": result.get("simulated", False),
+                "simulation_source": result.get("simulation_source"),
+                "provider": result.get("provider"),
             }
         }
     except PublishRecordError as e:
         logger.warning("draft_retry_publish_record_error", draft_id=draft_id, error=str(e))
-        return {
-            "code": 9004,
-            "message": str(e),
-            "data": {
+        await db.rollback()
+        return _json_error(
+            status.HTTP_409_CONFLICT,
+            9004,
+            str(e),
+            {
                 "draft_id": draft_id,
                 "publish_status": "failed",
-                "error": str(e)
-            }
-        }
+                "error": str(e),
+            },
+        )
+    except PublishDecisionError as e:
+        logger.warning("draft_retry_publish_blocked", draft_id=draft_id, error=e.message, reason_code=e.reason_code)
+        await db.rollback()
+        return _json_error(
+            status.HTTP_409_CONFLICT,
+            9004,
+            e.message,
+            {
+                "draft_id": draft_id,
+                "publish_status": "failed",
+                "reason_code": e.reason_code,
+                "decision": e.decision,
+            },
+        )
     except DraftPublishError as e:
         logger.error("draft_retry_publish_error", draft_id=draft_id, error=e.message)
-        return {
-            "code": 9004,
-            "message": e.message,
-            "data": {
+        await db.commit()
+        return _json_error(
+            status.HTTP_502_BAD_GATEWAY,
+            9004,
+            e.message,
+            {
                 "draft_id": draft_id,
                 "publish_status": "failed",
-                "error": str(e)
-            }
-        }
+                "error": str(e),
+            },
+        )
     except Exception as e:
         logger.error("draft_retry_publish_unexpected_error", draft_id=draft_id, error=str(e))
-        return {
-            "code": 5000,
-            "message": f"Internal error: {str(e)}",
-            "data": None
-        }
+        await db.rollback()
+        return _json_error(status.HTTP_500_INTERNAL_SERVER_ERROR, 5000, f"Internal error: {str(e)}")

@@ -2,22 +2,28 @@
 
 <cite>
 **本文档引用的文件**
-- [package.json](file://OpenClaw-bot-review-main/package.json)
-- [next.config.mjs](file://OpenClaw-bot-review-main/nex.config.mjs)
-- [tsconfig.json](file://OpenClaw-bot-review-main/tsconfig.json)
-- [postcss.config.js](file://OpenClaw-bot-review-main/postcss.config.js)
-- [app/layout.tsx](file://OpenClaw-bot-review-main/app/layout.tsx)
-- [app/page.tsx](file://OpenClaw-bot-review-main/app/page.tsx)
-- [app/globals.css](file://OpenClaw-bot-review-main/app/globals.css)
-- [app/providers.tsx](file://OpenClaw-bot-review-main/app/providers.tsx)
-- [app/sidebar.tsx](file://OpenClaw-bot-review-main/app/sidebar.tsx)
-- [app/alert-monitor.tsx](file://OpenClaw-bot-review-main/app/alert-monitor.tsx)
-- [app/global-bugs-overlay.tsx](file://OpenClaw-bot-review-main/app/global-bugs-overlay.tsx)
-- [lib/theme.tsx](file://OpenClaw-bot-review-main/lib/theme.tsx)
-- [lib/i18n.tsx](file://OpenClaw-bot-review-main/lib/i18n.tsx)
-- [lib/gateway-url.ts](file://OpenClaw-bot-review-main/lib/gateway-url.ts)
-- [lib/config-cache.ts](file://OpenClaw-bot-review-main/lib/config-cache.ts)
+- [package.json](file://frontend/package.json)
+- [next.config.ts](file://frontend/next.config.ts)
+- [tsconfig.json](file://frontend/tsconfig.json)
+- [postcss.config.js](file://frontend/postcss.config.js)
+- [app/layout.tsx](file://frontend/app/layout.tsx)
+- [app/globals.css](file://frontend/app/globals.css)
+- [app/(shell)/layout.tsx](file://frontend/app/(shell)/layout.tsx)
+- [app/(shell)/context.tsx](file://frontend/app/(shell)/context.tsx)
+- [app/(shell)/page.tsx](file://frontend/app/(shell)/page.tsx)
+- [types/index.ts](file://frontend/types/index.ts)
+- [lib/api.ts](file://frontend/lib/api.ts)
+- [components/TaskStatusBanner.tsx](file://frontend/components/TaskStatusBanner.tsx)
 </cite>
+
+## 更新摘要
+**所做更改**
+- 新增Shell布局架构分析，涵盖三栏式SaaS控制台设计
+- 新增设计系统和CSS变量体系详解
+- 新增上下文管理和状态共享机制
+- 新增API客户端和类型安全架构
+- 更新架构概览以反映SaaS控制面板特征
+- 新增组件层次结构和数据流分析
 
 ## 目录
 1. [简介](#简介)
@@ -25,430 +31,563 @@
 3. [核心组件](#核心组件)
 4. [架构概览](#架构概览)
 5. [详细组件分析](#详细组件分析)
-6. [依赖关系分析](#依赖关系分析)
-7. [性能考虑](#性能考虑)
-8. [故障排除指南](#故障排除指南)
-9. [结论](#结论)
-10. [附录](#附录)
+6. [设计系统与样式架构](#设计系统与样式架构)
+7. [上下文管理与状态共享](#上下文管理与状态共享)
+8. [API架构与类型安全](#api架构与类型安全)
+9. [性能考虑](#性能考虑)
+10. [故障排除指南](#故障排除指南)
+11. [结论](#结论)
+12. [附录](#附录)
 
 ## 简介
 
-这是一个基于Next.js 16.0.0的机器人管理系统前端应用，采用App Router架构设计。该应用提供了OpenClaw机器人的可视化监控界面，支持多语言国际化、主题切换、实时状态监控等功能。
+这是一个基于Next.js 16.2.1的成熟SaaS控制面板应用，采用先进的App Router架构设计。该应用为多智能体内容生产平台，提供微信公众号内容创作和管理的完整解决方案。应用采用三栏式布局架构，包含Shell布局、设计系统和上下文管理等企业级特性。
 
 ## 项目结构
 
-该项目采用Next.js官方推荐的App Router目录结构，主要特点包括：
+该项目采用Next.js官方推荐的App Router目录结构，并扩展为SaaS控制面板架构：
 
 ```mermaid
 graph TB
 subgraph "应用根目录"
-A[app/] --> B[页面组件]
-A --> C[布局组件]
-A --> D[API路由]
-A --> E[客户端组件]
+A[app/] --> B[Shell布局层]
+A --> C[页面组件层]
+A --> D[API路由层]
+A --> E[客户端组件层]
+end
+subgraph "Shell布局层"
+F[(shell)/layout.tsx] --> G[TopBar]
+F --> H[Sidebar]
+F --> I[RightPanel]
+F --> J[ShellContext]
+end
+subgraph "页面组件层"
+K[dashboard] --> L[运营总览]
+K --> M[创作工作台]
+K --> N[账号管理]
+K --> O[草稿箱]
 end
 subgraph "核心目录"
-F[lib/] --> G[工具库]
-F --> H[国际化]
-F --> I[主题管理]
-J[public/] --> K[静态资源]
-end
-subgraph "配置文件"
-L[next.config.mjs]
-M[tsconfig.json]
-N[postcss.config.js]
-O[package.json]
+P[lib/] --> Q[API客户端]
+P --> R[工具库]
+S[types/] --> T[类型定义]
+U[components/] --> V[业务组件]
+W[styles/] --> X[设计系统]
 end
 ```
 
 **图表来源**
-- [app/layout.tsx:1-34](file://OpenClaw-bot-review-main/app/layout.tsx#L1-L34)
-- [package.json:1-23](file://OpenClaw-bot-review-main/package.json#L1-L23)
+- [app/(shell)/layout.tsx:1-574](file://frontend/app/(shell)/layout.tsx#L1-L574)
+- [package.json:1-25](file://frontend/package.json#L1-L25)
 
 **章节来源**
-- [package.json:1-23](file://OpenClaw-bot-review-main/package.json#L1-L23)
-- [next.config.mjs:1-6](file://OpenClaw-bot-review-main/next.config.mjs#L1-L6)
+- [package.json:1-25](file://frontend/package.json#L1-L25)
+- [next.config.ts:1-15](file://frontend/next.config.ts#L1-L15)
 
 ## 核心组件
 
-### 应用布局系统
+### Shell布局架构
 
-应用采用分层布局架构，通过RootLayout统一管理全局样式和组件结构：
+应用采用三栏式SaaS控制台架构，提供完整的运营控制面板：
 
 ```mermaid
 classDiagram
-class RootLayout {
-+metadata : Metadata
-+viewport : Viewport
-+children : ReactNode
-+render() : JSX.Element
+class ShellLayout {
++stats : DashboardStats
++accounts : AccountSummary[]
++drafts : DraftSummary[]
++tasks : TaskSummary[]
++events : RecentEvent[]
++loadData() : void
++refreshData() : void
 }
-class Providers {
-+children : ReactNode
+class TopBar {
++stats : DashboardStats
++currentView : string
 +render() : JSX.Element
 }
 class Sidebar {
-+pathname : string
-+t : Function
++accounts : AccountSummary[]
++loading : boolean
++currentPath : string
 +render() : JSX.Element
 }
-class AlertMonitor {
-+enabled : boolean
-+checkInterval : number
-+lastResults : string[]
-+render() : null
-}
-class GlobalBugsOverlay {
-+canvasRef : Ref
-+systemRef : Ref
+class RightPanel {
++events : RecentEvent[]
 +render() : JSX.Element
 }
-RootLayout --> Providers : "包含"
-Providers --> AlertMonitor : "包含"
-Providers --> GlobalBugsOverlay : "包含"
-RootLayout --> Sidebar : "包含"
+class ShellContext {
++stats : DashboardStats
++accounts : AccountSummary[]
++drafts : DraftSummary[]
++tasks : TaskSummary[]
++events : RecentEvent[]
++refreshData() : void
+}
+ShellLayout --> TopBar : "包含"
+ShellLayout --> Sidebar : "包含"
+ShellLayout --> RightPanel : "包含"
+ShellLayout --> ShellContext : "提供"
 ```
 
 **图表来源**
-- [app/layout.tsx:18-33](file://OpenClaw-bot-review-main/app/layout.tsx#L18-L33)
-- [app/providers.tsx:7-13](file://OpenClaw-bot-review-main/app/providers.tsx#L7-L13)
-- [app/sidebar.tsx:227-781](file://OpenClaw-bot-review-main/app/sidebar.tsx#L227-L781)
+- [app/(shell)/layout.tsx:426-574](file://frontend/app/(shell)/layout.tsx#L426-L574)
+- [app/(shell)/context.tsx:30-51](file://frontend/app/(shell)/context.tsx#L30-L51)
 
-### 主题管理系统
+### 设计系统架构
 
-应用实现了完整的主题切换机制，支持明暗两种主题模式：
+应用实现了完整的CSS变量驱动的设计系统：
 
 ```mermaid
 stateDiagram-v2
-[*] --> DarkTheme
+[*] --> DesignSystem
+DesignSystem --> DarkTheme : "明暗主题切换"
 DarkTheme --> LightTheme : "toggleTheme()"
 LightTheme --> DarkTheme : "toggleTheme()"
 state DarkTheme {
-[*] --> DarkColors
-DarkColors --> LocalStorage : "setTheme('dark')"
+[*] --> ColorVariables
+ColorVariables --> BackgroundLayers
+BackgroundLayers --> BorderSystem
+BorderSystem --> TextHierarchy
+TextHierarchy --> ShadowSystem
+ShadowSystem --> BorderRadius
+BorderRadius --> SpacingSystem
 }
 state LightTheme {
-[*] --> LightColors
-LightColors --> LocalStorage : "setTheme('light')"
+[*] --> ColorVariables
+ColorVariables --> BackgroundLayers
+BackgroundLayers --> BorderSystem
+BorderSystem --> TextHierarchy
+TextHierarchy --> ShadowSystem
+ShadowSystem --> BorderRadius
+BorderRadius --> SpacingSystem
 }
-LocalStorage --> DOM : "data-theme='dark/light'"
 ```
 
 **图表来源**
-- [lib/theme.tsx:19-45](file://OpenClaw-bot-review-main/lib/theme.tsx#L19-L45)
+- [app/globals.css:8-83](file://frontend/app/globals.css#L8-L83)
 
 **章节来源**
-- [app/layout.tsx:1-34](file://OpenClaw-bot-review-main/app/layout.tsx#L1-L34)
-- [app/providers.tsx:1-14](file://OpenClaw-bot-review-main/app/providers.tsx#L1-L14)
-- [lib/theme.tsx:1-63](file://OpenClaw-bot-review-main/lib/theme.tsx#L1-L63)
+- [app/(shell)/layout.tsx:1-574](file://frontend/app/(shell)/layout.tsx#L1-L574)
+- [app/globals.css:1-984](file://frontend/app/globals.css#L1-L984)
 
 ## 架构概览
 
-应用采用模块化的架构设计，主要分为以下几个层次：
+应用采用分层的SaaS控制面板架构，主要分为以下几个层次：
 
 ```mermaid
 graph TB
 subgraph "表现层"
-A[页面组件] --> B[布局组件]
-B --> C[导航组件]
-B --> D[内容区域]
+A[ShellLayout] --> B[TopBar]
+A --> C[Sidebar]
+A --> D[RightPanel]
+E[页面组件] --> F[DashboardView]
+E --> G[WorkspaceView]
+E --> H[AccountView]
+E --> I[DraftView]
 end
 subgraph "状态管理层"
-E[主题Provider] --> F[国际化Provider]
-F --> G[全局状态]
+J[ShellContext] --> K[DashboardStats]
+J --> L[RecentEvent]
+J --> M[AccountSummary]
+J --> N[DraftSummary]
 end
 subgraph "业务逻辑层"
-H[告警监控] --> I[实时数据]
-H --> J[状态轮询]
+O[API Client] --> P[任务管理]
+O --> Q[账号管理]
+O --> R[草稿管理]
+O --> S[微信集成]
 end
 subgraph "基础设施层"
-K[样式系统] --> L[TypeScript配置]
-L --> M[构建配置]
+T[设计系统] --> U[TypeScript类型]
+T --> V[Next.js配置]
+T --> W[构建优化]
 end
-A --> E
-C --> H
-D --> I
-E --> K
+A --> J
+E --> O
+J --> T
 ```
 
 **图表来源**
-- [app/page.tsx:220-520](file://OpenClaw-bot-review-main/app/page.tsx#L220-L520)
-- [app/alert-monitor.tsx:6-44](file://OpenClaw-bot-review-main/app/alert-monitor.tsx#L6-L44)
+- [app/(shell)/layout.tsx:426-574](file://frontend/app/(shell)/layout.tsx#L426-L574)
+- [lib/api.ts:1-733](file://frontend/lib/api.ts#L1-L733)
 
 ## 详细组件分析
 
-### 主页组件分析
+### Dashboard运营总览
 
-主页组件是整个应用的核心，负责展示机器人状态、统计数据和交互功能：
+Dashboard视图是SaaS控制面板的核心，提供全面的运营指标和快速操作入口：
 
 ```mermaid
 sequenceDiagram
 participant U as 用户
-participant P as 主页组件
-participant S as 状态管理
-participant API as 后端API
-U->>P : 访问主页
-P->>S : 初始化状态
-P->>API : 获取配置数据
-API-->>P : 返回配置信息
-P->>API : 获取统计数据
-API-->>P : 返回统计结果
-P->>S : 更新UI状态
-P->>U : 渲染页面
-loop 定时刷新
-P->>API : 轮询状态
-API-->>P : 返回最新状态
-P->>S : 更新状态
-end
+participant D as DashboardView
+participant C as ShellContext
+participant A as API Client
+U->>D : 访问运营总览
+D->>C : 获取stats数据
+C->>A : 请求统计数据
+A-->>C : 返回统计结果
+C-->>D : 提供上下文数据
+D->>U : 渲染统计卡片
+D->>U : 显示待处理中心
+D->>U : 展示内容流转看板
+D->>U : 提供快速开始入口
 ```
 
 **图表来源**
-- [app/page.tsx:279-310](file://OpenClaw-bot-review-main/app/page.tsx#L279-L310)
-- [app/page.tsx:514-520](file://OpenClaw-bot-review-main/app/page.tsx#L514-L520)
+- [app/(shell)/page.tsx:341-383](file://frontend/app/(shell)/page.tsx#L341-L383)
 
 #### 数据流分析
 
-主页组件采用缓存策略优化数据获取：
+Dashboard采用上下文驱动的数据管理模式：
 
 ```mermaid
 flowchart TD
-A[组件挂载] --> B{检查缓存}
-B --> |有缓存| C[使用缓存数据]
-B --> |无缓存| D[发起网络请求]
-D --> E[获取配置数据]
-D --> F[获取统计数据]
-E --> G[更新缓存]
-F --> G
-G --> H[渲染UI]
-C --> H
-I[定时器] --> J[刷新数据]
-J --> E
-J --> F
-J --> G
+A[组件挂载] --> B{检查上下文}
+B --> |有数据| C[使用上下文数据]
+B --> |无数据| D[触发上下文加载]
+D --> E[调用API客户端]
+E --> F[获取统计数据]
+F --> G[更新ShellContext]
+G --> H[触发重新渲染]
+C --> I[渲染UI组件]
+H --> I
+J[定时刷新] --> K[后台数据同步]
+K --> G
 ```
 
 **图表来源**
-- [app/page.tsx:111-117](file://OpenClaw-bot-review-main/app/page.tsx#L111-L117)
-- [app/page.tsx:279-310](file://OpenClaw-bot-review-main/app/page.tsx#L279-L310)
+- [app/(shell)/layout.tsx:455-540](file://frontend/app/(shell)/layout.tsx#L455-L540)
+- [app/(shell)/page.tsx:97-114](file://frontend/app/(shell)/page.tsx#L97-L114)
 
 **章节来源**
-- [app/page.tsx:1-873](file://OpenClaw-bot-review-main/app/page.tsx#L1-L873)
+- [app/(shell)/page.tsx:1-383](file://frontend/app/(shell)/page.tsx#L1-L383)
 
-### 国际化系统
+### 任务状态横幅
 
-应用支持多语言切换，采用Context模式实现：
+TaskStatusBanner提供实时的任务执行状态反馈：
 
 ```mermaid
 classDiagram
-class I18nProvider {
-+locale : Locale
-+translations : Record
-+children : ReactNode
-+t(key) : string
-+setLocale(locale) : void
+class TaskStatusBanner {
++activeTaskId : string
++nodes : NodeRun[]
++taskDone : boolean
++render() : JSX.Element
 }
-class LocaleContext {
-+locale : Locale
-+setLocale : Function
-+t : Function
+class TaskStore {
++activeTaskId : string
++setActiveTaskId(id) : void
 }
-class LanguageSwitcher {
-+currentLocale : Locale
-+switchLocale() : void
+class TaskSSE {
++subscribe(taskId) : void
++unsubscribe() : void
 }
-I18nProvider --> LocaleContext : "创建"
-LanguageSwitcher --> I18nProvider : "使用"
+TaskStatusBanner --> TaskStore : "使用"
+TaskStatusBanner --> TaskSSE : "订阅"
 ```
 
 **图表来源**
-- [lib/i18n.tsx:1-800](file://OpenClaw-bot-review-main/lib/i18n.tsx#L1-L800)
+- [components/TaskStatusBanner.tsx:7-116](file://frontend/components/TaskStatusBanner.tsx#L7-L116)
 
 **章节来源**
-- [lib/i18n.tsx:1-933](file://OpenClaw-bot-review-main/lib/i18n.tsx#L1-L933)
+- [components/TaskStatusBanner.tsx:1-116](file://frontend/components/TaskStatusBanner.tsx#L1-L116)
 
-### 导航系统
+### 侧边栏导航系统
 
-侧边栏组件实现了响应式导航，支持桌面和移动端适配：
+侧边栏实现SaaS控制面板的标准导航模式：
 
 ```mermaid
 graph LR
-A[桌面端] --> B[完整侧边栏]
-A --> C[折叠侧边栏]
-D[移动端] --> E[抽屉菜单]
-D --> F[顶部导航]
-B --> G[图标导航]
-C --> H[图标+文字]
-E --> I[完整导航]
-F --> J[简要导航]
-G --> K[Agent卡片]
-H --> K
-I --> K
-J --> K
+A[左侧导航] --> B[运营总览]
+A --> C[创作工作台]
+A --> D[账号管理]
+A --> E[草稿箱]
+A --> F[历史任务]
+B --> G[快速访问账号]
+G --> H[账号状态指示]
+G --> I[操作模式标识]
 ```
 
 **图表来源**
-- [app/sidebar.tsx:596-781](file://OpenClaw-bot-review-main/app/sidebar.tsx#L596-L781)
+- [app/(shell)/layout.tsx:144-295](file://frontend/app/(shell)/layout.tsx#L144-L295)
 
 **章节来源**
-- [app/sidebar.tsx:1-781](file://OpenClaw-bot-review-main/app/sidebar.tsx#L1-L781)
+- [app/(shell)/layout.tsx:1-574](file://frontend/app/(shell)/layout.tsx#L1-L574)
 
-### 实时监控系统
+## 设计系统与样式架构
 
-告警监控组件提供后台状态检查功能：
+### CSS变量设计系统
 
-```mermaid
-sequenceDiagram
-participant M as Monitor组件
-participant API as 后端API
-participant Timer as 定时器
-M->>API : 获取告警配置
-API-->>M : 返回配置
-M->>Timer : 设置检查间隔
-loop 按间隔检查
-Timer->>API : 触发告警检查
-API-->>M : 返回检查结果
-M->>M : 更新状态
-end
-```
-
-**图表来源**
-- [app/alert-monitor.tsx:11-39](file://OpenClaw-bot-review-main/app/alert-monitor.tsx#L11-L39)
-
-**章节来源**
-- [app/alert-monitor.tsx:1-45](file://OpenClaw-bot-review-main/app/alert-monitor.tsx#L1-L45)
-
-## 依赖关系分析
-
-### 样式系统架构
-
-应用采用Tailwind CSS + 自定义CSS变量的混合样式方案：
+应用采用CSS变量驱动的设计系统，提供完整的主题和样式规范：
 
 ```mermaid
 graph TB
-A[Tailwind CSS] --> B[PostCSS处理]
-B --> C[CSS变量覆盖]
-C --> D[主题切换]
-E[自定义CSS] --> F[颜色变量]
-F --> G[响应式设计]
-G --> H[动画效果]
-D --> I[明暗主题]
-H --> I
+A[设计系统] --> B[背景层级系统]
+A --> C[边框系统]
+A --> D[文字层级系统]
+A --> E[强调色系统]
+A --> F[状态色系统]
+A --> G[阴影系统]
+A --> H[圆角系统]
+A --> I[间距系统]
+B --> J[--bg-void, --bg-base, --bg-surface]
+C --> K[--border-subtle, --border-default, --border-strong]
+D --> L[--text-primary, --text-secondary, --text-muted]
+E --> M[--accent, --accent-hover, --accent-dim]
+F --> N[--stat-cyan, --stat-green, --stat-red, --stat-yellow]
 ```
 
 **图表来源**
-- [postcss.config.js:1-6](file://OpenClaw-bot-review-main/postcss.config.js#L1-L6)
-- [app/globals.css:1-137](file://OpenClaw-bot-review-main/app/globals.css#L1-L137)
+- [app/globals.css:8-83](file://frontend/app/globals.css#L8-L83)
 
-### TypeScript配置分析
+### 动画和过渡系统
 
-项目采用严格模式的TypeScript配置：
+应用实现了丰富的动画效果系统：
 
 ```mermaid
-flowchart TD
-A[TypeScript配置] --> B[编译选项]
-A --> C[路径映射]
-A --> D[插件配置]
-B --> E[target: ES2017]
-B --> F[module: esnext]
-B --> G[bundler解析]
-B --> H[严格模式]
-C --> I["@/* -> ./*"]
-D --> J["next"插件]
-E --> K[兼容性]
-F --> L[现代特性]
-G --> M[打包优化]
-H --> N[类型安全]
+stateDiagram-v2
+[*] --> AnimationSystem
+AnimationSystem --> PulseAnimation : "cc-pulse"
+AnimationSystem --> ActivePulse : "cc-active-pulse"
+AnimationSystem --> DonePulse : "cc-done-pulse"
+AnimationSystem --> ErrorPulse : "cc-error-pulse"
+AnimationSystem --> SpinAnimation : "cc-spin"
+AnimationSystem --> SlideUp : "cc-slide-up"
+AnimationSystem --> FadeIn : "cc-fade-in"
+PulseAnimation --> StatusBlink : "cc-status-blink"
+ActivePulse --> HoloFlicker : "cc-holo-flicker"
 ```
 
 **图表来源**
-- [tsconfig.json:2-42](file://OpenClaw-bot-review-main/tsconfig.json#L2-L42)
+- [app/globals.css:167-247](file://frontend/app/globals.css#L167-L247)
 
 **章节来源**
-- [app/globals.css:1-137](file://OpenClaw-bot-review-main/app/globals.css#L1-L137)
-- [tsconfig.json:1-42](file://OpenClaw-bot-review-main/tsconfig.json#L1-L42)
+- [app/globals.css:1-984](file://frontend/app/globals.css#L1-L984)
+
+## 上下文管理与状态共享
+
+### ShellContext上下文架构
+
+应用采用React Context实现跨组件的状态共享：
+
+```mermaid
+classDiagram
+class ShellContextValue {
++stats : DashboardStats
++accounts : AccountSummary[]
++drafts : DraftSummary[]
++tasks : TaskSummary[]
++events : RecentEvent[]
++refreshData() : void
+}
+class DashboardStats {
++todayTasks : number
++pendingDrafts : number
++publishedToday : number
++publishFailed : number
+}
+class RecentEvent {
++id : string
++type : string
++action : string
++title : string
++time : string
++status : string
+}
+ShellContextValue --> DashboardStats : "包含"
+ShellContextValue --> RecentEvent : "包含"
+```
+
+**图表来源**
+- [app/(shell)/context.tsx:13-37](file://frontend/app/(shell)/context.tsx#L13-L37)
+
+### 状态管理模式
+
+```mermaid
+sequenceDiagram
+participant C as 子组件
+participant S as ShellContext
+participant L as ShellLayout
+participant A as API Client
+C->>S : useShellContext()
+S->>L : 从Provider获取状态
+L->>A : loadData()
+A-->>L : 返回统计数据
+L->>S : 更新Context状态
+S-->>C : 提供最新状态
+C->>C : 重新渲染
+```
+
+**图表来源**
+- [app/(shell)/context.tsx:45-51](file://frontend/app/(shell)/context.tsx#L45-L51)
+- [app/(shell)/layout.tsx:542-549](file://frontend/app/(shell)/layout.tsx#L542-L549)
+
+**章节来源**
+- [app/(shell)/context.tsx:1-52](file://frontend/app/(shell)/context.tsx#L1-L52)
+
+## API架构与类型安全
+
+### API客户端架构
+
+应用采用统一的API客户端封装，提供类型安全的后端通信：
+
+```mermaid
+classDiagram
+class ApiClient {
++BASE : string
++request(path, options) : Promise
++createTask(positioning) : Promise
++listAccounts(page, pageSize) : Promise
++listDrafts(page, pageSize, filters) : Promise
++listTasks(page, pageSize, status) : Promise
+}
+class ApiResponse {
++code : number
++message : string
++data : any
++details : Record
+}
+class TaskCreateRequest {
++positioning : string
++workflow_id : string
+}
+ApiClient --> ApiResponse : "返回"
+ApiClient --> TaskCreateRequest : "参数"
+```
+
+**图表来源**
+- [lib/api.ts:65-85](file://frontend/lib/api.ts#L65-L85)
+- [lib/api.ts:19-44](file://frontend/lib/api.ts#L19-L44)
+
+### 类型安全架构
+
+应用采用严格的TypeScript类型定义确保代码质量：
+
+```mermaid
+graph TB
+A[类型系统] --> B[任务类型]
+A --> C[账号类型]
+A --> D[草稿类型]
+A --> E[微信配置类型]
+B --> F[TaskStatus]
+B --> G[TaskDetail]
+B --> H[TaskSummary]
+C --> I[OperationMode]
+C --> J[AccountDetail]
+D --> K[PublishStatus]
+D --> L[DraftDetail]
+E --> M[WeChatConfigSummary]
+```
+
+**图表来源**
+- [types/index.ts:5-141](file://frontend/types/index.ts#L5-L141)
+- [types/index.ts:198-281](file://frontend/types/index.ts#L198-L281)
+
+**章节来源**
+- [lib/api.ts:1-733](file://frontend/lib/api.ts#L1-L733)
+- [types/index.ts:1-519](file://frontend/types/index.ts#L1-L519)
 
 ## 性能考虑
 
 ### 代码分割策略
 
-应用采用以下代码分割策略：
+应用采用多层次的代码分割优化：
 
 1. **路由级分割**: 每个页面组件独立打包
 2. **组件级分割**: 大型组件按需加载
 3. **懒加载**: 图标和特殊功能组件延迟加载
+4. **上下文分割**: ShellContext独立管理状态
 
-### 缓存优化
+### 缓存优化策略
 
 ```mermaid
 flowchart TD
-A[数据获取] --> B{检查缓存}
-B --> |命中| C[返回缓存]
-B --> |未命中| D[网络请求]
-D --> E[更新缓存]
-E --> F[渲染组件]
-C --> F
-G[定时刷新] --> H[后台更新]
-H --> I[保持UI流畅]
+A[数据获取] --> B{检查上下文缓存}
+B --> |命中| C[返回上下文数据]
+B --> |未命中| D[发起API请求]
+D --> E[获取统计数据]
+D --> F[获取账号列表]
+D --> G[获取草稿列表]
+E --> H[更新ShellContext]
+F --> H
+G --> H
+H --> I[渲染组件]
+C --> I
+J[定时器] --> K[后台数据刷新]
+K --> H
 ```
 
 **图表来源**
-- [app/page.tsx:111-117](file://OpenClaw-bot-review-main/app/page.tsx#L111-L117)
+- [app/(shell)/layout.tsx:455-540](file://frontend/app/(shell)/layout.tsx#L455-L540)
 
 ### 构建优化
 
-- **Standalone输出**: 使用`next.config.mjs`配置生成独立可执行文件
-- **Tree Shaking**: 通过ES模块导入实现无用代码剔除
-- **压缩优化**: 生产环境自动启用代码压缩
+- **Next.js优化**: 使用App Router和React Server Components
+- **TypeScript编译**: 严格模式和增量编译
+- **CSS优化**: Tailwind CSS和CSS变量优化
+- **SSE优化**: 直连后端避免代理缓冲
 
 **章节来源**
-- [next.config.mjs:1-6](file://OpenClaw-bot-review-main/next.config.mjs#L1-L6)
+- [next.config.ts:1-15](file://frontend/next.config.ts#L1-L15)
+- [tsconfig.json:1-42](file://frontend/tsconfig.json#L1-L42)
 
 ## 故障排除指南
 
 ### 常见问题诊断
 
-1. **主题切换失效**
-   - 检查localStorage中`theme`键值
-   - 验证CSS变量是否正确应用
-   - 确认`data-theme`属性设置
+1. **Shell布局不显示**
+   - 检查ShellContext提供者配置
+   - 验证上下文数据加载状态
+   - 确认API客户端连接正常
 
-2. **国际化文本不显示**
-   - 验证翻译键是否存在
-   - 检查当前locale设置
-   - 确认翻译文件完整性
+2. **设计系统样式异常**
+   - 检查CSS变量定义
+   - 验证主题切换逻辑
+   - 确认样式优先级
 
-3. **实时数据不更新**
-   - 检查定时器是否正常工作
-   - 验证API接口可用性
-   - 确认缓存策略配置
+3. **API请求失败**
+   - 验证Next.js代理配置
+   - 检查BASE路径设置
+   - 确认响应格式处理
+
+4. **SSE连接问题**
+   - 验证后端端口可达性
+   - 检查CORS配置
+   - 确认开发服务器代理设置
 
 **章节来源**
-- [lib/theme.tsx:20-45](file://OpenClaw-bot-review-main/lib/theme.tsx#L20-L45)
-- [lib/i18n.tsx:1-800](file://OpenClaw-bot-review-main/lib/i18n.tsx#L1-L800)
+- [app/(shell)/layout.tsx:528-533](file://frontend/app/(shell)/layout.tsx#L528-L533)
+- [lib/api.ts:142-148](file://frontend/lib/api.ts#L142-L148)
 
 ## 结论
 
-该Next.js应用展现了现代化前端架构的最佳实践：
+该Next.js SaaS控制面板展现了现代企业级应用的最佳实践：
 
-1. **清晰的架构层次**: 从布局到组件的分层设计
-2. **完善的工具链**: TypeScript + Tailwind CSS + PostCSS
-3. **优秀的用户体验**: 主题切换、国际化、响应式设计
-4. **高效的性能优化**: 缓存策略、代码分割、构建优化
+1. **完整的架构分层**: 从Shell布局到业务组件的清晰分层
+2. **强大的设计系统**: CSS变量驱动的可维护样式架构
+3. **类型安全保证**: 严格的TypeScript类型定义
+4. **上下文管理**: React Context实现的状态共享
+5. **性能优化**: 多层次的代码分割和缓存策略
+6. **实时通信**: SSE实现的高效数据流
 
 建议在后续开发中重点关注：
-- 组件单元测试覆盖率
-- 错误边界和降级处理
-- 性能监控和分析
+- 组件单元测试覆盖率提升
+- 错误边界和降级处理完善
+- 性能监控和分析工具集成
 - SEO优化和可访问性改进
+- 安全性和权限控制强化
 
 ## 附录
 
 ### 开发环境配置
 
 - **Node.js版本**: ^18.0.0
-- **Next.js版本**: ^16.0.0
-- **React版本**: ^19.0.0
-- **TypeScript版本**: ^5.0.0
+- **Next.js版本**: ^16.2.1
+- **React版本**: ^19.2.4
+- **TypeScript版本**: ^5.9.3
+- **Tailwind CSS版本**: ^4.2.2
 
 ### 构建命令
 
@@ -461,4 +600,15 @@ npm run build
 
 # 生产启动
 npm run start
+
+# 代码检查
+npm run lint
 ```
+
+### 关键配置说明
+
+1. **Next.js配置**: 通过rewrites实现API代理
+2. **TypeScript配置**: 严格模式和路径映射
+3. **PostCSS配置**: Tailwind CSS集成
+4. **设计系统**: CSS变量和动画系统
+5. **API架构**: 统一请求封装和类型安全

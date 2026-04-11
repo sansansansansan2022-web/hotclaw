@@ -15,6 +15,7 @@ from app.db.session import get_db_context
 from app.models.tables import AccountModel, ArticleDraftModel
 from app.models.wechat_config import WeChatConfigModel
 from app.schemas.wechat import PublishResult
+from app.services.e2e_test_mode_service import e2e_test_mode_service
 from app.services.publish_decision_service import PublishDecisionError, publish_decision_service
 from app.services.publish_record_service import PublishRecordError, publish_record_service
 from app.services.wechat_draft_service import WeChatDraftError, wechat_draft_service
@@ -106,6 +107,65 @@ class WeChatPublishService:
         )
 
         try:
+            publish_mode = await e2e_test_mode_service.get_publish_mode(db)
+            if publish_mode == e2e_test_mode_service.MODE_FAKE_FAILURE:
+                error_message = await e2e_test_mode_service.get_publish_failure_message(db)
+                await self._mark_publish_failure(
+                    record.id,
+                    draft,
+                    db,
+                    error_code="E2E_FAKE_PUBLISH",
+                    error_message=error_message,
+                )
+                raise DraftPublishError(draft_id, error_message)
+
+            if publish_mode == e2e_test_mode_service.MODE_FAKE_SUCCESS:
+                fake_media_id = f"e2e-media-{record.id}"
+                fake_publish_id = f"e2e-publish-{record.id}"
+                fake_article_id = f"e2e-article-{record.id}"
+                fake_url = f"https://example.test/hotclaw/publish/{record.id}"
+
+                draft.draft_status = "approved" if draft.draft_status in {"draft", "pending_review"} else draft.draft_status
+                draft.publish_status = "pending"
+                draft.confirmed_at = draft.confirmed_at or datetime.now(timezone.utc)
+                draft.confirmed_by = operator
+                draft.publish_error_message = None
+                db.add(draft)
+                await db.flush()
+
+                await publish_record_service.update_success(
+                    record.id,
+                    db,
+                    wechat_draft_id=fake_media_id,
+                    media_id=fake_media_id,
+                    publish_id=fake_publish_id,
+                    article_id=fake_article_id,
+                    url=fake_url,
+                    response_snapshot="simulated=true;source=e2e_fake;provider=fake;event=publish_success",
+                )
+                await publish_record_service.sync_draft_status(draft.id, db)
+                refreshed_record = await publish_record_service.get_record(record.id, db)
+                await self._sync_account_publish_status(
+                    draft.account_id,
+                    db,
+                    status=publish_record_service.STATUS_PUBLISHED,
+                    error_message=None,
+                )
+                return PublishResult(
+                    success=True,
+                    draft_id=draft_id,
+                    publish_record_id=record.id,
+                    wechat_draft_media_id=fake_media_id,
+                    wechat_publish_id=fake_publish_id,
+                    wechat_article_url=fake_url,
+                    publish_status=publish_record_service.STATUS_PUBLISHED,
+                    decision=decision.to_dict(),
+                    published_at=refreshed_record.published_at if refreshed_record else None,
+                    simulated=True,
+                    simulation_source="e2e_fake",
+                    provider="fake",
+                )
+
             await publish_record_service.update_status(
                 record.id,
                 db,
@@ -186,7 +246,12 @@ class WeChatPublishService:
                 publish_status=final_status,
                 decision=decision.to_dict(),
                 published_at=refreshed_record.published_at if refreshed_record else None,
+                simulated=False,
+                simulation_source=None,
+                provider="wechat",
             )
+        except DraftPublishError:
+            raise
         except PublishDecisionError:
             raise
         except (WeChatTokenError, WeChatMediaError, WeChatDraftError, WeChatPublishError) as exc:
@@ -368,7 +433,16 @@ class WeChatPublishService:
             record = await publish_record_service.get_record(existing_record_id, db)
             if not record:
                 raise PublishRecordError(f"Publish record {existing_record_id} not found")
-            await publish_record_service.update_status(record.id, db, status=publish_record_service.STATUS_PENDING)
+            await publish_record_service.update_status(
+                record.id,
+                db,
+                status=publish_record_service.STATUS_PENDING,
+                finished_at=None,
+                published_at=None,
+                error_code=None,
+                error_message=None,
+                response_snapshot=None,
+            )
             return record
 
         request_snapshot = f"title={draft.title[:80]}"
@@ -396,7 +470,7 @@ class WeChatPublishService:
             db,
             error_code=error_code,
             error_message=error_message[:500],
-            response_snapshot=f"failed:{error_code}",
+            response_snapshot=self._build_failure_snapshot(error_code),
         )
         draft.publish_status = "failed"
         if draft.draft_status == "published":
@@ -417,6 +491,11 @@ class WeChatPublishService:
             error_code=error_code,
             error_message=error_message,
         )
+
+    def _build_failure_snapshot(self, error_code: str) -> str:
+        if error_code == "E2E_FAKE_PUBLISH":
+            return "simulated=true;source=e2e_fake;provider=fake;event=publish_failed"
+        return f"failed:{error_code}"
 
     async def _sync_account_publish_status(
         self,

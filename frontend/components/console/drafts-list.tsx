@@ -142,7 +142,7 @@ export function DraftsCenterPage({ initialAccountId }: { initialAccountId?: stri
           ]}
         >
           {drafts.map((draft) => (
-            <tr key={draft.id}>
+            <tr key={draft.id} data-testid={`draft-row-${draft.id}`}>
               <td className="px-5 py-4">
                 <div>
                   <p className="text-sm font-semibold text-slate-900">{draft.title}</p>
@@ -159,14 +159,14 @@ export function DraftsCenterPage({ initialAccountId }: { initialAccountId?: stri
                 )}
               </td>
               <td className="px-5 py-4">
-                <Badge tone={draftTone(draft.draft_status)}>{draftStatusLabel(draft.draft_status)}</Badge>
+                <Badge data-testid={`draft-status-${draft.id}`} data-status={draft.draft_status} tone={draftTone(draft.draft_status)}>{draftStatusLabel(draft.draft_status)}</Badge>
               </td>
               <td className="px-5 py-4">
-                <Badge tone={draftTone(draft.publish_status)}>{publishStatusLabel(draft.publish_status)}</Badge>
+                <Badge data-testid={`draft-publish-status-${draft.id}`} data-status={draft.publish_status} tone={draftTone(draft.publish_status)}>{publishStatusLabel(draft.publish_status)}</Badge>
               </td>
               <td className="px-5 py-4 text-sm text-slate-600">{formatDateTime(draft.updated_at)}</td>
               <td className="px-5 py-4">
-                <Link href={`/drafts/${draft.id}`}>
+                <Link href={`/drafts/${draft.id}`} data-testid={`draft-open-${draft.id}`}>
                   <Button variant="secondary" size="sm">
                     {t("drafts.open")}
                   </Button>

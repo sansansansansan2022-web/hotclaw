@@ -1,0 +1,33 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8146/api/v1/tasks/task_eWl74sPVFc7B/status",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_RhVUVqP4ADOn"
+    },
+    "body": {
+      "code": 0,
+      "message": "ok",
+      "data": {
+        "task_id": "task_eWl74sPVFc7B",
+        "status": "running",
+        "current_node": null,
+        "progress": {
+          "total_nodes": 11,
+          "completed_nodes": 0,
+          "current_node_index": 0
+        },
+        "started_at": "2026-04-11T11:46:43.487055+00:00",
+        "elapsed_seconds": 153.560809
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"ok\",\"data\":{\"task_id\":\"task_eWl74sPVFc7B\",\"status\":\"running\",\"current_node\":null,\"progress\":{\"total_nodes\":11,\"completed_nodes\":0,\"current_node_index\":0},\"started_at\":\"2026-04-11T11:46:43.487055+00:00\",\"elapsed_seconds\":153.560809}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

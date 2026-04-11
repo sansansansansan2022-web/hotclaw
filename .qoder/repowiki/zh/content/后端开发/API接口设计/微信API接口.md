@@ -19,11 +19,10 @@
 
 ## 更新摘要
 **变更内容**
-- 新增发布记录管理API端点，支持完整的发布生命周期管理
-- 添加获取单个发布记录功能
-- 新增手动状态同步和刷新功能
-- 扩展草稿发布记录查询能力
-- 增强重试发布机制
+- 标准化使用官方免费发布API(freepublish/submit)，替代之前的预览发布API
+- 改进publish_id的提取和跟踪逻辑，确保准确跟踪已发布内容
+- 增强发布状态查询机制，使用getpubqueuejob API进行可靠的状态同步
+- 提升发布流程的可靠性，通过完整的发布记录管理确保状态一致性
 
 ## 目录
 1. [简介](#简介)
@@ -48,9 +47,9 @@
 - 媒体资源上传和处理
 - 访问令牌管理和缓存
 - 发布状态查询和跟踪
-- **新增：发布记录生命周期管理**
-- **新增：手动状态同步和刷新**
-- **新增：重试发布机制**
+- **新增：标准化的官方免费发布API集成**
+- **新增：改进的publish_id提取和跟踪机制**
+- **新增：可靠的发布状态同步功能**
 
 ## 项目结构
 
@@ -119,7 +118,26 @@ I --> V
 
 ### 发布服务模块
 
-实现完整的文章发布流程，从内容处理到最终发布，包括草稿创建、媒体上传、正式发布等步骤。
+**更新** 实现完整的文章发布流程，从内容处理到最终发布，包括草稿创建、媒体上传、正式发布等步骤。现已标准化使用官方免费发布API(freepublish/submit)，确保准确的publish_id提取和跟踪。
+
+```mermaid
+flowchart TD
+A[开始发布] --> B[替换外链图片]
+B --> C{是否提供封面图?}
+C --> |否| D[使用空字符串]
+C --> |是| E[使用提供的封面图]
+D --> F[创建草稿]
+E --> F
+F --> G[使用官方免费发布API提交]
+G --> H[提取publish_id和msg_id]
+H --> I{发布成功?}
+I --> |是| J[返回成功结果]
+I --> |否| K[返回错误信息]
+```
+
+**图表来源**
+- [backend/app/services/wechat_publish_service.py:36-143](file://backend/app/services/wechat_publish_service.py#L36-L143)
+- [backend/app/services/wechat_publish_service.py:201-261](file://backend/app/services/wechat_publish_service.py#L201-L261)
 
 **章节来源**
 - [backend/app/services/wechat_publish_service.py:23-345](file://backend/app/services/wechat_publish_service.py#L23-L345)
@@ -143,7 +161,7 @@ I --> V
 **新增** 统一管理所有发布记录的生命周期，包括创建、状态更新、错误记录、状态回查同步等功能。
 
 **章节来源**
-- [backend/app/services/publish_record_service.py:30-433](file://backend/app/services/publish_record_service.py#L30-L433)
+- [backend/app/services/publish_record_service.py:30-473](file://backend/app/services/publish_record_service.py#L30-L473)
 
 ## 架构概览
 
@@ -171,8 +189,8 @@ Record-->>Service : 记录ID
 Service->>Token : 获取访问令牌
 Token->>WeChat : 获取令牌
 WeChat-->>Token : 访问令牌
-Service->>WeChat : 提交发布
-WeChat-->>Service : 发布结果
+Service->>WeChat : 使用官方免费发布API提交
+WeChat-->>Service : 返回publish_id和msg_id
 Service->>Record : 更新发布状态
 Record-->>Service : 状态更新
 Service-->>API : 发布完成
@@ -255,6 +273,8 @@ WeChatTokenService --> WeChatTokenError : "抛出异常"
 
 ### 发布服务流程
 
+**更新** 发布服务现已标准化使用官方免费发布API，确保准确的publish_id提取和跟踪：
+
 ```mermaid
 flowchart TD
 A[开始发布] --> B[替换外链图片]
@@ -263,18 +283,30 @@ C --> |否| D[使用空字符串]
 C --> |是| E[使用提供的封面图]
 D --> F[创建草稿]
 E --> F
-F --> G[提交发布]
-G --> H{发布成功?}
-H --> |是| I[返回成功结果]
-H --> |否| J[返回错误信息]
+F --> G[使用官方免费发布API提交]
+G --> H[提取publish_id和msg_id]
+H --> I[创建发布记录]
+I --> J[查询发布状态]
+J --> K{发布成功?}
+K --> |是| L[更新记录为published]
+K --> |否| M[更新记录为failed]
+L --> N[同步草稿状态]
+M --> N
+N --> O[返回最终结果]
 ```
 
 **图表来源**
 - [backend/app/services/wechat_publish_service.py:36-143](file://backend/app/services/wechat_publish_service.py#L36-L143)
+- [backend/app/services/wechat_publish_service.py:201-341](file://backend/app/services/wechat_publish_service.py#L201-L341)
 
 #### 发布状态查询
 
-支持查询发布状态，包括待处理、成功、失败等状态。
+**更新** 现在使用官方免费发布API的状态查询接口，确保可靠的状态跟踪：
+
+- 使用`freepublish/getpubqueuejob` API查询发布状态
+- 支持pending、success、failed三种状态
+- 准确提取article_id和msg_id
+- 与发布记录服务双向同步
 
 **章节来源**
 - [backend/app/services/wechat_publish_service.py:263-341](file://backend/app/services/wechat_publish_service.py#L263-L341)
@@ -399,7 +431,7 @@ E --> F[返回完整记录信息]
 
 #### POST /api/v1/wechat/publish-records/{record_id}/refresh-status
 
-手动刷新发布状态，从微信API同步最新状态到本地记录，并同步草稿状态。
+**更新** 手动刷新发布状态，从微信API同步最新状态到本地记录，并同步草稿状态。现在使用官方免费发布API进行可靠的状态查询。
 
 ```mermaid
 sequenceDiagram
@@ -409,7 +441,7 @@ participant Service as 发布记录服务
 participant WeChat as 微信API
 Client->>API : 刷新状态请求
 API->>Service : 获取记录信息
-Service->>WeChat : 查询微信发布状态
+Service->>WeChat : 使用官方免费发布API查询状态
 WeChat-->>Service : 返回最新状态
 Service->>Service : 更新本地记录
 Service->>Service : 同步草稿状态
@@ -438,7 +470,7 @@ API-->>Client : 返回刷新结果
 - **查询功能**：按草稿、账号、时间范围查询
 
 **章节来源**
-- [backend/app/services/publish_record_service.py:30-433](file://backend/app/services/publish_record_service.py#L30-L433)
+- [backend/app/services/publish_record_service.py:30-473](file://backend/app/services/publish_record_service.py#L30-L473)
 
 ## 依赖关系分析
 
@@ -564,6 +596,21 @@ J --> F
 3. 确认重试条件满足
 4. 手动刷新状态同步
 
+#### 官方免费发布API问题
+
+**症状**：使用freepublish/submit API时出现错误
+
+**可能原因**：
+- 草稿创建失败
+- 令牌权限不足
+- 微信API限制
+
+**解决步骤**：
+1. 验证草稿创建成功
+2. 检查访问令牌权限
+3. 查看微信API返回的具体错误
+4. 重新尝试发布流程
+
 **章节来源**
 - [backend/app/services/wechat_token_service.py:127-135](file://backend/app/services/wechat_token_service.py#L127-L135)
 - [backend/app/services/wechat_media_service.py:96-105](file://backend/app/services/wechat_media_service.py#L96-L105)
@@ -578,7 +625,9 @@ J --> F
 - 完善的错误处理机制
 - 高效的缓存策略
 - 异步异步处理能力
-- **新增：完整的发布记录生命周期管理**
+- **新增：标准化的官方免费发布API集成**
+- **新增：改进的publish_id提取和跟踪机制**
+- **新增：可靠的发布状态同步功能**
 
 **功能完整性**：
 - 支持完整的发布流程
@@ -595,4 +644,10 @@ J --> F
 - 可扩展的服务架构
 - **新增：灵活的发布记录管理**
 
-系统适用于需要自动化微信公众号内容发布的场景，为内容创作者和营销团队提供了高效的技术工具。新增的发布记录管理功能进一步增强了系统的可观测性和可维护性，支持完整的发布生命周期跟踪和管理。
+**可靠性提升**：
+- 使用官方免费发布API确保准确性
+- 完整的发布记录生命周期管理
+- 可靠的状态跟踪和同步机制
+- 多层次的错误处理和重试机制
+
+系统适用于需要自动化微信公众号内容发布的场景，为内容创作者和营销团队提供了高效的技术工具。新增的发布记录管理功能和官方API集成进一步增强了系统的可观测性和可维护性，支持完整的发布生命周期跟踪和管理，显著提升了发布流程的可靠性。

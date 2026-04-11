@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8146/api/v1/tasks/task_c_v82VU5bJ8P/status",
+    "json": null
+  },
+  "response": {
+    "status_code": 500,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": null
+    },
+    "body": {
+      "code": 5000,
+      "message": "internal server error",
+      "data": null,
+      "details": {
+        "error": "can't subtract offset-naive and offset-aware datetimes"
+      }
+    },
+    "body_text": "{\"code\":5000,\"message\":\"internal server error\",\"data\":null,\"details\":{\"error\":\"can't subtract offset-naive and offset-aware datetimes\"}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": false
+}

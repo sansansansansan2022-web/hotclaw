@@ -1,0 +1,95 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8145/api/v1/drafts/9",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_xG0XOhfmLYp-"
+    },
+    "body": {
+      "id": 9,
+      "task_id": "task_Uy3DbNgVFXnh",
+      "account_id": "acct_-fXGVc5EhN1-",
+      "account_name": "Audit fake-flow-1775907984",
+      "title": "HotClaw E2E Golden Draft",
+      "title_candidates": [
+        "HotClaw E2E Golden Draft"
+      ],
+      "selected_topic": "HotClaw E2E Golden Path Topic",
+      "summary": "Deterministic draft generated in E2E fake mode.",
+      "content_markdown": "# HotClaw E2E Golden Draft\n\nVerify the single golden path\n\n## Why it exists\n\nIt keeps the generation pipeline stable.\n\n## What it proves\n\nIt proves status writeback is visible.",
+      "content_html": "<h1>HotClaw E2E Golden Draft</h1><p>This is a deterministic draft used by the HotClaw E2E golden path.</p><h2>Why it exists</h2><p>It keeps the generation pipeline stable while the UI and status writeback are verified.</p><h2>What it proves</h2><p>Task creation, draft creation, confirmation, publishing, and publish record writeback stay observable.</p>",
+      "word_count": 28,
+      "tags": [
+        "e2e",
+        "golden-path"
+      ],
+      "draft_status": "published",
+      "publish_status": "published",
+      "publish_review_required": true,
+      "source_type": "semi_auto_task",
+      "confirmed_at": "2026-04-11T11:46:27.451871",
+      "confirmed_by": "user",
+      "published_at": "2026-04-11T11:46:28.188768",
+      "publish_error_message": null,
+      "audit_result": null,
+      "style_profile": null,
+      "retrieved_memories": null,
+      "outline_plan": {
+        "article_goal": "Verify the single golden path",
+        "sections": [
+          {
+            "id": "why",
+            "title": "Why it exists",
+            "summary": "Stable fake generation"
+          },
+          {
+            "id": "prove",
+            "title": "What it proves",
+            "summary": "End-to-end observability"
+          }
+        ]
+      },
+      "section_drafts": [
+        {
+          "id": "why",
+          "heading": "Why it exists",
+          "summary": "Stable fake generation",
+          "content_markdown": "It keeps the generation pipeline stable."
+        },
+        {
+          "id": "prove",
+          "heading": "What it proves",
+          "summary": "End-to-end observability",
+          "content_markdown": "It proves status writeback is visible."
+        }
+      ],
+      "style_review": null,
+      "structure_review": null,
+      "review_results": [
+        {
+          "reviewer": "e2e_fake_reviewer",
+          "passed": true,
+          "score": 1.0,
+          "summary": "Deterministic E2E content passed review.",
+          "issues": [],
+          "rewrite_suggestions": []
+        }
+      ],
+      "rewrite_result": null,
+      "evaluation": {
+        "final_score": 1.0,
+        "summary": "Deterministic E2E content."
+      },
+      "created_at": "2026-04-11T11:46:27",
+      "updated_at": "2026-04-11T11:46:28"
+    },
+    "body_text": "{\"id\":9,\"task_id\":\"task_Uy3DbNgVFXnh\",\"account_id\":\"acct_-fXGVc5EhN1-\",\"account_name\":\"Audit fake-flow-1775907984\",\"title\":\"HotClaw E2E Golden Draft\",\"title_candidates\":[\"HotClaw E2E Golden Draft\"],\"selected_topic\":\"HotClaw E2E Golden Path Topic\",\"summary\":\"Deterministic draft generated in E2E fake mode.\",\"content_markdown\":\"# HotClaw E2E Golden Draft\\n\\nVerify the single golden path\\n\\n## Why it exists\\n\\nIt keeps the generation pipeline stable.\\n\\n## What it proves\\n\\nIt proves status writeback is visible.\",\"content_html\":\"<h1>HotClaw E2E Golden Draft</h1><p>This is a deterministic draft used by the HotClaw E2E golden path.</p><h2>Why it exists</h2><p>It keeps the generation pipeline stable while the UI and status writeback are verified.</p><h2>What it proves</h2><p>Task creation, draft creation, confirmation, publishing, and publish record writeback stay observable.</p>\",\"word_count\":28,\"tags\":[\"e2e\",\"golden-path\"],\"draft_status\":\"published\",\"publish_status\":\"published\",\"publish_review_required\":true,\"source_type\":\"semi_auto_task\",\"confirmed_at\":\"2026-04-11T11:46:27.451871\",\"confirmed_by\":\"user\",\"published_at\":\"2026-04-11T11:46:28.188768\",\"publish_error_message\":null,\"audit_result\":null,\"style_profile\":null,\"retrieved_memories\":null,\"outline_plan\":{\"article_goal\":\"Verify the single golden path\",\"sections\":[{\"id\":\"why\",\"title\":\"Why it exists\",\"summary\":\"Stable fake generation\"},{\"id\":\"prove\",\"title\":\"What it proves\",\"summary\":\"End-to-end observability\"}]},\"section_drafts\":[{\"id\":\"why\",\"heading\":\"Why it exists\",\"summary\":\"Stable fake generation\",\"content_markdown\":\"It keeps the generation pipeline stable.\"},{\"id\":\"prove\",\"heading\":\"What it proves\",\"summary\":\"End-to-end observability\",\"content_markdown\":\"It proves status writeback is visible.\"}],\"style_review\":null,\"structure_review\":null,\"review_results\":[{\"reviewer\":\"e2e_fake_reviewer\",\"passed\":true,\"score\":1.0,\"summary\":\"Deterministic E2E content passed review.\",\"issues\":[],\"rewrite_suggestions\":[]}],\"rewrite_result\":null,\"evaluation\":{\"final_score\":1.0,\"summary\":\"Deterministic E2E content.\"},\"created_at\":\"2026-04-11T11:46:27\",\"updated_at\":\"2026-04-11T11:46:28\"}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

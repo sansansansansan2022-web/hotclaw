@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8145/api/v1/health",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_XtfFlm5MUP8V"
+    },
+    "body": {
+      "status": "ok",
+      "version": "0.1.0"
+    },
+    "body_text": "{\"status\":\"ok\",\"version\":\"0.1.0\"}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

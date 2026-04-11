@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "PUT",
+    "url": "http://127.0.0.1:8145/system-configs/e2e_publish_mode",
+    "json": {
+      "value": "fake_success",
+      "value_type": "string"
+    }
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_4gYV7kZPO0g2"
+    },
+    "body": {
+      "key": "e2e_publish_mode",
+      "value": "fake_success",
+      "value_type": "string",
+      "description": "HotClaw E2E test config",
+      "category": "app",
+      "is_sensitive": false,
+      "is_system": false,
+      "requires_restart": false
+    },
+    "body_text": "{\"key\":\"e2e_publish_mode\",\"value\":\"fake_success\",\"value_type\":\"string\",\"description\":\"HotClaw E2E test config\",\"category\":\"app\",\"is_sensitive\":false,\"is_system\":false,\"requires_restart\":false}"
+  }
+}

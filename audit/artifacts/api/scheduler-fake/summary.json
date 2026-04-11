@@ -1,0 +1,118 @@
+{
+  "scenario": "scheduler-fake",
+  "steps": [
+    {
+      "name": "health",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\01-health.json"
+    },
+    {
+      "name": "system-config-put-e2e_generation_mode",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\02-system-config-put-e2e_generation_mode.json"
+    },
+    {
+      "name": "scheduler-fake-create-account",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\03-scheduler-fake-create-account.json"
+    },
+    {
+      "name": "scheduler-db-patch",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\04-scheduler-db-patch.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\05-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\06-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\07-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\08-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\09-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\10-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\11-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\12-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\13-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\14-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\15-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\16-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\17-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-task-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\18-scheduler-task-list.json"
+    },
+    {
+      "name": "scheduler-fake-task-status-task_GcQEyP4QPkU3",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\19-scheduler-fake-task-status-task_GcQEyP4QPkU3.json"
+    },
+    {
+      "name": "scheduler-fake-task-detail-task_GcQEyP4QPkU3",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\20-scheduler-fake-task-detail-task_GcQEyP4QPkU3.json"
+    },
+    {
+      "name": "scheduler-account-detail",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\21-scheduler-account-detail.json"
+    },
+    {
+      "name": "scheduler-drafts",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\scheduler-fake\\22-scheduler-drafts.json"
+    }
+  ],
+  "ids": {
+    "account_id": "acct_fVK3C9aZZRZ-",
+    "task_id": "task_GcQEyP4QPkU3"
+  },
+  "logs": {
+    "stdout": "D:\\project\\hotclaw\\audit\\logs\\scheduler-fake-backend.out.log",
+    "stderr": "D:\\project\\hotclaw\\audit\\logs\\scheduler-fake-backend.err.log"
+  },
+  "scheduler_task_detected": {
+    "task_id": "task_GcQEyP4QPkU3",
+    "account_id": "acct_fVK3C9aZZRZ-",
+    "account_name": "Audit scheduler-fake-1775908222",
+    "positioning_summary": "HotClaw audit positioning scheduler-fake-177590822...",
+    "status": "completed",
+    "created_at": "2026-04-11T11:51:23+00:00",
+    "elapsed_seconds": 0.00595,
+    "error_message": null,
+    "audit_result": {
+      "passed": true,
+      "risk_level": "low",
+      "issues": [],
+      "overall_comment": "E2E fake draft is ready for flow verification."
+    }
+  },
+  "task_final_status": "completed"
+}

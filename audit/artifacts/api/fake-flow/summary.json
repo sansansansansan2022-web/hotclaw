@@ -1,0 +1,138 @@
+{
+  "scenario": "fake-flow",
+  "steps": [
+    {
+      "name": "health",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\01-health.json"
+    },
+    {
+      "name": "list-accounts",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\02-list-accounts.json"
+    },
+    {
+      "name": "missing-account",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\03-missing-account.json"
+    },
+    {
+      "name": "system-config-put-e2e_generation_mode",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\04-system-config-put-e2e_generation_mode.json"
+    },
+    {
+      "name": "system-config-put-e2e_generation_failure_message",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\05-system-config-put-e2e_generation_failure_message.json"
+    },
+    {
+      "name": "system-config-put-e2e_publish_mode",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\06-system-config-put-e2e_publish_mode.json"
+    },
+    {
+      "name": "system-config-put-e2e_publish_failure_message",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\07-system-config-put-e2e_publish_failure_message.json"
+    },
+    {
+      "name": "fake-flow-create-account",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\08-fake-flow-create-account.json"
+    },
+    {
+      "name": "account-detail",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\09-account-detail.json"
+    },
+    {
+      "name": "run-account",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\10-run-account.json"
+    },
+    {
+      "name": "fake-flow-task-status-task_Uy3DbNgVFXnh",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\11-fake-flow-task-status-task_Uy3DbNgVFXnh.json"
+    },
+    {
+      "name": "fake-flow-task-detail-task_Uy3DbNgVFXnh",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\12-fake-flow-task-detail-task_Uy3DbNgVFXnh.json"
+    },
+    {
+      "name": "draft-list",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\13-draft-list.json"
+    },
+    {
+      "name": "draft-detail",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\14-draft-detail.json"
+    },
+    {
+      "name": "draft-pending-count",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\15-draft-pending-count.json"
+    },
+    {
+      "name": "confirm-publish",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\16-confirm-publish.json"
+    },
+    {
+      "name": "confirm-publish-duplicate",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\17-confirm-publish-duplicate.json"
+    },
+    {
+      "name": "publish-without-config",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\18-publish-without-config.json"
+    },
+    {
+      "name": "fake-flow-create-wechat-config",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\19-fake-flow-create-wechat-config.json"
+    },
+    {
+      "name": "wechat-config-detail",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\20-wechat-config-detail.json"
+    },
+    {
+      "name": "wechat-config-test",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\21-wechat-config-test.json"
+    },
+    {
+      "name": "publish-fake-failure",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\22-publish-fake-failure.json"
+    },
+    {
+      "name": "publish-records-after-failure",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\23-publish-records-after-failure.json"
+    },
+    {
+      "name": "system-config-put-e2e_publish_mode",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\24-system-config-put-e2e_publish_mode.json"
+    },
+    {
+      "name": "retry-publish-fake-success",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\25-retry-publish-fake-success.json"
+    },
+    {
+      "name": "draft-wechat-status",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\26-draft-wechat-status.json"
+    },
+    {
+      "name": "publish-record-detail",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\27-publish-record-detail.json"
+    },
+    {
+      "name": "publish-record-sync-status",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\28-publish-record-sync-status.json"
+    },
+    {
+      "name": "final-draft-detail",
+      "path": "D:\\project\\hotclaw\\audit\\artifacts\\api\\fake-flow\\29-final-draft-detail.json"
+    }
+  ],
+  "ids": {
+    "account_id": "acct_-fXGVc5EhN1-",
+    "task_id": "task_Uy3DbNgVFXnh",
+    "draft_id": 9,
+    "failed_publish_record_id": 7,
+    "retry_publish_record_id": 8
+  },
+  "logs": {
+    "stdout": "D:\\project\\hotclaw\\audit\\logs\\fake-flow-backend.out.log",
+    "stderr": "D:\\project\\hotclaw\\audit\\logs\\fake-flow-backend.err.log"
+  },
+  "task_final_status": "completed",
+  "publish_failure_payload": {
+    "draft_id": 9,
+    "publish_status": "failed",
+    "error": "failed to publish draft 9: Audit fake publish failure"
+  }
+}

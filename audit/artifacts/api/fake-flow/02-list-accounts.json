@@ -1,0 +1,192 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8145/api/v1/accounts?page=1&page_size=20",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_5S1QBl6r9Ccf"
+    },
+    "body": {
+      "accounts": [
+        {
+          "account_id": "acct_wYdjnmC0N--s",
+          "name": "Audit scheduler-fake-1775907486",
+          "category": null,
+          "positioning": "HotClaw audit positioning scheduler-fake-1775907486",
+          "operation_mode": "semi_auto",
+          "posting_frequency": "daily",
+          "auto_run_enabled": true,
+          "is_active": true,
+          "last_run_at": "2026-04-11T11:39:07.420683",
+          "next_run_at": "2026-04-12T09:00:00",
+          "last_run_status": "success",
+          "last_error_message": null,
+          "created_at": "2026-04-11T11:38:06"
+        },
+        {
+          "account_id": "acct_JDUjNGoMW52H",
+          "name": "Audit real-flow-1775907236",
+          "category": null,
+          "positioning": "HotClaw audit positioning real-flow-1775907236",
+          "operation_mode": "semi_auto",
+          "posting_frequency": "daily",
+          "auto_run_enabled": false,
+          "is_active": true,
+          "last_run_at": "2026-04-11T11:33:56.659173",
+          "next_run_at": null,
+          "last_run_status": "running",
+          "last_error_message": null,
+          "created_at": "2026-04-11T11:33:56"
+        },
+        {
+          "account_id": "acct_4VpoQhyCsguX",
+          "name": "Audit fake-flow-1775907227",
+          "category": null,
+          "positioning": "HotClaw audit positioning fake-flow-1775907227",
+          "operation_mode": "semi_auto",
+          "posting_frequency": "daily",
+          "auto_run_enabled": false,
+          "is_active": true,
+          "last_run_at": "2026-04-11T11:33:49.087432",
+          "next_run_at": null,
+          "last_run_status": "success",
+          "last_error_message": null,
+          "created_at": "2026-04-11T11:33:47"
+        },
+        {
+          "account_id": "acct_hwjao_jaoL52",
+          "name": "Audit scheduler-fake-1775899825",
+          "category": null,
+          "positioning": "HotClaw audit positioning scheduler-fake-1775899825",
+          "operation_mode": "semi_auto",
+          "posting_frequency": "daily",
+          "auto_run_enabled": true,
+          "is_active": true,
+          "last_run_at": "2026-04-11T09:31:25.386124",
+          "next_run_at": "2026-04-12T09:00:00",
+          "last_run_status": "success",
+          "last_error_message": null,
+          "created_at": "2026-04-11T09:30:25"
+        },
+        {
+          "account_id": "acct_R53frdBFJ0kJ",
+          "name": "Audit real-flow-1775899578",
+          "category": null,
+          "positioning": "HotClaw audit positioning real-flow-1775899578",
+          "operation_mode": "semi_auto",
+          "posting_frequency": "daily",
+          "auto_run_enabled": false,
+          "is_active": true,
+          "last_run_at": "2026-04-11T09:26:18.702634",
+          "next_run_at": null,
+          "last_run_status": "running",
+          "last_error_message": null,
+          "created_at": "2026-04-11T09:26:18"
+        },
+        {
+          "account_id": "acct_8qYSoCMNn82T",
+          "name": "Audit fake-flow-1775899569",
+          "category": null,
+          "positioning": "HotClaw audit positioning fake-flow-1775899569",
+          "operation_mode": "semi_auto",
+          "posting_frequency": "daily",
+          "auto_run_enabled": false,
+          "is_active": true,
+          "last_run_at": "2026-04-11T09:26:09.876080",
+          "next_run_at": null,
+          "last_run_status": "success",
+          "last_error_message": null,
+          "created_at": "2026-04-11T09:26:09"
+        },
+        {
+          "account_id": "acct_V5DhlVb5DdRS",
+          "name": "E2E Account 1775846593142-910",
+          "category": null,
+          "positioning": "HotClaw E2E positioning 1775846593142-910",
+          "operation_mode": "semi_auto",
+          "posting_frequency": null,
+          "auto_run_enabled": false,
+          "is_active": true,
+          "last_run_at": "2026-04-10T18:43:13.453858",
+          "next_run_at": null,
+          "last_run_status": "success",
+          "last_error_message": null,
+          "created_at": "2026-04-10T18:43:13"
+        },
+        {
+          "account_id": "acct_tn6lRP3TReeR",
+          "name": "E2E Account 1775846593828-680",
+          "category": null,
+          "positioning": "HotClaw E2E positioning 1775846593828-680",
+          "operation_mode": "semi_auto",
+          "posting_frequency": null,
+          "auto_run_enabled": false,
+          "is_active": true,
+          "last_run_at": "2026-04-10T18:43:14.146915",
+          "next_run_at": null,
+          "last_run_status": "success",
+          "last_error_message": null,
+          "created_at": "2026-04-10T18:43:13"
+        },
+        {
+          "account_id": "acct_Jid6f6NJaVSd",
+          "name": "E2E Account 1775846591489-726",
+          "category": null,
+          "positioning": "HotClaw E2E positioning 1775846591489-726",
+          "operation_mode": "semi_auto",
+          "posting_frequency": null,
+          "auto_run_enabled": false,
+          "is_active": true,
+          "last_run_at": "2026-04-10T18:43:11.812060",
+          "next_run_at": null,
+          "last_run_status": "success",
+          "last_error_message": null,
+          "created_at": "2026-04-10T18:43:11"
+        },
+        {
+          "account_id": "acct_170dNr172xsU",
+          "name": "E2E Account 1775846590721-911",
+          "category": null,
+          "positioning": "HotClaw E2E positioning 1775846590721-911",
+          "operation_mode": "semi_auto",
+          "posting_frequency": null,
+          "auto_run_enabled": false,
+          "is_active": true,
+          "last_run_at": "2026-04-10T18:43:11.030403",
+          "next_run_at": null,
+          "last_run_status": "failed",
+          "last_error_message": "E2E generation boom",
+          "created_at": "2026-04-10T18:43:10"
+        },
+        {
+          "account_id": "acct__In__-6c8hTm",
+          "name": "E2E Account 1775846588981-288",
+          "category": null,
+          "positioning": "HotClaw E2E positioning 1775846588981-288",
+          "operation_mode": "semi_auto",
+          "posting_frequency": null,
+          "auto_run_enabled": false,
+          "is_active": true,
+          "last_run_at": "2026-04-10T18:43:09.960573",
+          "next_run_at": null,
+          "last_run_status": "success",
+          "last_error_message": null,
+          "created_at": "2026-04-10T18:43:08"
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "page_size": 20,
+        "total": 11,
+        "total_pages": 1
+      }
+    },
+    "body_text": "{\"accounts\":[{\"account_id\":\"acct_wYdjnmC0N--s\",\"name\":\"Audit scheduler-fake-1775907486\",\"category\":null,\"positioning\":\"HotClaw audit positioning scheduler-fake-1775907486\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":\"daily\",\"auto_run_enabled\":true,\"is_active\":true,\"last_run_at\":\"2026-04-11T11:39:07.420683\",\"next_run_at\":\"2026-04-12T09:00:00\",\"last_run_status\":\"success\",\"last_error_message\":null,\"created_at\":\"2026-04-11T11:38:06\"},{\"account_id\":\"acct_JDUjNGoMW52H\",\"name\":\"Audit real-flow-1775907236\",\"category\":null,\"positioning\":\"HotClaw audit positioning real-flow-1775907236\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":\"daily\",\"auto_run_enabled\":false,\"is_active\":true,\"last_run_at\":\"2026-04-11T11:33:56.659173\",\"next_run_at\":null,\"last_run_status\":\"running\",\"last_error_message\":null,\"created_at\":\"2026-04-11T11:33:56\"},{\"account_id\":\"acct_4VpoQhyCsguX\",\"name\":\"Audit fake-flow-1775907227\",\"category\":null,\"positioning\":\"HotClaw audit positioning fake-flow-1775907227\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":\"daily\",\"auto_run_enabled\":false,\"is_active\":true,\"last_run_at\":\"2026-04-11T11:33:49.087432\",\"next_run_at\":null,\"last_run_status\":\"success\",\"last_error_message\":null,\"created_at\":\"2026-04-11T11:33:47\"},{\"account_id\":\"acct_hwjao_jaoL52\",\"name\":\"Audit scheduler-fake-1775899825\",\"category\":null,\"positioning\":\"HotClaw audit positioning scheduler-fake-1775899825\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":\"daily\",\"auto_run_enabled\":true,\"is_active\":true,\"last_run_at\":\"2026-04-11T09:31:25.386124\",\"next_run_at\":\"2026-04-12T09:00:00\",\"last_run_status\":\"success\",\"last_error_message\":null,\"created_at\":\"2026-04-11T09:30:25\"},{\"account_id\":\"acct_R53frdBFJ0kJ\",\"name\":\"Audit real-flow-1775899578\",\"category\":null,\"positioning\":\"HotClaw audit positioning real-flow-1775899578\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":\"daily\",\"auto_run_enabled\":false,\"is_active\":true,\"last_run_at\":\"2026-04-11T09:26:18.702634\",\"next_run_at\":null,\"last_run_status\":\"running\",\"last_error_message\":null,\"created_at\":\"2026-04-11T09:26:18\"},{\"account_id\":\"acct_8qYSoCMNn82T\",\"name\":\"Audit fake-flow-1775899569\",\"category\":null,\"positioning\":\"HotClaw audit positioning fake-flow-1775899569\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":\"daily\",\"auto_run_enabled\":false,\"is_active\":true,\"last_run_at\":\"2026-04-11T09:26:09.876080\",\"next_run_at\":null,\"last_run_status\":\"success\",\"last_error_message\":null,\"created_at\":\"2026-04-11T09:26:09\"},{\"account_id\":\"acct_V5DhlVb5DdRS\",\"name\":\"E2E Account 1775846593142-910\",\"category\":null,\"positioning\":\"HotClaw E2E positioning 1775846593142-910\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":null,\"auto_run_enabled\":false,\"is_active\":true,\"last_run_at\":\"2026-04-10T18:43:13.453858\",\"next_run_at\":null,\"last_run_status\":\"success\",\"last_error_message\":null,\"created_at\":\"2026-04-10T18:43:13\"},{\"account_id\":\"acct_tn6lRP3TReeR\",\"name\":\"E2E Account 1775846593828-680\",\"category\":null,\"positioning\":\"HotClaw E2E positioning 1775846593828-680\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":null,\"auto_run_enabled\":false,\"is_active\":true,\"last_run_at\":\"2026-04-10T18:43:14.146915\",\"next_run_at\":null,\"last_run_status\":\"success\",\"last_error_message\":null,\"created_at\":\"2026-04-10T18:43:13\"},{\"account_id\":\"acct_Jid6f6NJaVSd\",\"name\":\"E2E Account 1775846591489-726\",\"category\":null,\"positioning\":\"HotClaw E2E positioning 1775846591489-726\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":null,\"auto_run_enabled\":false,\"is_active\":true,\"last_run_at\":\"2026-04-10T18:43:11.812060\",\"next_run_at\":null,\"last_run_status\":\"success\",\"last_error_message\":null,\"created_at\":\"2026-04-10T18:43:11\"},{\"account_id\":\"acct_170dNr172xsU\",\"name\":\"E2E Account 1775846590721-911\",\"category\":null,\"positioning\":\"HotClaw E2E positioning 1775846590721-911\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":null,\"auto_run_enabled\":false,\"is_active\":true,\"last_run_at\":\"2026-04-10T18:43:11.030403\",\"next_run_at\":null,\"last_run_status\":\"failed\",\"last_error_message\":\"E2E generation boom\",\"created_at\":\"2026-04-10T18:43:10\"},{\"account_id\":\"acct__In__-6c8hTm\",\"name\":\"E2E Account 1775846588981-288\",\"category\":null,\"positioning\":\"HotClaw E2E positioning 1775846588981-288\",\"operation_mode\":\"semi_auto\",\"posting_frequency\":null,\"auto_run_enabled\":false,\"is_active\":true,\"last_run_at\":\"2026-04-10T18:43:09.960573\",\"next_run_at\":null,\"last_run_status\":\"success\",\"last_error_message\":null,\"created_at\":\"2026-04-10T18:43:08\"}],\"pagination\":{\"page\":1,\"page_size\":20,\"total\":11,\"total_pages\":1}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

@@ -1,0 +1,44 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8147/api/v1/accounts",
+    "json": {
+      "name": "Audit scheduler-fake-1775908222",
+      "positioning": "HotClaw audit positioning scheduler-fake-1775908222",
+      "operation_mode": "semi_auto",
+      "auto_run_enabled": true,
+      "auto_publish_enabled": false,
+      "is_active": true,
+      "posting_frequency": "daily",
+      "posting_time": "09:00",
+      "automation_plan": {
+        "plan_type": "semi_auto",
+        "is_enabled": true,
+        "run_strategy": "scheduled",
+        "schedule_type": "daily",
+        "schedule_config": {
+          "time": "09:00"
+        },
+        "auto_publish_enabled": false,
+        "publish_review_required": true,
+        "timezone": "Asia/Shanghai"
+      }
+    }
+  },
+  "response": {
+    "status_code": 201,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_mQqO6B0AInCK"
+    },
+    "body": {
+      "account_id": "acct_fVK3C9aZZRZ-",
+      "name": "Audit scheduler-fake-1775908222",
+      "is_active": true,
+      "operation_mode": "semi_auto"
+    },
+    "body_text": "{\"account_id\":\"acct_fVK3C9aZZRZ-\",\"name\":\"Audit scheduler-fake-1775908222\",\"is_active\":true,\"operation_mode\":\"semi_auto\"}"
+  },
+  "expected_status": 201,
+  "status_matches_expectation": true
+}

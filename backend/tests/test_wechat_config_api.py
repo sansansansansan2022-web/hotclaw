@@ -97,3 +97,43 @@ async def test_test_connection_endpoint_updates_status(client, db_session, accou
     config_data = get_response.json()["data"]
     assert config_data["last_test_status"] == "success"
     assert config_data["verified_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_test_connection_endpoint_returns_real_error_message(client, account, monkeypatch):
+    create_payload = {
+        "app_id": "wx-test-failure",
+        "app_secret": "failing-secret",
+        "default_author": "Tester",
+        "is_enabled": True,
+    }
+    create_response = await client.post(f"/api/v1/accounts/{account.id}/wechat-config", json=create_payload)
+    assert create_response.status_code == 200
+
+    tested_at = datetime.now(timezone.utc)
+    error_message = "WeChat API error 40164: invalid ip 101.69.225.146, not in whitelist"
+    monkeypatch.setattr(
+        wechat_token_service,
+        "test_connection",
+        AsyncMock(
+            return_value={
+                "success": False,
+                "message": error_message,
+                "tested_at": tested_at,
+                "token_expires_at": None,
+            }
+        ),
+    )
+
+    response = await client.post(f"/api/v1/accounts/{account.id}/wechat-config/test")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["code"] == 1
+    assert payload["message"] == error_message
+    assert payload["data"]["message"] == error_message
+
+    get_response = await client.get(f"/api/v1/accounts/{account.id}/wechat-config")
+    assert get_response.status_code == 200
+    config_data = get_response.json()["data"]
+    assert config_data["last_test_status"] == "failed"
+    assert config_data["last_test_error"] == error_message

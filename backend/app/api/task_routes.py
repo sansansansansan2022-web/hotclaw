@@ -16,17 +16,21 @@ Task API routes.
 """
 
 import asyncio
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.core.logger import get_logger
+from app.models.tables import ArticleDraftModel
 from app.schemas.common import ApiResponse
 from app.schemas.task import TaskCreateRequest
+from app.orchestrator.engine import orchestrator_engine
 from app.services.task_service import task_service
 from app.services.account_harness_service import account_harness_service
-from app.core.tracer import get_trace_id, set_task_id
+from app.core.tracer import get_trace_id, generate_trace_id, set_trace_id, set_task_id
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 logger = get_logger(__name__)
@@ -35,6 +39,20 @@ logger = get_logger(__name__)
 # 【后台任务追踪】
 # 存储 asyncio.Task 引用，防止被垃圾回收
 _background_tasks: dict[str, asyncio.Task] = {}
+
+
+def _ensure_utc(dt: datetime | None) -> datetime | None:
+    """Treat naive timestamps loaded from SQLite as UTC for API reads."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _isoformat_utc(dt: datetime | None) -> str | None:
+    normalized = _ensure_utc(dt)
+    return normalized.isoformat() if normalized else None
 
 
 async def _run_task_in_background(tid: str) -> None:
@@ -59,6 +77,8 @@ async def _run_task_in_background(tid: str) -> None:
 
     async with async_session_factory() as bg_db:
         try:
+            trace_id = get_trace_id() or generate_trace_id()
+            set_trace_id(trace_id)
             set_task_id(tid)
             await task_service.run_task(tid, bg_db)
         except Exception as e:
@@ -144,19 +164,20 @@ async def get_task_status(task_id: str, db: AsyncSession = Depends(get_db)) -> A
     if task.elapsed_seconds is not None:
         elapsed = task.elapsed_seconds
     elif task.started_at:
-        from datetime import datetime, timezone
-        elapsed = (datetime.now(timezone.utc) - task.started_at).total_seconds()
+        started_at = _ensure_utc(task.started_at)
+        if started_at is not None:
+            elapsed = (datetime.now(timezone.utc) - started_at).total_seconds()
 
     return ApiResponse(data={
         "task_id": task.id,
         "status": task.status,
         "current_node": current_node,
         "progress": {
-            "total_nodes": 6,
+            "total_nodes": max(orchestrator_engine.get_workflow_node_count(), len(node_runs)),
             "completed_nodes": completed_nodes,
             "current_node_index": current_index,
         },
-        "started_at": task.started_at.isoformat() if task.started_at else None,
+        "started_at": _isoformat_utc(task.started_at),
         "elapsed_seconds": elapsed,
     })
 
@@ -181,6 +202,24 @@ async def get_task_detail(task_id: str, db: AsyncSession = Depends(get_db)) -> A
         account_name=account_name,
     )
 
+    latest_draft = None
+    draft_result = await db.execute(
+        select(ArticleDraftModel)
+        .where(ArticleDraftModel.task_id == task.id)
+        .order_by(desc(ArticleDraftModel.updated_at), desc(ArticleDraftModel.id))
+        .limit(1)
+    )
+    draft = draft_result.scalar_one_or_none()
+    if draft is not None:
+        latest_draft = {
+            "id": draft.id,
+            "account_id": draft.account_id,
+            "title": draft.title,
+            "draft_status": draft.draft_status,
+            "publish_status": draft.publish_status,
+            "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,
+        }
+
     return ApiResponse(data={
         "task_id": task.id,
         "account_id": task.account_id,
@@ -191,11 +230,12 @@ async def get_task_detail(task_id: str, db: AsyncSession = Depends(get_db)) -> A
         "result_data": task.result_data,
         "ops_context": account_harness_service.extract_ops_context(task.input_data, task.result_data),
         "error_message": task.error_message,
-        "created_at": task.created_at.isoformat() if task.created_at else None,
-        "started_at": task.started_at.isoformat() if task.started_at else None,
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "created_at": _isoformat_utc(task.created_at),
+        "started_at": _isoformat_utc(task.started_at),
+        "completed_at": _isoformat_utc(task.completed_at),
         "elapsed_seconds": task.elapsed_seconds,
         "total_tokens": task.total_tokens,
+        "latest_draft": latest_draft,
     })
 
 
@@ -214,11 +254,12 @@ async def get_task_nodes(task_id: str, db: AsyncSession = Depends(get_db)) -> Ap
         nodes_data.append({
             "node_id": n.node_id,
             "agent_id": n.agent_id,
+            "name": orchestrator_engine.get_node_display_name(n.node_id, n.agent_id),
             "status": n.status,
             "input_data": n.input_data,
             "output_data": n.output_data,
-            "started_at": n.started_at.isoformat() if n.started_at else None,
-            "completed_at": n.completed_at.isoformat() if n.completed_at else None,
+            "started_at": _isoformat_utc(n.started_at),
+            "completed_at": _isoformat_utc(n.completed_at),
             "elapsed_seconds": n.elapsed_seconds,
             "prompt_tokens": n.prompt_tokens,
             "completion_tokens": n.completion_tokens,
@@ -277,7 +318,7 @@ async def list_tasks(
             "account_name": t.account.name if getattr(t, "account", None) else None,
             "positioning_summary": positioning[:50] + ("..." if len(positioning) > 50 else ""),
             "status": t.status,
-            "created_at": t.created_at.isoformat() if t.created_at else None,
+            "created_at": _isoformat_utc(t.created_at),
             "elapsed_seconds": t.elapsed_seconds,
             "error_message": t.error_message,
             "audit_result": audit_result,

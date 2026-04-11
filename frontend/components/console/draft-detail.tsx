@@ -139,6 +139,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
         title: locale === "zh-CN" ? "草稿操作失败" : "Draft action failed",
         message: actionError instanceof Error ? actionError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error.",
       });
+      await load();
     }
   };
 
@@ -199,6 +200,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
               ) : null}
               <Button
                 variant="secondary"
+                data-testid="draft-confirm-button"
                 disabled={!actions.canApprove}
                 onClick={() =>
                   void runAction(
@@ -239,6 +241,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
               <Button
                 variant="secondary"
                 disabled={!actions.canPublish}
+                data-testid="draft-publish-button"
                 onClick={() =>
                   void runAction(
                     () => publishDraftToWeChat(parsedId),
@@ -252,6 +255,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
               <Button
                 variant="secondary"
                 disabled={!actions.canRetry}
+                data-testid="draft-retry-button"
                 onClick={() =>
                   void runAction(
                     () => retryPublishDraft(parsedId),
@@ -350,8 +354,8 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
             >
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone={tone(detail.draft_status)}>{draftStatusLabel(detail.draft_status)}</Badge>
-                  <Badge tone={tone(detail.publish_status)}>{publishStatusLabel(detail.publish_status)}</Badge>
+                  <Badge data-testid="draft-status-badge" data-status={detail.draft_status} tone={tone(detail.draft_status)}>{draftStatusLabel(detail.draft_status)}</Badge>
+                  <Badge data-testid="publish-status-badge" data-status={detail.publish_status} tone={tone(detail.publish_status)}>{publishStatusLabel(detail.publish_status)}</Badge>
                   {insights.rewrite ? (
                     <Badge tone={insights.rewrite.used_rewrite ? "success" : "muted"}>
                       {insights.rewrite.used_rewrite
@@ -399,6 +403,9 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
                   <Button variant="secondary" disabled>
                     {locale === "zh-CN" ? "局部重写（占位）" : "Section Rewrite (Placeholder)"}
                   </Button>
+                </div>
+                <div data-testid="draft-publish-error" className="sr-only">
+                  {detail.publish_error_message || ""}
                 </div>
               </div>
             </Card>
@@ -524,13 +531,25 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
               description={locale === "zh-CN" ? "保留现有发布记录表格，不影响现有发布追踪。"
                 : "Preserves the existing publish-record table so the current publishing trace remains intact."}
             >
+              <div
+                data-testid="draft-publish-status-region"
+                data-latest-record-id={records[0]?.id ?? ""}
+                data-latest-publish-status={records[0]?.publish_status ?? detail.publish_status}
+              >
               {records.length ? (
                 <Table columns={[locale === "zh-CN" ? "记录" : "Record", locale === "zh-CN" ? "状态" : "Status", locale === "zh-CN" ? "尝试次数" : "Attempt", locale === "zh-CN" ? "创建时间" : "Created"]}>
                   {records.map((record) => (
-                    <tr key={record.id}>
+                    <tr key={record.id} data-testid={`publish-record-row-${record.id}`} data-publish-status={record.publish_status}>
                       <td className="px-5 py-4 text-sm font-semibold text-slate-900">#{record.id}</td>
                       <td className="px-5 py-4">
-                        <Badge tone={tone(record.publish_status)}>{publishStatusLabel(record.publish_status)}</Badge>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge tone={tone(record.publish_status)}>{publishStatusLabel(record.publish_status)}</Badge>
+                          {record.simulated ? (
+                            <Badge tone="warning">
+                              {locale === "zh-CN" ? "模拟" : "Simulated"}
+                            </Badge>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-5 py-4 text-sm text-slate-600">{locale === "zh-CN" ? `第 ${record.publish_attempt} 次尝试` : `Attempt ${record.publish_attempt}`}</td>
                       <td className="px-5 py-4 text-sm text-slate-600">{formatDateTime(record.created_at)}</td>
@@ -543,6 +562,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
                   description={locale === "zh-CN" ? "只有草稿进入微信发布流程后，才会生成发布记录。" : "Publish records are created only after a draft enters the WeChat publishing flow."}
                 />
               )}
+              </div>
             </Card>
           </div>
         </div>

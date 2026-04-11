@@ -1,0 +1,338 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8147/api/v1/tasks/task_Vwc5wmh7LogX",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_yErWxOHfxxiu"
+    },
+    "body": {
+      "code": 0,
+      "message": "ok",
+      "data": {
+        "task_id": "task_Vwc5wmh7LogX",
+        "account_id": "acct_hwjao_jaoL52",
+        "account_name": "Audit scheduler-fake-1775899825",
+        "status": "completed",
+        "input_data": {
+          "positioning": "HotClaw audit positioning scheduler-fake-1775899825",
+          "ops_context": {
+            "generated_at": "2026-04-11T09:31:25.317466+00:00",
+            "trigger": {
+              "source": "scheduler",
+              "requested_plan_type": "semi_auto"
+            },
+            "account_health": {
+              "status": "attention",
+              "issues": [
+                "Reference sources are still sparse."
+              ]
+            },
+            "operation_stage": "style_learning",
+            "run_strategy": {
+              "allow_run": true,
+              "requested_mode": "semi_auto",
+              "effective_mode": "semi_auto",
+              "allow_auto_publish": false,
+              "preferred_reference_source_ids": [],
+              "avoid_recent_topics": [],
+              "preferred_content_lane": "HotClaw audit positioning scheduler-fake-1775899825",
+              "degraded_from": null,
+              "degrade_reason": null
+            },
+            "ops_notes": [
+              "Reference sources are still sparse, so this run should stay conservative."
+            ],
+            "signals": {
+              "enabled_reference_source_count": 0,
+              "pending_review_count": 0,
+              "recent_failed_publish_count": 0,
+              "recent_success_publish_count": 0,
+              "recent_failed_task_count": 0,
+              "preferred_content_lane": "HotClaw audit positioning scheduler-fake-1775899825",
+              "recent_task_count": 0,
+              "recent_draft_count": 0,
+              "recent_publish_count": 0
+            },
+            "fallback_used": true,
+            "account_summary": {
+              "account_id": "acct_hwjao_jaoL52",
+              "account_name": "Audit scheduler-fake-1775899825"
+            }
+          }
+        },
+        "workflow_id": "default_pipeline",
+        "result_data": {
+          "input": {
+            "positioning": "HotClaw audit positioning scheduler-fake-1775899825"
+          },
+          "profile": {
+            "domain": "e2e",
+            "tone": "clear",
+            "positioning_raw": "HotClaw audit positioning scheduler-fake-1775899825"
+          },
+          "topics": {
+            "selected_topic": "HotClaw E2E Golden Path Topic",
+            "topics": [
+              {
+                "title": "HotClaw E2E Golden Path Topic",
+                "angle": "golden-path",
+                "reasoning": "Deterministic E2E topic"
+              }
+            ]
+          },
+          "titles": {
+            "selected_topic": "HotClaw E2E Golden Path Topic",
+            "selected_title": "HotClaw E2E Golden Draft",
+            "titles": [
+              {
+                "text": "HotClaw E2E Golden Draft",
+                "style": "e2e",
+                "reasoning": "Deterministic E2E title"
+              }
+            ]
+          },
+          "content": {
+            "selected_topic": "HotClaw E2E Golden Path Topic",
+            "title_candidates": [
+              "HotClaw E2E Golden Draft"
+            ],
+            "selected_title": "HotClaw E2E Golden Draft",
+            "summary": "Deterministic draft generated in E2E fake mode.",
+            "content_markdown": "# HotClaw E2E Golden Draft\n\nVerify the single golden path\n\n## Why it exists\n\nIt keeps the generation pipeline stable.\n\n## What it proves\n\nIt proves status writeback is visible.",
+            "content_html": "<h1>HotClaw E2E Golden Draft</h1><p>This is a deterministic draft used by the HotClaw E2E golden path.</p><h2>Why it exists</h2><p>It keeps the generation pipeline stable while the UI and status writeback are verified.</p><h2>What it proves</h2><p>Task creation, draft creation, confirmation, publishing, and publish record writeback stay observable.</p>",
+            "structure": {
+              "sections": [
+                {
+                  "section_id": "why",
+                  "heading": "Why it exists",
+                  "summary": "Stable fake generation",
+                  "word_count": 6,
+                  "evidence_refs": []
+                },
+                {
+                  "section_id": "prove",
+                  "heading": "What it proves",
+                  "summary": "End-to-end observability",
+                  "word_count": 6,
+                  "evidence_refs": []
+                }
+              ]
+            },
+            "tags": [
+              "e2e",
+              "golden-path"
+            ],
+            "word_count": 27
+          },
+          "outline_plan": {
+            "article_goal": "Verify the single golden path",
+            "sections": [
+              {
+                "id": "why",
+                "title": "Why it exists",
+                "summary": "Stable fake generation"
+              },
+              {
+                "id": "prove",
+                "title": "What it proves",
+                "summary": "End-to-end observability"
+              }
+            ]
+          },
+          "section_drafts": [
+            {
+              "id": "why",
+              "heading": "Why it exists",
+              "summary": "Stable fake generation",
+              "content_markdown": "It keeps the generation pipeline stable."
+            },
+            {
+              "id": "prove",
+              "heading": "What it proves",
+              "summary": "End-to-end observability",
+              "content_markdown": "It proves status writeback is visible."
+            }
+          ],
+          "audit_result": {
+            "passed": true,
+            "risk_level": "low",
+            "issues": [],
+            "overall_comment": "E2E fake draft is ready for flow verification."
+          },
+          "review_results": [
+            {
+              "reviewer": "e2e_fake_reviewer",
+              "passed": true,
+              "score": 1.0,
+              "summary": "Deterministic E2E content passed review.",
+              "issues": [],
+              "rewrite_suggestions": []
+            }
+          ],
+          "evaluation": {
+            "final_score": 1.0,
+            "summary": "Deterministic E2E content."
+          },
+          "content_pipeline": {
+            "version": "e2e-fake-v1",
+            "used_structured_pipeline": true,
+            "fallback_to_content_writer": false,
+            "degraded": false,
+            "rewrite_attempted": false,
+            "rewrite_used": false,
+            "rewrite_failed": false
+          },
+          "e2e_test_mode": {
+            "enabled": true,
+            "task_id": "task_Vwc5wmh7LogX",
+            "account_id": "acct_hwjao_jaoL52",
+            "generation_mode": "fake_success"
+          },
+          "assembled_article": {
+            "selected_topic": "HotClaw E2E Golden Path Topic",
+            "title_candidates": [
+              "HotClaw E2E Golden Draft"
+            ],
+            "selected_title": "HotClaw E2E Golden Draft",
+            "summary": "Deterministic draft generated in E2E fake mode.",
+            "content_markdown": "# HotClaw E2E Golden Draft\n\nVerify the single golden path\n\n## Why it exists\n\nIt keeps the generation pipeline stable.\n\n## What it proves\n\nIt proves status writeback is visible.",
+            "content_html": "<h1>HotClaw E2E Golden Draft</h1><p>This is a deterministic draft used by the HotClaw E2E golden path.</p><h2>Why it exists</h2><p>It keeps the generation pipeline stable while the UI and status writeback are verified.</p><h2>What it proves</h2><p>Task creation, draft creation, confirmation, publishing, and publish record writeback stay observable.</p>",
+            "structure": {
+              "sections": [
+                {
+                  "section_id": "why",
+                  "heading": "Why it exists",
+                  "summary": "Stable fake generation",
+                  "word_count": 6,
+                  "evidence_refs": []
+                },
+                {
+                  "section_id": "prove",
+                  "heading": "What it proves",
+                  "summary": "End-to-end observability",
+                  "word_count": 6,
+                  "evidence_refs": []
+                }
+              ]
+            },
+            "tags": [
+              "e2e",
+              "golden-path"
+            ],
+            "word_count": 27
+          },
+          "ops_context": {
+            "generated_at": "2026-04-11T09:31:25.317466+00:00",
+            "trigger": {
+              "source": "scheduler",
+              "requested_plan_type": "semi_auto"
+            },
+            "account_health": {
+              "status": "attention",
+              "issues": [
+                "Reference sources are still sparse."
+              ]
+            },
+            "operation_stage": "style_learning",
+            "run_strategy": {
+              "allow_run": true,
+              "requested_mode": "semi_auto",
+              "effective_mode": "semi_auto",
+              "allow_auto_publish": false,
+              "preferred_reference_source_ids": [],
+              "avoid_recent_topics": [],
+              "preferred_content_lane": "HotClaw audit positioning scheduler-fake-1775899825",
+              "degraded_from": null,
+              "degrade_reason": null
+            },
+            "ops_notes": [
+              "Reference sources are still sparse, so this run should stay conservative."
+            ],
+            "signals": {
+              "enabled_reference_source_count": 0,
+              "pending_review_count": 0,
+              "recent_failed_publish_count": 0,
+              "recent_success_publish_count": 0,
+              "recent_failed_task_count": 0,
+              "preferred_content_lane": "HotClaw audit positioning scheduler-fake-1775899825",
+              "recent_task_count": 0,
+              "recent_draft_count": 0,
+              "recent_publish_count": 0
+            },
+            "fallback_used": true,
+            "account_summary": {
+              "account_id": "acct_hwjao_jaoL52",
+              "account_name": "Audit scheduler-fake-1775899825"
+            }
+          }
+        },
+        "ops_context": {
+          "generated_at": "2026-04-11T09:31:25.317466+00:00",
+          "trigger": {
+            "source": "scheduler",
+            "requested_plan_type": "semi_auto"
+          },
+          "account_health": {
+            "status": "attention",
+            "issues": [
+              "Reference sources are still sparse."
+            ]
+          },
+          "operation_stage": "style_learning",
+          "run_strategy": {
+            "allow_run": true,
+            "requested_mode": "semi_auto",
+            "effective_mode": "semi_auto",
+            "allow_auto_publish": false,
+            "preferred_reference_source_ids": [],
+            "avoid_recent_topics": [],
+            "preferred_content_lane": "HotClaw audit positioning scheduler-fake-1775899825",
+            "degraded_from": null,
+            "degrade_reason": null
+          },
+          "ops_notes": [
+            "Reference sources are still sparse, so this run should stay conservative."
+          ],
+          "signals": {
+            "enabled_reference_source_count": 0,
+            "pending_review_count": 0,
+            "recent_failed_publish_count": 0,
+            "recent_success_publish_count": 0,
+            "recent_failed_task_count": 0,
+            "preferred_content_lane": "HotClaw audit positioning scheduler-fake-1775899825",
+            "recent_task_count": 0,
+            "recent_draft_count": 0,
+            "recent_publish_count": 0
+          },
+          "fallback_used": true,
+          "account_summary": {
+            "account_id": "acct_hwjao_jaoL52",
+            "account_name": "Audit scheduler-fake-1775899825"
+          }
+        },
+        "error_message": null,
+        "created_at": "2026-04-11T09:31:25",
+        "started_at": "2026-04-11T09:31:25.398350",
+        "completed_at": "2026-04-11T09:31:25.401861",
+        "elapsed_seconds": 0.003511,
+        "total_tokens": 0,
+        "latest_draft": {
+          "id": 6,
+          "account_id": "acct_hwjao_jaoL52",
+          "title": "HotClaw E2E Golden Draft",
+          "draft_status": "pending_review",
+          "publish_status": "not_published",
+          "updated_at": "2026-04-11T09:31:25"
+        }
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"ok\",\"data\":{\"task_id\":\"task_Vwc5wmh7LogX\",\"account_id\":\"acct_hwjao_jaoL52\",\"account_name\":\"Audit scheduler-fake-1775899825\",\"status\":\"completed\",\"input_data\":{\"positioning\":\"HotClaw audit positioning scheduler-fake-1775899825\",\"ops_context\":{\"generated_at\":\"2026-04-11T09:31:25.317466+00:00\",\"trigger\":{\"source\":\"scheduler\",\"requested_plan_type\":\"semi_auto\"},\"account_health\":{\"status\":\"attention\",\"issues\":[\"Reference sources are still sparse.\"]},\"operation_stage\":\"style_learning\",\"run_strategy\":{\"allow_run\":true,\"requested_mode\":\"semi_auto\",\"effective_mode\":\"semi_auto\",\"allow_auto_publish\":false,\"preferred_reference_source_ids\":[],\"avoid_recent_topics\":[],\"preferred_content_lane\":\"HotClaw audit positioning scheduler-fake-1775899825\",\"degraded_from\":null,\"degrade_reason\":null},\"ops_notes\":[\"Reference sources are still sparse, so this run should stay conservative.\"],\"signals\":{\"enabled_reference_source_count\":0,\"pending_review_count\":0,\"recent_failed_publish_count\":0,\"recent_success_publish_count\":0,\"recent_failed_task_count\":0,\"preferred_content_lane\":\"HotClaw audit positioning scheduler-fake-1775899825\",\"recent_task_count\":0,\"recent_draft_count\":0,\"recent_publish_count\":0},\"fallback_used\":true,\"account_summary\":{\"account_id\":\"acct_hwjao_jaoL52\",\"account_name\":\"Audit scheduler-fake-1775899825\"}}},\"workflow_id\":\"default_pipeline\",\"result_data\":{\"input\":{\"positioning\":\"HotClaw audit positioning scheduler-fake-1775899825\"},\"profile\":{\"domain\":\"e2e\",\"tone\":\"clear\",\"positioning_raw\":\"HotClaw audit positioning scheduler-fake-1775899825\"},\"topics\":{\"selected_topic\":\"HotClaw E2E Golden Path Topic\",\"topics\":[{\"title\":\"HotClaw E2E Golden Path Topic\",\"angle\":\"golden-path\",\"reasoning\":\"Deterministic E2E topic\"}]},\"titles\":{\"selected_topic\":\"HotClaw E2E Golden Path Topic\",\"selected_title\":\"HotClaw E2E Golden Draft\",\"titles\":[{\"text\":\"HotClaw E2E Golden Draft\",\"style\":\"e2e\",\"reasoning\":\"Deterministic E2E title\"}]},\"content\":{\"selected_topic\":\"HotClaw E2E Golden Path Topic\",\"title_candidates\":[\"HotClaw E2E Golden Draft\"],\"selected_title\":\"HotClaw E2E Golden Draft\",\"summary\":\"Deterministic draft generated in E2E fake mode.\",\"content_markdown\":\"# HotClaw E2E Golden Draft\\n\\nVerify the single golden path\\n\\n## Why it exists\\n\\nIt keeps the generation pipeline stable.\\n\\n## What it proves\\n\\nIt proves status writeback is visible.\",\"content_html\":\"<h1>HotClaw E2E Golden Draft</h1><p>This is a deterministic draft used by the HotClaw E2E golden path.</p><h2>Why it exists</h2><p>It keeps the generation pipeline stable while the UI and status writeback are verified.</p><h2>What it proves</h2><p>Task creation, draft creation, confirmation, publishing, and publish record writeback stay observable.</p>\",\"structure\":{\"sections\":[{\"section_id\":\"why\",\"heading\":\"Why it exists\",\"summary\":\"Stable fake generation\",\"word_count\":6,\"evidence_refs\":[]},{\"section_id\":\"prove\",\"heading\":\"What it proves\",\"summary\":\"End-to-end observability\",\"word_count\":6,\"evidence_refs\":[]}]},\"tags\":[\"e2e\",\"golden-path\"],\"word_count\":27},\"outline_plan\":{\"article_goal\":\"Verify the single golden path\",\"sections\":[{\"id\":\"why\",\"title\":\"Why it exists\",\"summary\":\"Stable fake generation\"},{\"id\":\"prove\",\"title\":\"What it proves\",\"summary\":\"End-to-end observability\"}]},\"section_drafts\":[{\"id\":\"why\",\"heading\":\"Why it exists\",\"summary\":\"Stable fake generation\",\"content_markdown\":\"It keeps the generation pipeline stable.\"},{\"id\":\"prove\",\"heading\":\"What it proves\",\"summary\":\"End-to-end observability\",\"content_markdown\":\"It proves status writeback is visible.\"}],\"audit_result\":{\"passed\":true,\"risk_level\":\"low\",\"issues\":[],\"overall_comment\":\"E2E fake draft is ready for flow verification.\"},\"review_results\":[{\"reviewer\":\"e2e_fake_reviewer\",\"passed\":true,\"score\":1.0,\"summary\":\"Deterministic E2E content passed review.\",\"issues\":[],\"rewrite_suggestions\":[]}],\"evaluation\":{\"final_score\":1.0,\"summary\":\"Deterministic E2E content.\"},\"content_pipeline\":{\"version\":\"e2e-fake-v1\",\"used_structured_pipeline\":true,\"fallback_to_content_writer\":false,\"degraded\":false,\"rewrite_attempted\":false,\"rewrite_used\":false,\"rewrite_failed\":false},\"e2e_test_mode\":{\"enabled\":true,\"task_id\":\"task_Vwc5wmh7LogX\",\"account_id\":\"acct_hwjao_jaoL52\",\"generation_mode\":\"fake_success\"},\"assembled_article\":{\"selected_topic\":\"HotClaw E2E Golden Path Topic\",\"title_candidates\":[\"HotClaw E2E Golden Draft\"],\"selected_title\":\"HotClaw E2E Golden Draft\",\"summary\":\"Deterministic draft generated in E2E fake mode.\",\"content_markdown\":\"# HotClaw E2E Golden Draft\\n\\nVerify the single golden path\\n\\n## Why it exists\\n\\nIt keeps the generation pipeline stable.\\n\\n## What it proves\\n\\nIt proves status writeback is visible.\",\"content_html\":\"<h1>HotClaw E2E Golden Draft</h1><p>This is a deterministic draft used by the HotClaw E2E golden path.</p><h2>Why it exists</h2><p>It keeps the generation pipeline stable while the UI and status writeback are verified.</p><h2>What it proves</h2><p>Task creation, draft creation, confirmation, publishing, and publish record writeback stay observable.</p>\",\"structure\":{\"sections\":[{\"section_id\":\"why\",\"heading\":\"Why it exists\",\"summary\":\"Stable fake generation\",\"word_count\":6,\"evidence_refs\":[]},{\"section_id\":\"prove\",\"heading\":\"What it proves\",\"summary\":\"End-to-end observability\",\"word_count\":6,\"evidence_refs\":[]}]},\"tags\":[\"e2e\",\"golden-path\"],\"word_count\":27},\"ops_context\":{\"generated_at\":\"2026-04-11T09:31:25.317466+00:00\",\"trigger\":{\"source\":\"scheduler\",\"requested_plan_type\":\"semi_auto\"},\"account_health\":{\"status\":\"attention\",\"issues\":[\"Reference sources are still sparse.\"]},\"operation_stage\":\"style_learning\",\"run_strategy\":{\"allow_run\":true,\"requested_mode\":\"semi_auto\",\"effective_mode\":\"semi_auto\",\"allow_auto_publish\":false,\"preferred_reference_source_ids\":[],\"avoid_recent_topics\":[],\"preferred_content_lane\":\"HotClaw audit positioning scheduler-fake-1775899825\",\"degraded_from\":null,\"degrade_reason\":null},\"ops_notes\":[\"Reference sources are still sparse, so this run should stay conservative.\"],\"signals\":{\"enabled_reference_source_count\":0,\"pending_review_count\":0,\"recent_failed_publish_count\":0,\"recent_success_publish_count\":0,\"recent_failed_task_count\":0,\"preferred_content_lane\":\"HotClaw audit positioning scheduler-fake-1775899825\",\"recent_task_count\":0,\"recent_draft_count\":0,\"recent_publish_count\":0},\"fallback_used\":true,\"account_summary\":{\"account_id\":\"acct_hwjao_jaoL52\",\"account_name\":\"Audit scheduler-fake-1775899825\"}}},\"ops_context\":{\"generated_at\":\"2026-04-11T09:31:25.317466+00:00\",\"trigger\":{\"source\":\"scheduler\",\"requested_plan_type\":\"semi_auto\"},\"account_health\":{\"status\":\"attention\",\"issues\":[\"Reference sources are still sparse.\"]},\"operation_stage\":\"style_learning\",\"run_strategy\":{\"allow_run\":true,\"requested_mode\":\"semi_auto\",\"effective_mode\":\"semi_auto\",\"allow_auto_publish\":false,\"preferred_reference_source_ids\":[],\"avoid_recent_topics\":[],\"preferred_content_lane\":\"HotClaw audit positioning scheduler-fake-1775899825\",\"degraded_from\":null,\"degrade_reason\":null},\"ops_notes\":[\"Reference sources are still sparse, so this run should stay conservative.\"],\"signals\":{\"enabled_reference_source_count\":0,\"pending_review_count\":0,\"recent_failed_publish_count\":0,\"recent_success_publish_count\":0,\"recent_failed_task_count\":0,\"preferred_content_lane\":\"HotClaw audit positioning scheduler-fake-1775899825\",\"recent_task_count\":0,\"recent_draft_count\":0,\"recent_publish_count\":0},\"fallback_used\":true,\"account_summary\":{\"account_id\":\"acct_hwjao_jaoL52\",\"account_name\":\"Audit scheduler-fake-1775899825\"}},\"error_message\":null,\"created_at\":\"2026-04-11T09:31:25\",\"started_at\":\"2026-04-11T09:31:25.398350\",\"completed_at\":\"2026-04-11T09:31:25.401861\",\"elapsed_seconds\":0.003511,\"total_tokens\":0,\"latest_draft\":{\"id\":6,\"account_id\":\"acct_hwjao_jaoL52\",\"title\":\"HotClaw E2E Golden Draft\",\"draft_status\":\"pending_review\",\"publish_status\":\"not_published\",\"updated_at\":\"2026-04-11T09:31:25\"}}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

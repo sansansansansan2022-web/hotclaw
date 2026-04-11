@@ -1,0 +1,54 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8145/api/v1/drafts/5/publish-records",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_rD5XqMkjUy0t"
+    },
+    "body": {
+      "code": 0,
+      "message": "ok",
+      "data": {
+        "draft_id": 5,
+        "total": 1,
+        "records": [
+          {
+            "id": 3,
+            "draft_id": 5,
+            "account_id": "acct_8qYSoCMNn82T",
+            "task_id": "task_SoBGPl0UTOKY",
+            "wechat_draft_id": null,
+            "media_id": null,
+            "publish_id": null,
+            "article_id": null,
+            "publish_status": "failed",
+            "source_mode": "manual",
+            "trigger_type": "manual_confirm",
+            "publish_attempt": 1,
+            "retry_count": 0,
+            "parent_record_id": null,
+            "error_code": "E2E_FAKE_PUBLISH",
+            "error_message": "Audit fake publish failure",
+            "url": null,
+            "request_snapshot": "title=HotClaw E2E Golden Draft",
+            "response_snapshot": "failed:E2E_FAKE_PUBLISH",
+            "started_at": "2026-04-11T09:26:12.624960",
+            "last_checked_at": "2026-04-11T09:26:12.629467",
+            "published_at": null,
+            "finished_at": "2026-04-11T09:26:12.629467",
+            "created_at": "2026-04-11T09:26:12",
+            "updated_at": "2026-04-11T09:26:12"
+          }
+        ]
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"ok\",\"data\":{\"draft_id\":5,\"total\":1,\"records\":[{\"id\":3,\"draft_id\":5,\"account_id\":\"acct_8qYSoCMNn82T\",\"task_id\":\"task_SoBGPl0UTOKY\",\"wechat_draft_id\":null,\"media_id\":null,\"publish_id\":null,\"article_id\":null,\"publish_status\":\"failed\",\"source_mode\":\"manual\",\"trigger_type\":\"manual_confirm\",\"publish_attempt\":1,\"retry_count\":0,\"parent_record_id\":null,\"error_code\":\"E2E_FAKE_PUBLISH\",\"error_message\":\"Audit fake publish failure\",\"url\":null,\"request_snapshot\":\"title=HotClaw E2E Golden Draft\",\"response_snapshot\":\"failed:E2E_FAKE_PUBLISH\",\"started_at\":\"2026-04-11T09:26:12.624960\",\"last_checked_at\":\"2026-04-11T09:26:12.629467\",\"published_at\":null,\"finished_at\":\"2026-04-11T09:26:12.629467\",\"created_at\":\"2026-04-11T09:26:12\",\"updated_at\":\"2026-04-11T09:26:12\"}]}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

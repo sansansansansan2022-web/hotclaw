@@ -1,0 +1,51 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8145/api/v1/drafts/9/wechat-status",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_oVKHi5-97DY8"
+    },
+    "body": {
+      "code": 0,
+      "message": "ok",
+      "data": {
+        "has_record": true,
+        "record_id": 8,
+        "draft_id": 9,
+        "account_id": "acct_-fXGVc5EhN1-",
+        "task_id": "task_Uy3DbNgVFXnh",
+        "wechat_draft_id": "e2e-media-8",
+        "media_id": "e2e-media-8",
+        "publish_id": "e2e-publish-8",
+        "article_id": "e2e-article-8",
+        "publish_status": "published",
+        "source_mode": "manual",
+        "trigger_type": "manual_retry",
+        "publish_attempt": 2,
+        "retry_count": 1,
+        "parent_record_id": 7,
+        "error_code": null,
+        "error_message": null,
+        "url": "https://example.test/hotclaw/publish/8",
+        "request_snapshot": "title=HotClaw E2E Golden Draft",
+        "response_snapshot": "simulated=true;source=e2e_fake;provider=fake;event=publish_success",
+        "simulated": true,
+        "simulation_source": "e2e_fake",
+        "provider": "fake",
+        "started_at": "2026-04-11T11:46:28.170875",
+        "finished_at": "2026-04-11T11:46:28.188768",
+        "published_at": "2026-04-11T11:46:28.188768",
+        "last_checked_at": "2026-04-11T11:46:28.188768",
+        "created_at": "2026-04-11T11:46:28"
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"ok\",\"data\":{\"has_record\":true,\"record_id\":8,\"draft_id\":9,\"account_id\":\"acct_-fXGVc5EhN1-\",\"task_id\":\"task_Uy3DbNgVFXnh\",\"wechat_draft_id\":\"e2e-media-8\",\"media_id\":\"e2e-media-8\",\"publish_id\":\"e2e-publish-8\",\"article_id\":\"e2e-article-8\",\"publish_status\":\"published\",\"source_mode\":\"manual\",\"trigger_type\":\"manual_retry\",\"publish_attempt\":2,\"retry_count\":1,\"parent_record_id\":7,\"error_code\":null,\"error_message\":null,\"url\":\"https://example.test/hotclaw/publish/8\",\"request_snapshot\":\"title=HotClaw E2E Golden Draft\",\"response_snapshot\":\"simulated=true;source=e2e_fake;provider=fake;event=publish_success\",\"simulated\":true,\"simulation_source\":\"e2e_fake\",\"provider\":\"fake\",\"started_at\":\"2026-04-11T11:46:28.170875\",\"finished_at\":\"2026-04-11T11:46:28.188768\",\"published_at\":\"2026-04-11T11:46:28.188768\",\"last_checked_at\":\"2026-04-11T11:46:28.188768\",\"created_at\":\"2026-04-11T11:46:28\"}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

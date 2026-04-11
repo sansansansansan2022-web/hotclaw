@@ -1,0 +1,47 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "http://127.0.0.1:8146/api/v1/accounts/acct_cVBNl21JrEU4/wechat-config",
+    "json": {
+      "app_id": "audit-fake-app-id",
+      "app_secret": "audit-fake-app-secret",
+      "default_author": "HotClaw Audit",
+      "default_thumb_media_id": "audit-thumb-media-id",
+      "need_open_comment": true,
+      "only_fans_can_comment": false,
+      "is_enabled": true
+    }
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_f037HdyKZd3c"
+    },
+    "body": {
+      "code": 0,
+      "message": "WeChat config created",
+      "data": {
+        "account_id": "acct_cVBNl21JrEU4",
+        "app_id_masked": "audi****p-id",
+        "has_app_secret": true,
+        "app_secret_masked": "au******et",
+        "default_author": "HotClaw Audit",
+        "default_thumb_media_id": "audit-thumb-media-id",
+        "need_open_comment": true,
+        "only_fans_can_comment": false,
+        "is_enabled": true,
+        "access_token_cached": false,
+        "token_expires_at": null,
+        "verified_at": null,
+        "last_test_status": "untested",
+        "last_test_error": null,
+        "created_at": "2026-04-11T11:50:15",
+        "updated_at": "2026-04-11T11:50:15"
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"WeChat config created\",\"data\":{\"account_id\":\"acct_cVBNl21JrEU4\",\"app_id_masked\":\"audi****p-id\",\"has_app_secret\":true,\"app_secret_masked\":\"au******et\",\"default_author\":\"HotClaw Audit\",\"default_thumb_media_id\":\"audit-thumb-media-id\",\"need_open_comment\":true,\"only_fans_can_comment\":false,\"is_enabled\":true,\"access_token_cached\":false,\"token_expires_at\":null,\"verified_at\":null,\"last_test_status\":\"untested\",\"last_test_error\":null,\"created_at\":\"2026-04-11T11:50:15\",\"updated_at\":\"2026-04-11T11:50:15\"}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

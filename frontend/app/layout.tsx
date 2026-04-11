@@ -10,7 +10,11 @@ export const metadata: Metadata = {
 export const dynamic = "force-dynamic";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const runtimeApiOrigin = process.env.HOTCLAW_API_ORIGIN ?? process.env.NEXT_PUBLIC_HOTCLAW_API_ORIGIN ?? "";
+  const runtimeApiOrigin = (
+    process.env.HOTCLAW_API_ORIGIN ??
+    process.env.NEXT_PUBLIC_HOTCLAW_API_ORIGIN ??
+    (process.env.NODE_ENV === "production" ? "" : "http://127.0.0.1:8000")
+  ).replace(/\/$/, "");
 
   return (
     <html lang="en" suppressHydrationWarning>

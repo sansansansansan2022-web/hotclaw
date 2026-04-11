@@ -1,0 +1,16 @@
+export const selectors = {
+  accountWorkspaceRunButton: '[data-testid="account-workspace-run-button"]',
+  taskStatusBadge: '[data-testid="task-status-badge"]',
+  taskErrorMessage: '[data-testid="task-error-message"]',
+  taskGeneratedDraftRegion: '[data-testid="task-generated-draft-region"]',
+  taskRelatedDraftLink: '[data-testid="task-related-draft-link"]',
+  taskRerunButton: '[data-testid="task-rerun-button"]',
+  draftStatusBadge: '[data-testid="draft-status-badge"]',
+  publishStatusBadge: '[data-testid="publish-status-badge"]',
+  draftConfirmButton: '[data-testid="draft-confirm-button"]',
+  draftPublishButton: '[data-testid="draft-publish-button"]',
+  draftRetryButton: '[data-testid="draft-retry-button"]',
+  draftPublishError: '[data-testid="draft-publish-error"]',
+  draftPublishStatusRegion: '[data-testid="draft-publish-status-region"]',
+  publishRecordRow: (recordId: number) => `[data-testid="publish-record-row-${recordId}"]`,
+};

@@ -1,0 +1,47 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8145/api/v1/wechat/publish-records/8",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr_DruTmN-UXyx0"
+    },
+    "body": {
+      "code": 0,
+      "message": "ok",
+      "data": {
+        "id": 8,
+        "draft_id": 9,
+        "account_id": "acct_-fXGVc5EhN1-",
+        "task_id": "task_Uy3DbNgVFXnh",
+        "wechat_draft_media_id": "e2e-media-8",
+        "wechat_publish_id": "e2e-publish-8",
+        "wechat_article_url": "https://example.test/hotclaw/publish/8",
+        "wechat_msg_data_id": "e2e-article-8",
+        "publish_status": "published",
+        "source_mode": "manual",
+        "trigger_type": "manual_retry",
+        "attempt_count": 2,
+        "retry_count": 1,
+        "simulated": true,
+        "simulation_source": "e2e_fake",
+        "provider": "fake",
+        "last_error_code": null,
+        "last_error_message": null,
+        "started_at": "2026-04-11T11:46:28.170875",
+        "finished_at": "2026-04-11T11:46:28.188768",
+        "published_at": "2026-04-11T11:46:28.188768",
+        "last_checked_at": "2026-04-11T11:46:28.188768",
+        "created_at": "2026-04-11T11:46:28",
+        "updated_at": "2026-04-11T11:46:28"
+      }
+    },
+    "body_text": "{\"code\":0,\"message\":\"ok\",\"data\":{\"id\":8,\"draft_id\":9,\"account_id\":\"acct_-fXGVc5EhN1-\",\"task_id\":\"task_Uy3DbNgVFXnh\",\"wechat_draft_media_id\":\"e2e-media-8\",\"wechat_publish_id\":\"e2e-publish-8\",\"wechat_article_url\":\"https://example.test/hotclaw/publish/8\",\"wechat_msg_data_id\":\"e2e-article-8\",\"publish_status\":\"published\",\"source_mode\":\"manual\",\"trigger_type\":\"manual_retry\",\"attempt_count\":2,\"retry_count\":1,\"simulated\":true,\"simulation_source\":\"e2e_fake\",\"provider\":\"fake\",\"last_error_code\":null,\"last_error_message\":null,\"started_at\":\"2026-04-11T11:46:28.170875\",\"finished_at\":\"2026-04-11T11:46:28.188768\",\"published_at\":\"2026-04-11T11:46:28.188768\",\"last_checked_at\":\"2026-04-11T11:46:28.188768\",\"created_at\":\"2026-04-11T11:46:28\",\"updated_at\":\"2026-04-11T11:46:28\"}}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

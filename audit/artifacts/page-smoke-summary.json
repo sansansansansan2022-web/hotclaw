@@ -1,0 +1,174 @@
+{
+  "generated_at": "2026-04-11T09:56:24.955Z",
+  "mode": "playwright-e2e-test-mode",
+  "account_id": "acct_4lJwzKhhJhsV",
+  "task_id": "task_itVuL_nIIZzd",
+  "draft_id": 14,
+  "publish_response": {
+    "code": 0,
+    "message": "WeChat publish submitted",
+    "data": {
+      "draft_id": 14,
+      "draft_status": "published",
+      "publish_status": "published",
+      "published_at": "2026-04-11T09:56:22.705137",
+      "wechat_media_id": "e2e-media-7",
+      "wechat_publish_id": "e2e-publish-7",
+      "publish_record_id": 7,
+      "decision": {
+        "decision": "ALLOW_PUBLISH",
+        "reason_code": "ALL_CHECKS_PASSED",
+        "reason_message": "All checks passed.",
+        "checks": {
+          "source": "manual_confirm",
+          "is_retry": false,
+          "global_publish_enabled": true,
+          "global_emergency_stop": false,
+          "draft_status": "approved",
+          "publish_status": "not_published",
+          "draft_account_id": "acct_4lJwzKhhJhsV",
+          "account_id": "acct_4lJwzKhhJhsV",
+          "account_name": "E2E Account 1775901375533-604",
+          "operation_mode": "semi_auto",
+          "auto_publish_enabled": false,
+          "publish_paused": false,
+          "has_active_publishing": false,
+          "frequency_check": {
+            "allowed": true,
+            "daily_exceeded": false,
+            "interval_exceeded": false,
+            "today_count": 0,
+            "max_posts_per_day": null,
+            "min_interval_minutes": null,
+            "reason": ""
+          },
+          "audit_check": {
+            "has_audit": false,
+            "risk_level": null,
+            "passed": null,
+            "comment": null,
+            "issues": null
+          },
+          "duplicate_check": {
+            "is_exact_match": false,
+            "is_similar": false,
+            "checked_count": 0
+          },
+          "wechat_config_exists": true,
+          "wechat_config_enabled": true
+        }
+      }
+    }
+  },
+  "pages": [
+    {
+      "name": "page-smoke-dashboard",
+      "route": "/dashboard",
+      "finalUrl": "http://127.0.0.1:3107/dashboard",
+      "httpStatus": 200,
+      "checks": [
+        "a[href=\"/accounts/new\"] visible",
+        "a[href=\"/workspace\"] visible"
+      ]
+    },
+    {
+      "name": "page-smoke-accounts",
+      "route": "/accounts",
+      "finalUrl": "http://127.0.0.1:3107/accounts",
+      "httpStatus": 200,
+      "checks": [
+        "created account name visible"
+      ]
+    },
+    {
+      "name": "page-smoke-account-detail",
+      "route": "/accounts/acct_4lJwzKhhJhsV",
+      "finalUrl": "http://127.0.0.1:3107/accounts/acct_4lJwzKhhJhsV",
+      "httpStatus": 200,
+      "checks": [
+        "[data-testid=\"account-detail-run-button\"] visible"
+      ]
+    },
+    {
+      "name": "page-smoke-account-workspace",
+      "route": "/accounts/acct_4lJwzKhhJhsV/workspace",
+      "finalUrl": "http://127.0.0.1:3107/accounts/acct_4lJwzKhhJhsV/workspace",
+      "httpStatus": 200,
+      "checks": [
+        "[data-testid=\"account-workspace-run-button\"]",
+        "[data-testid=\"task-row-task_itVuL_nIIZzd\"] visible",
+        "[data-testid=\"draft-row-14\"] visible"
+      ]
+    },
+    {
+      "name": "page-smoke-task-history",
+      "route": "/tasks/history",
+      "finalUrl": "http://127.0.0.1:3107/tasks/history",
+      "httpStatus": 200,
+      "checks": [
+        "task id task_itVuL_nIIZzd visible",
+        "a[href=\"/task/task_itVuL_nIIZzd\"] visible"
+      ]
+    },
+    {
+      "name": "page-smoke-task-detail",
+      "route": "/task/task_itVuL_nIIZzd",
+      "finalUrl": "http://127.0.0.1:3107/task/task_itVuL_nIIZzd",
+      "httpStatus": 200,
+      "checks": [
+        "[data-testid=\"task-status-badge\"]",
+        "[data-testid=\"task-generated-draft-region\"]",
+        "[data-testid=\"task-related-draft-link\"]"
+      ]
+    },
+    {
+      "name": "page-smoke-drafts-list",
+      "route": "/drafts",
+      "finalUrl": "http://127.0.0.1:3107/drafts",
+      "httpStatus": 200,
+      "checks": [
+        "[data-testid=\"draft-row-14\"] visible",
+        "[data-testid=\"draft-open-14\"] visible"
+      ]
+    },
+    {
+      "name": "page-smoke-draft-detail",
+      "route": "/drafts/14",
+      "finalUrl": "http://127.0.0.1:3107/drafts/14",
+      "httpStatus": 200,
+      "checks": [
+        "[data-testid=\"draft-status-badge\"]",
+        "[data-testid=\"publish-status-badge\"]",
+        "[data-testid=\"draft-confirm-button\"]"
+      ]
+    },
+    {
+      "name": "page-smoke-publish-logs",
+      "route": "/publish-logs",
+      "finalUrl": "http://127.0.0.1:3107/publish-logs",
+      "httpStatus": 200,
+      "checks": [
+        "a[href=\"/drafts/14\"] visible"
+      ]
+    },
+    {
+      "name": "page-smoke-publish-records-redirect",
+      "route": "/publish-records",
+      "finalUrl": "http://127.0.0.1:3107/publish-logs",
+      "httpStatus": 200,
+      "checks": [
+        "legacy route redirects to /publish-logs"
+      ]
+    },
+    {
+      "name": "page-smoke-settings",
+      "route": "/settings",
+      "finalUrl": "http://127.0.0.1:3107/settings",
+      "httpStatus": 200,
+      "checks": [
+        "a[href=\"/settings/wechat\"] visible",
+        "a[href=\"/settings/wechat/acct_4lJwzKhhJhsV\"] visible"
+      ]
+    }
+  ]
+}

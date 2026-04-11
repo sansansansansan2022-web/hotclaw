@@ -1,0 +1,128 @@
+{
+  "request": {
+    "method": "GET",
+    "url": "http://127.0.0.1:8147/api/v1/accounts/acct_fVK3C9aZZRZ-",
+    "json": null
+  },
+  "response": {
+    "status_code": 200,
+    "headers": {
+      "content-type": "application/json",
+      "x-trace-id": "tr__lG-5bsn32-O"
+    },
+    "body": {
+      "account_id": "acct_fVK3C9aZZRZ-",
+      "name": "Audit scheduler-fake-1775908222",
+      "category": null,
+      "positioning": "HotClaw audit positioning scheduler-fake-1775908222",
+      "audience": null,
+      "tone_style": null,
+      "posting_frequency": "daily",
+      "posting_time": "09:00",
+      "content_strategy": null,
+      "reference_accounts": null,
+      "operation_mode": "semi_auto",
+      "auto_run_enabled": true,
+      "auto_publish_enabled": false,
+      "is_active": true,
+      "publish_paused": false,
+      "max_posts_per_day": null,
+      "min_interval_minutes": null,
+      "last_run_at": "2026-04-11T11:51:23.154217",
+      "next_run_at": "2026-04-12T09:00:00",
+      "last_run_status": "success",
+      "last_error_message": null,
+      "last_publish_status": null,
+      "last_publish_error_message": null,
+      "last_published_at": null,
+      "reference_source_count": 0,
+      "reference_source_enabled_count": 0,
+      "reference_source_last_sync_status": null,
+      "automation_plan_summary": {
+        "id": 14,
+        "account_id": "acct_fVK3C9aZZRZ-",
+        "config_source": "plan",
+        "plan_type": "semi_auto",
+        "is_enabled": true,
+        "run_strategy": "scheduled",
+        "schedule_type": "daily",
+        "schedule_config": {
+          "time": "09:00"
+        },
+        "schedule_summary": "Daily at 09:00 (Asia/Shanghai)",
+        "auto_publish_enabled": false,
+        "publish_review_required": true,
+        "max_posts_per_day": null,
+        "min_interval_minutes": null,
+        "timezone": "Asia/Shanghai",
+        "next_run_at": "2026-04-12T09:00:00",
+        "last_run_at": "2026-04-11T11:51:23.154217",
+        "notes": null,
+        "latest_status": "success",
+        "is_active_plan": true,
+        "created_at": "2026-04-11T11:50:22",
+        "updated_at": "2026-04-11T11:51:23"
+      },
+      "latest_ops_context": {
+        "generated_at": "2026-04-11T11:51:23.081270+00:00",
+        "trigger": {
+          "source": "scheduler",
+          "requested_plan_type": "semi_auto"
+        },
+        "account_health": {
+          "status": "attention",
+          "issues": [
+            "Reference sources are still sparse."
+          ]
+        },
+        "operation_stage": "style_learning",
+        "run_strategy": {
+          "allow_run": true,
+          "requested_mode": "semi_auto",
+          "effective_mode": "semi_auto",
+          "allow_auto_publish": false,
+          "preferred_reference_source_ids": [],
+          "avoid_recent_topics": [],
+          "preferred_content_lane": "HotClaw audit positioning scheduler-fake-1775908222",
+          "degraded_from": null,
+          "degrade_reason": null
+        },
+        "ops_notes": [
+          "Reference sources are still sparse, so this run should stay conservative."
+        ],
+        "signals": {
+          "enabled_reference_source_count": 0,
+          "pending_review_count": 0,
+          "recent_failed_publish_count": 0,
+          "recent_success_publish_count": 0,
+          "recent_failed_task_count": 0,
+          "preferred_content_lane": "HotClaw audit positioning scheduler-fake-1775908222",
+          "recent_task_count": 0,
+          "recent_draft_count": 0,
+          "recent_publish_count": 0
+        },
+        "fallback_used": true,
+        "account_summary": {
+          "account_id": "acct_fVK3C9aZZRZ-",
+          "account_name": "Audit scheduler-fake-1775908222"
+        }
+      },
+      "latest_effective_mode": "semi_auto",
+      "latest_allow_auto_publish": false,
+      "latest_ops_degraded": false,
+      "created_at": "2026-04-11T11:50:22",
+      "updated_at": "2026-04-11T11:51:23",
+      "recent_tasks": [
+        {
+          "task_id": "task_GcQEyP4QPkU3",
+          "status": "completed",
+          "created_at": "2026-04-11T11:51:23",
+          "elapsed_seconds": 0.00595
+        }
+      ]
+    },
+    "body_text": "{\"account_id\":\"acct_fVK3C9aZZRZ-\",\"name\":\"Audit scheduler-fake-1775908222\",\"category\":null,\"positioning\":\"HotClaw audit positioning scheduler-fake-1775908222\",\"audience\":null,\"tone_style\":null,\"posting_frequency\":\"daily\",\"posting_time\":\"09:00\",\"content_strategy\":null,\"reference_accounts\":null,\"operation_mode\":\"semi_auto\",\"auto_run_enabled\":true,\"auto_publish_enabled\":false,\"is_active\":true,\"publish_paused\":false,\"max_posts_per_day\":null,\"min_interval_minutes\":null,\"last_run_at\":\"2026-04-11T11:51:23.154217\",\"next_run_at\":\"2026-04-12T09:00:00\",\"last_run_status\":\"success\",\"last_error_message\":null,\"last_publish_status\":null,\"last_publish_error_message\":null,\"last_published_at\":null,\"reference_source_count\":0,\"reference_source_enabled_count\":0,\"reference_source_last_sync_status\":null,\"automation_plan_summary\":{\"id\":14,\"account_id\":\"acct_fVK3C9aZZRZ-\",\"config_source\":\"plan\",\"plan_type\":\"semi_auto\",\"is_enabled\":true,\"run_strategy\":\"scheduled\",\"schedule_type\":\"daily\",\"schedule_config\":{\"time\":\"09:00\"},\"schedule_summary\":\"Daily at 09:00 (Asia/Shanghai)\",\"auto_publish_enabled\":false,\"publish_review_required\":true,\"max_posts_per_day\":null,\"min_interval_minutes\":null,\"timezone\":\"Asia/Shanghai\",\"next_run_at\":\"2026-04-12T09:00:00\",\"last_run_at\":\"2026-04-11T11:51:23.154217\",\"notes\":null,\"latest_status\":\"success\",\"is_active_plan\":true,\"created_at\":\"2026-04-11T11:50:22\",\"updated_at\":\"2026-04-11T11:51:23\"},\"latest_ops_context\":{\"generated_at\":\"2026-04-11T11:51:23.081270+00:00\",\"trigger\":{\"source\":\"scheduler\",\"requested_plan_type\":\"semi_auto\"},\"account_health\":{\"status\":\"attention\",\"issues\":[\"Reference sources are still sparse.\"]},\"operation_stage\":\"style_learning\",\"run_strategy\":{\"allow_run\":true,\"requested_mode\":\"semi_auto\",\"effective_mode\":\"semi_auto\",\"allow_auto_publish\":false,\"preferred_reference_source_ids\":[],\"avoid_recent_topics\":[],\"preferred_content_lane\":\"HotClaw audit positioning scheduler-fake-1775908222\",\"degraded_from\":null,\"degrade_reason\":null},\"ops_notes\":[\"Reference sources are still sparse, so this run should stay conservative.\"],\"signals\":{\"enabled_reference_source_count\":0,\"pending_review_count\":0,\"recent_failed_publish_count\":0,\"recent_success_publish_count\":0,\"recent_failed_task_count\":0,\"preferred_content_lane\":\"HotClaw audit positioning scheduler-fake-1775908222\",\"recent_task_count\":0,\"recent_draft_count\":0,\"recent_publish_count\":0},\"fallback_used\":true,\"account_summary\":{\"account_id\":\"acct_fVK3C9aZZRZ-\",\"account_name\":\"Audit scheduler-fake-1775908222\"}},\"latest_effective_mode\":\"semi_auto\",\"latest_allow_auto_publish\":false,\"latest_ops_degraded\":false,\"created_at\":\"2026-04-11T11:50:22\",\"updated_at\":\"2026-04-11T11:51:23\",\"recent_tasks\":[{\"task_id\":\"task_GcQEyP4QPkU3\",\"status\":\"completed\",\"created_at\":\"2026-04-11T11:51:23\",\"elapsed_seconds\":0.00595}]}"
+  },
+  "expected_status": 200,
+  "status_matches_expectation": true
+}

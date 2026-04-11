@@ -27,7 +27,12 @@ if _env_file.exists():
             if line and not line.startswith("#") and "=" in line:
                 key, _, value = line.partition("=")
                 # setdefault: 如果环境变量已存在则不覆盖
-                os.environ.setdefault(key.strip(), value.strip())
+                normalized_key = key.strip()
+                normalized_value = value.strip()
+                existing_value = os.environ.get(normalized_key)
+                os.environ[normalized_key] = (
+                    existing_value.strip() if existing_value is not None else normalized_value
+                )
 
 from pydantic_settings import BaseSettings
 from pydantic import Field

@@ -20,6 +20,7 @@ from app.models.tables import AccountModel, ReferenceSourceModel, TaskModel
 from app.services.automation_plan_service import automation_plan_service
 from app.services.account_harness_service import account_harness_service
 from app.services.article_assembler_service import article_assembler_service
+from app.services.reference_digest_service import reference_digest_service
 
 logger = get_logger(__name__)
 
@@ -580,9 +581,8 @@ class AccountService:
                 }
             )
 
-        reference_source_briefs = article_assembler_service.build_reference_source_context(
-            {"reference_sources": reference_sources},
-            {},
+        reference_digest = reference_digest_service.build_account_reference_digest(
+            reference_sources,
             limit=3,
         )
         return {
@@ -594,12 +594,13 @@ class AccountService:
             "content_strategy": account.content_strategy,
             "reference_accounts": account.reference_accounts,
             "reference_sources": reference_sources,
-            "reference_source_briefs": reference_source_briefs.get("sources", []),
+            "reference_source_briefs": reference_digest.get("source_digests", []),
+            "reference_digest": reference_digest,
             "reference_style_guide": {
-                "preferred_source_names": reference_source_briefs.get("preferred_source_names", []),
-                "style_takeaways": reference_source_briefs.get("style_takeaways", []),
-                "structure_takeaways": reference_source_briefs.get("structure_takeaways", []),
-                "usage_rules": reference_source_briefs.get("usage_rules", []),
+                "preferred_source_names": reference_digest.get("preferred_source_names", []),
+                "style_takeaways": reference_digest.get("style_takeaways", []),
+                "structure_takeaways": reference_digest.get("structure_takeaways", []),
+                "usage_rules": reference_digest.get("usage_rules", []),
             },
             "operation_mode": summary.get("plan_type", account.operation_mode),
             "automation_plan_summary": serializable_summary,

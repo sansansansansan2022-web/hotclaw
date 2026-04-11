@@ -10,6 +10,8 @@ import litellm
 from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
 from app.services.article_assembler_service import article_assembler_service
+from app.services.query_planner_service import query_planner_service
+from app.services.reference_digest_service import reference_digest_service
 
 
 class StyleReviewerAgent(BaseAgent):
@@ -31,6 +33,9 @@ class StyleReviewerAgent(BaseAgent):
             "ops_context": {"type": "object"},
             "outline_plan": {"type": "object"},
             "section_drafts": {"type": "object"},
+            "query_plan": {"type": "object"},
+            "reference_digest": {"type": "object"},
+            "source_candidates": {"type": "array"},
         },
         "required": ["assembled_article"],
     }
@@ -42,24 +47,8 @@ class StyleReviewerAgent(BaseAgent):
             "passed": {"type": "boolean"},
             "score": {"type": "number"},
             "summary": {"type": "string"},
-            "issues": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "code": {"type": "string"},
-                        "severity": {"type": "string"},
-                        "message": {"type": "string"},
-                        "section_id": {"type": "string"},
-                        "suggestion": {"type": "string"},
-                        "evidence_excerpt": {"type": "string"},
-                    },
-                },
-            },
-            "rewrite_suggestions": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
+            "issues": {"type": "array"},
+            "rewrite_suggestions": {"type": "array", "items": {"type": "string"}},
         },
     }
 
@@ -98,8 +87,7 @@ Flag only actionable problems and ground them in specific sections whenever poss
                 custom_llm_provider="dashscope",
             )
             content = response.choices[0].message.content
-            data = self._parse_json(content)
-            return self._success(self._normalize_review(data))
+            return self._success(self._normalize_review(self._parse_json(content)))
         except json.JSONDecodeError as exc:
             return self._failure("JSON_PARSE_ERROR", f"Failed to parse style review JSON: {exc}")
         except Exception as exc:
@@ -108,9 +96,9 @@ Flag only actionable problems and ground them in specific sections whenever poss
     def _build_user_prompt(self, input_data: dict[str, Any]) -> str:
         account_context = input_data.get("account_context") or {}
         profile = input_data.get("profile") or {}
-        ops_context = input_data.get("ops_context") or {}
         outline_plan = input_data.get("outline_plan") or {}
         section_drafts = input_data.get("section_drafts") or {}
+        source_candidates = input_data.get("source_candidates") or []
         article = article_assembler_service.extract_article_payload(
             {
                 "assembled_article": input_data.get("assembled_article"),
@@ -119,10 +107,8 @@ Flag only actionable problems and ground them in specific sections whenever poss
                 "topics": input_data.get("topics"),
             }
         )
-        reference_context = article_assembler_service.build_reference_source_context(
-            account_context,
-            ops_context,
-        )
+        query_plan = self._resolve_query_plan(input_data)
+        reference_digest = self._resolve_reference_digest(input_data, query_plan)
         outline_summary = article_assembler_service.summarize_outline_plan(outline_plan)
         section_summary = article_assembler_service.summarize_section_drafts(section_drafts)
         account_snapshot = {
@@ -131,13 +117,15 @@ Flag only actionable problems and ground them in specific sections whenever poss
             "audience": account_context.get("audience") or profile.get("target_audience") or "",
             "tone_style": account_context.get("tone_style") or profile.get("tone") or "",
             "content_strategy": account_context.get("content_strategy") or "",
-            "preferred_content_lane": (ops_context.get("run_strategy") or {}).get("preferred_content_lane") or "",
+            "preferred_content_lane": (query_plan.get("lane") or {}).get("label") or "",
         }
         review_job = {
             "allowed_issue_codes": [
                 "style_drift",
+                "account_voice_missed",
                 "reference_style_missed",
-                "templated_tone",
+                "ai_tone_heavy",
+                "templated_transition",
                 "repetitive_expression",
                 "generic_opening",
                 "weak_closing",
@@ -161,12 +149,19 @@ Flag only actionable problems and ground them in specific sections whenever poss
                 "- Judge whether the draft sounds like this account and whether preferred references actually influenced the writing.",
                 "- Catch AI-ish wording, templated transitions, repeated expressions, and lines that feel too generic for a real public-account writer.",
                 "- If the opening or closing feels generic, flag it directly instead of hiding it under a broad summary.",
+                "- Use source candidates and reference digest as the comparison target for style similarity, not as a fact-check source.",
                 "",
                 "ACCOUNT SNAPSHOT",
                 article_assembler_service.to_pretty_json(account_snapshot),
                 "",
+                "QUERY PLAN",
+                article_assembler_service.to_pretty_json(query_plan),
+                "",
                 "REFERENCE STYLE BRIEF",
-                article_assembler_service.to_pretty_json(reference_context),
+                article_assembler_service.to_pretty_json(reference_digest),
+                "",
+                "SOURCE CANDIDATES",
+                article_assembler_service.to_pretty_json(source_candidates[:5] if isinstance(source_candidates, list) else []),
                 "",
                 "OUTLINE SUMMARY",
                 article_assembler_service.to_pretty_json(outline_summary),
@@ -189,6 +184,39 @@ Flag only actionable problems and ground them in specific sections whenever poss
                 "",
                 "Return JSON with reviewer, passed, score, summary, issues, rewrite_suggestions.",
             ]
+        )
+
+    def _resolve_query_plan(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        query_plan = input_data.get("query_plan")
+        if isinstance(query_plan, dict):
+            return query_plan
+        return query_planner_service.build_plan(
+            profile=input_data.get("profile") or {},
+            account_context=input_data.get("account_context") or {},
+            ops_context=input_data.get("ops_context") or {},
+            selected_topic=article_assembler_service.extract_selected_topic(
+                input_data.get("topics"), input_data.get("titles")
+            ),
+            selected_title=article_assembler_service.extract_selected_title(input_data.get("titles")),
+        )
+
+    def _resolve_reference_digest(
+        self,
+        input_data: dict[str, Any],
+        query_plan: dict[str, Any],
+    ) -> dict[str, Any]:
+        reference_digest = input_data.get("reference_digest")
+        if isinstance(reference_digest, dict):
+            return reference_digest
+        return reference_digest_service.build_reference_digest(
+            account_context=input_data.get("account_context") or {},
+            ops_context=input_data.get("ops_context") or {},
+            query_plan=query_plan,
+            source_candidates=input_data.get("source_candidates") or [],
+            selected_topic=article_assembler_service.extract_selected_topic(
+                input_data.get("topics"), input_data.get("titles")
+            ),
+            selected_title=article_assembler_service.extract_selected_title(input_data.get("titles")),
         )
 
     def _parse_json(self, content: str) -> dict[str, Any]:
@@ -270,8 +298,10 @@ Flag only actionable problems and ground them in specific sections whenever poss
         text = str(value or "").strip().lower()
         allowed_codes = {
             "style_drift",
+            "account_voice_missed",
             "reference_style_missed",
-            "templated_tone",
+            "ai_tone_heavy",
+            "templated_transition",
             "repetitive_expression",
             "generic_opening",
             "weak_closing",
