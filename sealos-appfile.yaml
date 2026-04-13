@@ -1,0 +1,35 @@
+# Sealos DevBox Appfile for HotClaw
+# https://www.sealos.io/docs/io-manifest/appfile
+
+---
+apiVersion: apps.sealos.io/v1
+kind: App
+metadata:
+  name: hotclaw
+  labels:
+    app: hotclaw
+    tier: frontend
+spec:
+  # Main service (Frontend with backend embedded)
+  cmd: ["bash", "scripts/start-devbox.sh"]
+  ports:
+    - port: 3000
+      protocol: TCP
+      public: true
+  env:
+    - name: HOTCLAW_FRONTEND_MODE
+      value: auto
+    - name: HOTCLAW_ENABLE_SCHEDULER
+      value: "0"
+    - name: HOTCLAW_BACKEND_PORT
+      value: "8000"
+    - name: HOTCLAW_FRONTEND_PORT
+      value: "3000"
+    - name: HOTCLAW_API_ORIGIN
+      value: http://127.0.0.1:8000
+  resources:
+    cpu: 4
+    memory: 8Gi
+  selectors:
+    matchLabels:
+      app: hotclaw
