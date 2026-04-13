@@ -9,6 +9,10 @@ const apiOrigin = (
 ).replace(/\/$/, "");
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: process.cwd(),
+  },
+  outputFileTracingRoot: process.cwd(),
   async rewrites() {
     if (!apiOrigin) {
       return [];

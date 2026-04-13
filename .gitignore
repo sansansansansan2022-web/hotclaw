@@ -40,6 +40,7 @@ out/
 # Logs
 *.log
 logs/
+output/
 
 # Test
 .coverage
@@ -51,5 +52,6 @@ htmlcov/
 
 # Temp files
 nul
+tmp/
 files\ \(1\).zip
 files\ \(1\)/

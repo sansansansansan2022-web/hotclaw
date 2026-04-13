@@ -283,6 +283,17 @@ class WeChatPublishService:
             raise PublishRecordError(f"Publish record {publish_record_id} not found")
 
         previous_status = record.publish_status
+        simulation_meta = publish_record_service.get_simulation_metadata(record)
+        if simulation_meta.get("simulated"):
+            synced = await publish_record_service.sync_draft_status(record.draft_id, db)
+            return {
+                "record_id": record.id,
+                "previous_status": previous_status,
+                "new_status": previous_status,
+                "synced_draft": bool(synced.get("synced")),
+                "message": "Simulated publish record is already in sync",
+            }
+
         if not record.publish_id:
             if raise_on_missing_publish_id:
                 raise WeChatPublishError(f"Publish record {publish_record_id} has no publish_id")

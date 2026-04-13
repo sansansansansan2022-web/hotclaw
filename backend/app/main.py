@@ -62,6 +62,13 @@ from app.agents.registry import agent_registry
 logger = get_logger(__name__)
 
 
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _register_agents() -> None:
     """
     Register all agents into the registry.
@@ -129,14 +136,22 @@ async def lifespan(app: FastAPI):
         raise
     logger.info("system_configs_initialized")
 
-    # Start Account Scheduler
-    from app.scheduler.account_scheduler import account_scheduler
-    await account_scheduler.start()
+    scheduler_enabled = _env_flag("HOTCLAW_ENABLE_SCHEDULER", True)
+    account_scheduler = None
+    if scheduler_enabled:
+        from app.scheduler.account_scheduler import account_scheduler as scheduler
+
+        account_scheduler = scheduler
+        await account_scheduler.start()
+        logger.info("account_scheduler_enabled")
+    else:
+        logger.info("account_scheduler_disabled")
 
     logger.info("app_started", env=settings.app_env, debug=settings.app_debug)
     yield
     # ===== SHUTDOWN =====
-    await account_scheduler.stop()
+    if account_scheduler is not None:
+        await account_scheduler.stop()
     logger.info("app_shutdown")
 
 

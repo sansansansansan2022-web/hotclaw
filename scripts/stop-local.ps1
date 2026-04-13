@@ -21,7 +21,13 @@ function Write-Info([string]$Message) {
 function Stop-ProcessTree([int]$ProcessId, [string]$Label) {
     if ($ProcessId -le 0) { return }
     $null = taskkill /PID $ProcessId /F /T 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    $processStillRunning = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    if ($processStillRunning) {
+        Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
+        $processStillRunning = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
+    }
+
+    if (-not $processStillRunning) {
         Write-Info "Stopped $Label (PID $ProcessId)"
     }
 }
