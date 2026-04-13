@@ -9,12 +9,18 @@ from app.skills.registry import skill_registry
 
 # 注册所有 Skill
 from app.skills.hot_topic_fetch_skill import HotTopicFetchSkill
+from app.skills.external.github_project_curator_skill import GitHubProjectCuratorSkill
+from app.skills.external.scholar_paper_search_skill import ScholarPaperSearchSkill
 
 skill_registry.register(HotTopicFetchSkill())
+skill_registry.register(GitHubProjectCuratorSkill())
+skill_registry.register(ScholarPaperSearchSkill())
 
 __all__ = [
     "BaseSkill",
     "SkillResult",
     "skill_registry",
     "HotTopicFetchSkill",
+    "GitHubProjectCuratorSkill",
+    "ScholarPaperSearchSkill",
 ]

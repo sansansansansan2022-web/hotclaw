@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { TaskHistoryPage } from "@/components/console/task-history";
 
-export default function LegacyHistoryRoute() {
-  redirect("/tasks/history");
+export default function HistoryRoute() {
+  return <TaskHistoryPage />;
 }

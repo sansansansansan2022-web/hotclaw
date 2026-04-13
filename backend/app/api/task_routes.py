@@ -30,6 +30,8 @@ from app.schemas.task import TaskCreateRequest
 from app.orchestrator.engine import orchestrator_engine
 from app.services.task_service import task_service
 from app.services.account_harness_service import account_harness_service
+from app.skills.services.evidence_service import evidence_service
+from app.skills.services.skill_runtime_service import skill_runtime_service
 from app.core.tracer import get_trace_id, generate_trace_id, set_trace_id, set_task_id
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
@@ -269,6 +271,32 @@ async def get_task_nodes(task_id: str, db: AsyncSession = Depends(get_db)) -> Ap
         })
 
     return ApiResponse(data={"nodes": nodes_data})
+
+
+@router.get("/{task_id}/evidence")
+async def get_task_evidence(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
+    await task_service.get_task(task_id, db)
+    rows = await evidence_service.list_task_evidence(db, task_id)
+    return ApiResponse(
+        data={
+            "task_id": task_id,
+            "evidence": evidence_service.serialize_rows(rows),
+            "count": len(rows),
+        }
+    )
+
+
+@router.get("/{task_id}/skill-invocations")
+async def get_task_skill_invocations(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
+    await task_service.get_task(task_id, db)
+    rows = await skill_runtime_service.list_task_invocations(db, task_id)
+    return ApiResponse(
+        data={
+            "task_id": task_id,
+            "invocations": skill_runtime_service.serialize_invocations(rows),
+            "count": len(rows),
+        }
+    )
 
 
 @router.get("")

@@ -1,195 +1,373 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
-import { listAgents, getAgent, updateAgentConfig } from "@/lib/api";
-import type { AgentInfo } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { AppShell } from "@/components/console/layout";
+import { Icon } from "@/components/console/icons";
+import {
+  Badge,
+  Button,
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  SkeletonRows,
+  StatCard,
+  Textarea,
+} from "@/components/console/ui";
+import { cn } from "@/lib/utils";
+import { ApiError, deleteAgentConfig, getAgent, listAgents, updateAgentConfig, type AgentInfo } from "@/lib/api";
+
+type NoticeTone = "success" | "danger" | "info";
+
+interface NoticeState {
+  tone: NoticeTone;
+  message: string;
+}
+
+function NoticeBanner({ notice }: { notice: NoticeState | null }) {
+  if (!notice) return null;
+
+  const className =
+    notice.tone === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : notice.tone === "danger"
+        ? "border-rose-200 bg-rose-50 text-rose-700"
+        : "border-sky-200 bg-sky-50 text-sky-700";
+
+  return <div className={cn("rounded-2xl border px-4 py-3 text-sm", className)}>{notice.message}</div>;
+}
 
 export default function AgentsPage() {
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<AgentInfo | null>(null);
-  const [editing, setEditing] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const data = await listAgents();
-        setAgents(data.agents);
-      } catch {
-        // ignore
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
+  const customCount = agents.filter((agent) => agent.has_custom_prompt).length;
 
-  async function handleSelect(agentId: string) {
+  async function loadAgentDetail(agentId: string) {
+    setLoadingDetail(true);
     try {
       const detail = await getAgent(agentId);
       setSelected(detail);
-      setPromptDraft(detail.prompt_template || "");
+      setPromptDraft(detail.prompt_template || detail.default_system_prompt || "");
       setEditing(false);
-      setMessage("");
-    } catch {
-      // ignore
+      setError(null);
+    } catch (detailError) {
+      setError(detailError instanceof Error ? detailError.message : "Unable to load agent detail.");
+    } finally {
+      setLoadingDetail(false);
     }
   }
 
+  async function loadAgents(preferredAgentId?: string) {
+    setLoading(true);
+    try {
+      const response = await listAgents();
+      setAgents(response.agents);
+
+      const nextAgentId = preferredAgentId || selected?.agent_id || response.agents[0]?.agent_id || null;
+
+      if (nextAgentId) {
+        await loadAgentDetail(nextAgentId);
+      } else {
+        setSelected(null);
+        setPromptDraft("");
+      }
+
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load agents.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadAgents();
+  }, []);
+
   async function handleSave() {
     if (!selected) return;
+
+    const baselinePrompt = selected.prompt_template || selected.default_system_prompt || "";
+    if (promptDraft === baselinePrompt) {
+      setEditing(false);
+      return;
+    }
+
     setSaving(true);
-    setMessage("");
     try {
       await updateAgentConfig(selected.agent_id, { prompt_template: promptDraft });
-      setMessage("保存成功");
-      setEditing(false);
-    } catch {
-      setMessage("保存失败");
+      await loadAgents(selected.agent_id);
+      setNotice({ tone: "success", message: `Saved prompt changes for ${selected.name}.` });
+    } catch (saveError) {
+      const message = saveError instanceof ApiError ? saveError.message : "Unable to save agent configuration.";
+      setNotice({ tone: "danger", message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleResetToDefault() {
+    if (!selected) return;
+
+    setSaving(true);
+    try {
+      await updateAgentConfig(selected.agent_id, { prompt_template: "" });
+      await loadAgents(selected.agent_id);
+      setNotice({ tone: "success", message: `${selected.name} is now using the default prompt again.` });
+    } catch (resetError) {
+      const message = resetError instanceof ApiError ? resetError.message : "Unable to reset this agent.";
+      setNotice({ tone: "danger", message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteCustomConfig() {
+    if (!selected) return;
+
+    setSaving(true);
+    try {
+      await deleteAgentConfig(selected.agent_id);
+      setDeleteOpen(false);
+      await loadAgents(selected.agent_id);
+      setNotice({ tone: "success", message: `Removed the custom configuration for ${selected.name}.` });
+    } catch (deleteError) {
+      const message = deleteError instanceof ApiError ? deleteError.message : "Unable to delete this custom configuration.";
+      setNotice({ tone: "danger", message });
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
-      <header className="bg-slate-800/80 backdrop-blur-sm border-b border-slate-700 px-6 py-4 sticky top-0 z-20">
-        <div className="max-w-[900px] mx-auto flex items-center gap-4">
-          <Link href="/settings" className="text-cyan-400 hover:text-cyan-300 text-sm">
-            &larr; 设置中心
-          </Link>
-          <span className="text-slate-500">/</span>
-          <span className="text-white font-medium text-sm">智能体配置</span>
-        </div>
-      </header>
+    <AppShell>
+      <div className="space-y-8">
+        <PageHeader
+          eyebrow="Agent Runtime"
+          title="Agents"
+          description="Inspect registered agents, review their effective prompts, and customize the prompt layer without leaving the main console."
+          actions={
+            <Button variant="secondary" onClick={() => void loadAgents(selected?.agent_id)}>
+              <Icon name="refresh" className="h-4 w-4" />
+              Refresh
+            </Button>
+          }
+        />
 
-      <main className="max-w-[900px] mx-auto p-6 flex gap-6">
-        {/* Agent list */}
-        <div className="w-[260px] shrink-0">
-          <div className="text-xs text-cyan-400/80 mb-2 border-b border-slate-700/50 pb-1">
-            已注册智能体
-          </div>
-          {loading ? (
-            <div className="text-xs text-slate-500 py-4 flex items-center gap-2">
-              <div className="w-4 h-4 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
-              加载中...
+        {loading ? (
+          <SkeletonRows rows={5} />
+        ) : error ? (
+          <ErrorState title="Agents failed to load" description={error} retry={() => void loadAgents(selected?.agent_id)} />
+        ) : (
+          <>
+            <div className="grid gap-5 md:grid-cols-3">
+              <StatCard
+                label="Registered Agents"
+                value={String(agents.length)}
+                hint="All runtime agents discovered from the backend registry."
+                tone="info"
+                icon={<Icon name="workspace" className="h-6 w-6" />}
+              />
+              <StatCard
+                label="Customized Prompts"
+                value={String(customCount)}
+                hint="Agents currently using a stored custom prompt."
+                tone="warning"
+                icon={<Icon name="edit" className="h-6 w-6" />}
+              />
+              <StatCard
+                label="Default Prompts"
+                value={String(Math.max(agents.length - customCount, 0))}
+                hint="Agents still inheriting the default system prompt."
+                tone="success"
+                icon={<Icon name="check" className="h-6 w-6" />}
+              />
             </div>
-          ) : agents.length === 0 ? (
-            <div className="text-xs text-slate-500 py-4">暂无智能体</div>
-          ) : (
-            <div className="space-y-1">
-              {agents.map((a) => (
-                <button
-                  key={a.agent_id}
-                  onClick={() => handleSelect(a.agent_id)}
-                  className={`w-full text-left px-3 py-2.5 rounded-lg text-xs transition-colors border ${
-                    selected?.agent_id === a.agent_id
-                      ? "bg-cyan-900/30 border-cyan-500/50 text-cyan-300"
-                      : "bg-slate-800/30 border-slate-700/50 text-slate-300 hover:border-slate-600"
-                  }`}
-                >
-                  <div className="font-bold">{a.name}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">{a.agent_id}</div>
-                  <div className="text-[10px] text-slate-500 truncate">{a.description}</div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
 
-        {/* Detail */}
-        <div className="flex-1 min-w-0">
-          {!selected ? (
-            <div className="text-sm text-slate-500 py-12 text-center">
-              选择左侧智能体查看详情
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-base text-white font-medium">{selected.name}</span>
-                  <span className={`text-xs px-2 py-0.5 rounded border ${
-                    selected.status === "active"
-                      ? "text-green-400 border-green-600/40 bg-green-900/20"
-                      : "text-slate-400 border-slate-600/40 bg-slate-800"
-                  }`}>
-                    {selected.status}
-                  </span>
-                </div>
-                <div className="text-sm text-slate-400">{selected.description}</div>
-                <div className="flex gap-4 mt-3 text-xs text-slate-500">
-                  <span>ID: {selected.agent_id}</span>
-                  <span>版本: {selected.version}</span>
-                </div>
-              </div>
-
-              {/* Prompt template editor */}
-              <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs text-cyan-400/80 font-medium">Prompt 模板</span>
-                  {!editing ? (
-                    <button
-                      onClick={() => setEditing(true)}
-                      className="text-xs text-slate-400 hover:text-white border border-slate-600 px-3 py-1 rounded-lg transition-colors"
-                    >
-                      编辑
-                    </button>
-                  ) : (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleSave}
-                        disabled={saving}
-                        className="text-xs text-cyan-400 hover:text-cyan-300 border border-cyan-600/50 px-3 py-1 rounded-lg disabled:opacity-50 transition-colors"
-                      >
-                        {saving ? "保存中..." : "保存"}
-                      </button>
-                      <button
-                        onClick={() => { setEditing(false); setPromptDraft(selected.prompt_template || ""); }}
-                        className="text-xs text-slate-400 hover:text-white border border-slate-600 px-3 py-1 rounded-lg transition-colors"
-                      >
-                        取消
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {editing ? (
-                  <textarea
-                    value={promptDraft}
-                    onChange={(e) => setPromptDraft(e.target.value)}
-                    rows={10}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs text-slate-300
-                               focus:outline-none focus:border-cyan-500 resize-y font-mono"
-                    placeholder="在此输入智能体的 prompt 模板..."
-                  />
-                ) : (
-                  <pre className="text-xs text-slate-400 bg-slate-900/60 p-3 rounded-lg min-h-[80px] whitespace-pre-wrap font-mono">
-                    {selected.prompt_template || "(未配置)"}
-                  </pre>
-                )}
-                {message && (
-                  <div className={`mt-2 text-xs ${message.includes("成功") ? "text-green-400" : "text-red-400"}`}>
-                    {message}
+            <div className="grid gap-6 xl:grid-cols-[0.95fr_1.25fr]">
+              <Card title="Registered Agents" description="Pick an agent to inspect its prompt and runtime metadata.">
+                {agents.length ? (
+                  <div className="space-y-3">
+                    {agents.map((agent) => {
+                      const active = selected?.agent_id === agent.agent_id;
+                      return (
+                        <button
+                          key={agent.agent_id}
+                          type="button"
+                          onClick={() => void loadAgentDetail(agent.agent_id)}
+                          className={cn(
+                            "w-full rounded-2xl border p-4 text-left transition",
+                            active
+                              ? "border-brand-200 bg-brand-50"
+                              : "border-slate-200 bg-white hover:border-brand-200 hover:bg-brand-50/50",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-900">{agent.name}</p>
+                              <p className="mt-1 truncate text-xs text-slate-500">{agent.agent_id}</p>
+                            </div>
+                            <Badge tone={agent.has_custom_prompt ? "warning" : "muted"}>
+                              {agent.has_custom_prompt ? "Custom" : "Default"}
+                            </Badge>
+                          </div>
+                          <p className="mt-3 text-sm leading-6 text-slate-500">{agent.description}</p>
+                        </button>
+                      );
+                    })}
                   </div>
+                ) : (
+                  <EmptyState
+                    title="No agents found"
+                    description="The backend did not return any agent registrations yet."
+                  />
+                )}
+              </Card>
+
+              <div className="space-y-6">
+                <NoticeBanner notice={notice} />
+
+                {loadingDetail ? (
+                  <SkeletonRows rows={3} />
+                ) : selected ? (
+                  <>
+                    <Card
+                      title="Agent Overview"
+                      description="The selected agent's effective runtime prompt and current configuration state."
+                      action={
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge tone={selected.has_custom_prompt ? "warning" : "success"}>
+                            {selected.has_custom_prompt ? "Custom Prompt" : "Default Prompt"}
+                          </Badge>
+                          <Badge tone="muted">{selected.status}</Badge>
+                        </div>
+                      }
+                    >
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Name</p>
+                          <p className="mt-2 text-sm font-semibold text-slate-900">{selected.name}</p>
+                          <p className="mt-1 text-sm text-slate-500">{selected.description}</p>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Agent ID</p>
+                          <p className="mt-2 text-sm font-semibold text-slate-900">{selected.agent_id}</p>
+                          <p className="mt-1 text-sm text-slate-500">Version {selected.version}</p>
+                        </div>
+                      </div>
+                    </Card>
+
+                    <Card
+                      title="Prompt Configuration"
+                      description="Edit the effective prompt text used by this agent. Saving creates or updates the stored custom prompt."
+                      action={
+                        <div className="flex flex-wrap gap-2">
+                          {editing ? (
+                            <>
+                              <Button
+                                variant="secondary"
+                                onClick={() => {
+                                  setEditing(false);
+                                  setPromptDraft(selected.prompt_template || selected.default_system_prompt || "");
+                                }}
+                              >
+                                Cancel
+                              </Button>
+                              <Button onClick={() => void handleSave()} disabled={saving}>
+                                {saving ? "Saving..." : "Save Prompt"}
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              {selected.has_custom_prompt ? (
+                                <Button variant="secondary" onClick={() => void handleResetToDefault()} disabled={saving}>
+                                  Reset to Default
+                                </Button>
+                              ) : null}
+                              <Button variant="secondary" onClick={() => setEditing(true)}>
+                                <Icon name="edit" className="h-4 w-4" />
+                                Edit Prompt
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      }
+                    >
+                      {editing ? (
+                        <Textarea
+                          value={promptDraft}
+                          onChange={(event) => setPromptDraft(event.target.value)}
+                          className="min-h-[320px] font-mono"
+                          placeholder="Enter the prompt text used by this agent."
+                        />
+                      ) : (
+                        <pre className="overflow-auto rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm leading-6 text-slate-700">
+                          {promptDraft || "No prompt is available for this agent."}
+                        </pre>
+                      )}
+                    </Card>
+
+                    <div className="grid gap-6 md:grid-cols-2">
+                      <Card title="Model Configuration" description="Structured model configuration persisted for this agent, if any.">
+                        <pre className="overflow-auto rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-xs leading-6 text-slate-700">
+                          {selected.model_config_data
+                            ? JSON.stringify(selected.model_config_data, null, 2)
+                            : "Using the global default model configuration."}
+                        </pre>
+                      </Card>
+
+                      <Card
+                        title="Retry Configuration"
+                        description="Retry settings applied specifically to this agent when the backend stores them."
+                        action={
+                          selected.has_custom_prompt ? (
+                            <Button variant="destructive" onClick={() => setDeleteOpen(true)} disabled={saving}>
+                              Delete Custom Config
+                            </Button>
+                          ) : null
+                        }
+                      >
+                        <pre className="overflow-auto rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-xs leading-6 text-slate-700">
+                          {selected.retry_config
+                            ? JSON.stringify(selected.retry_config, null, 2)
+                            : "No retry override is stored for this agent."}
+                        </pre>
+                      </Card>
+                    </div>
+                  </>
+                ) : (
+                  <Card title="Agent Detail" description="Choose an agent from the list to inspect or customize it.">
+                    <EmptyState
+                      title="Select an agent"
+                      description="Pick any registered agent on the left to review its effective prompt and configuration details."
+                    />
+                  </Card>
                 )}
               </div>
-
-              {/* Model config */}
-              <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
-                <span className="text-xs text-cyan-400/80 font-medium block mb-3">模型配置</span>
-                <pre className="text-xs text-slate-400 bg-slate-900/60 p-3 rounded-lg font-mono">
-                  {selected.model_config_data
-                    ? JSON.stringify(selected.model_config_data, null, 2)
-                    : "(使用默认配置)"}
-                </pre>
-              </div>
             </div>
-          )}
-        </div>
-      </main>
-    </div>
+          </>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Delete Custom Agent Configuration"
+        description={`This removes the stored custom configuration for ${selected?.name ?? "the selected agent"} and reverts it to the default prompt.`}
+        confirmLabel="Delete Custom Config"
+        tone="danger"
+        onConfirm={() => void handleDeleteCustomConfig()}
+        onCancel={() => setDeleteOpen(false)}
+      />
+    </AppShell>
   );
 }

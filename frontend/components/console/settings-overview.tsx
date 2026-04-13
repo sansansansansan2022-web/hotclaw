@@ -119,33 +119,42 @@ export function SettingsPage() {
           <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
             <Card title="Providers, Agents & Skills" description="Configuration inventory that already exists in the backend.">
               <div className="space-y-4">
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">LLM Providers</p>
-                      <p className="mt-1 text-sm text-slate-500">The backend supports provider records and default provider switching.</p>
-                    </div>
+                <Link href="/settings/llm-providers" className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 p-4 transition hover:border-brand-200 hover:bg-brand-50/60">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">LLM Providers</p>
+                    <p className="mt-1 text-sm text-slate-500">The backend supports provider records and default provider switching.</p>
+                  </div>
+                  <div className="flex items-center gap-3">
                     <Badge tone={providers.length ? "success" : "muted"}>{formatNumber(providers.length)}</Badge>
+                    <Button variant="secondary" size="sm">{t("settings.configure")}</Button>
                   </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">Agents</p>
-                      <p className="mt-1 text-sm text-slate-500">These are the registered nodes in the six-agent workflow.</p>
+                </Link>
+                <Link href="/settings/agents" className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 p-4 transition hover:border-brand-200 hover:bg-brand-50/60">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Agents</p>
+                    <p className="mt-1 text-sm text-slate-500">These are the registered nodes in the six-agent workflow.</p>
+                    <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-700">
+                      <Icon name="arrowUpRight" className="h-3.5 w-3.5" />
+                      Open Agent Configuration
                     </div>
+                  </div>
+                  <div className="flex items-center gap-3">
                     <Badge tone={agents.length ? "success" : "muted"}>{formatNumber(agents.length)}</Badge>
+                    <span className="inline-flex items-center rounded-xl border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700">
+                      {t("settings.configure")}
+                    </span>
                   </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">Skills</p>
-                      <p className="mt-1 text-sm text-slate-500">Skill configuration is available, but the UI is consolidated into the main settings view for now.</p>
-                    </div>
+                </Link>
+                <Link href="/settings/skills" className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 p-4 transition hover:border-brand-200 hover:bg-brand-50/60">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Skills</p>
+                    <p className="mt-1 text-sm text-slate-500">Skill configuration is available, but the UI is consolidated into the main settings view for now.</p>
+                  </div>
+                  <div className="flex items-center gap-3">
                     <Badge tone={skills.length ? "success" : "muted"}>{formatNumber(skills.length)}</Badge>
+                    <Button variant="secondary" size="sm">{t("settings.configure")}</Button>
                   </div>
-                </div>
+                </Link>
               </div>
             </Card>
 

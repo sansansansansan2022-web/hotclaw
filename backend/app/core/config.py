@@ -143,6 +143,33 @@ class Settings(BaseSettings):
     # llm_timeout: LLM API 调用超时
     llm_timeout: int = Field(default=60, description="LLM API 调用超时（秒）")
 
+    enable_github_skill: bool = Field(default=False, description="Enable GitHub research skill")
+    enable_scholar_skill: bool = Field(default=False, description="Enable scholar research skill")
+    skill_cache_ttl_seconds: int = Field(default=21600, description="Skill cache TTL in seconds")
+
+    github_token: str = Field(default="", description="GitHub API token")
+    github_api_mode: str = Field(default="rest", description="GitHub API mode")
+    github_api_base_url: str = Field(default="https://api.github.com", description="GitHub API base URL")
+    github_skill_timeout_seconds: int = Field(default=20, description="GitHub skill timeout in seconds")
+
+    scholar_provider: str = Field(default="", description="Scholar provider strategy")
+    scholar_provider_api_key: str = Field(default="", description="Scholar provider API key")
+    scholar_skill_timeout_seconds: int = Field(default=20, description="Scholar skill timeout in seconds")
+
+    openalex_base_url: str = Field(default="https://api.openalex.org", description="OpenAlex API base URL")
+    openalex_api_key: str = Field(default="", description="OpenAlex API key")
+    openalex_mailto: str = Field(default="", description="OpenAlex polite pool email")
+
+    crossref_base_url: str = Field(default="https://api.crossref.org", description="Crossref API base URL")
+    crossref_api_key: str = Field(default="", description="Crossref API key")
+    crossref_mailto: str = Field(default="", description="Crossref polite pool email")
+
+    semantic_scholar_base_url: str = Field(
+        default="https://api.semanticscholar.org",
+        description="Semantic Scholar API base URL",
+    )
+    semantic_scholar_api_key: str = Field(default="", description="Semantic Scholar API key")
+
     model_config = {
         # 环境变量不区分大小写（LLM_API_KEY = llm_api_key）
         "case_sensitive": False,

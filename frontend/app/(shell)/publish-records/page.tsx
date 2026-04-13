@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { PublishLogsPage } from "@/components/console/publish-logs";
 
-export default function LegacyPublishRecordsRoute() {
-  redirect("/publish-logs");
+export default function PublishRecordsRoute() {
+  return <PublishLogsPage />;
 }

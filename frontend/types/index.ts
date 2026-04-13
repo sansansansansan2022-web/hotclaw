@@ -947,6 +947,31 @@ export interface AgentInfo {
   retry_config?: Record<string, unknown> | null;
 }
 
+export interface AgentCreateRequest {
+  agent_id: string;
+  name?: string;
+  description?: string;
+  prompt_template?: string;
+  model_config_data?: Record<string, unknown>;
+  retry_config?: Record<string, unknown>;
+}
+
+export interface AgentCreateResponse {
+  agent_id: string;
+  name: string;
+  description: string | null;
+  prompt_template: string | null;
+  model_config_data: Record<string, unknown> | null;
+  retry_config: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+export interface AgentUpdateRequest {
+  model_config_data?: Record<string, unknown>;
+  prompt_template?: string;
+  retry_config?: Record<string, unknown>;
+}
+
 export interface SkillInfo {
   skill_id: string;
   name: string;

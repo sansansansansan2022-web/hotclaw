@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { WorkspacePage } from "@/components/console/workspace";
 
-export default function LegacyNewsroomRoute() {
-  redirect("/workspace");
+export default function NewsroomRoute() {
+  return <WorkspacePage />;
 }

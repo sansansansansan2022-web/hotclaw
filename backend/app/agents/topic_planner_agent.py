@@ -30,6 +30,9 @@ class TopicPlannerAgent(BaseAgent):
             "query_plan": {"type": "object"},
             "reference_digest": {"type": "object"},
             "source_candidates": {"type": "array"},
+            "selected_evidence": {"type": "array"},
+            "evidence_summaries": {"type": "object"},
+            "citation_guardrails": {"type": "object"},
         },
         "required": ["profile", "hot_topics"],
     }
@@ -52,6 +55,8 @@ class TopicPlannerAgent(BaseAgent):
                         "reference_basis": {"type": "string"},
                         "target_reader": {"type": "string"},
                         "content_lane": {"type": "string"},
+                        "topic_kind": {"type": "string"},
+                        "evidence_refs": {"type": "array", "items": {"type": "string"}},
                     },
                 },
             }
@@ -68,6 +73,8 @@ Rules:
 - Do not just restate a hot topic. Choose a sharper angle the account can credibly write.
 - Explain why each topic is worth writing now, which reference basis supports it, and who it is really for.
 - Avoid generic lane drift, shallow summaries, and topics that duplicate the recent-avoid list.
+- topic_kind must be one of: paper_digest, research_trend, github_project_review, tools_roundup, benchmark_analysis, industry_method_explainer, general_analysis.
+- When external evidence exists, evidence_refs must name the real paper or repo titles that support the topic.
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
@@ -103,6 +110,7 @@ Rules:
         lane_label = ((query_plan.get("lane") or {}).get("label")) or "通用洞察"
         digest = input_data.get("reference_digest") or {}
         preferred_sources = digest.get("preferred_source_names") if isinstance(digest, dict) else []
+        selected_evidence = input_data.get("selected_evidence") or []
         target_reader = (
             (input_data.get("account_context") or {}).get("audience")
             or (input_data.get("profile") or {}).get("target_audience")
@@ -116,6 +124,22 @@ Rules:
             title = str(item.get("title") or "").strip()
             if not title:
                 continue
+            evidence_refs = [
+                str(item.get("title") or "").strip()
+                for item in selected_evidence[:2]
+                if isinstance(item, dict) and str(item.get("title") or "").strip()
+            ]
+            topic_kind = "general_analysis"
+            if any(
+                isinstance(item, dict) and str(item.get("source_type") or "").startswith("github")
+                for item in selected_evidence
+            ):
+                topic_kind = "github_project_review"
+            elif any(
+                isinstance(item, dict) and str(item.get("source_type") or "").startswith("scholar")
+                for item in selected_evidence
+            ):
+                topic_kind = "paper_digest"
             topics.append(
                 {
                     "title": title,
@@ -128,6 +152,8 @@ Rules:
                     "reference_basis": ", ".join(preferred_sources[:2]) if preferred_sources else "reference digest",
                     "target_reader": str(target_reader),
                     "content_lane": lane_label,
+                    "topic_kind": topic_kind,
+                    "evidence_refs": evidence_refs,
                 }
             )
             if len(topics) >= 3:
@@ -143,6 +169,8 @@ Rules:
         query_plan = self._resolve_query_plan(input_data)
         reference_digest = input_data.get("reference_digest") or {}
         source_candidates = input_data.get("source_candidates") or []
+        selected_evidence = input_data.get("selected_evidence") or []
+        evidence_summaries = input_data.get("evidence_summaries") or {}
 
         account_snapshot = {
             "account_name": account_context.get("account_name") or "unknown",
@@ -167,6 +195,12 @@ Rules:
                 "REFERENCE DIGEST",
                 article_assembler_service.to_pretty_json(reference_digest),
                 "",
+                "EVIDENCE SUMMARIES",
+                article_assembler_service.to_pretty_json(evidence_summaries),
+                "",
+                "SELECTED EVIDENCE",
+                article_assembler_service.to_pretty_json(selected_evidence[:8] if isinstance(selected_evidence, list) else []),
+                "",
                 "SOURCE CANDIDATES",
                 article_assembler_service.to_pretty_json(source_candidates[:6] if isinstance(source_candidates, list) else []),
                 "",
@@ -176,8 +210,9 @@ Rules:
                 "RETURN CONTRACT",
                 "- Return JSON with topics.",
                 "- Provide 3-5 topics.",
-                "- Each topic must include title, angle, hook, target_emotion, estimated_appeal, reasoning, why_now, reference_basis, target_reader, content_lane.",
+                "- Each topic must include title, angle, hook, target_emotion, estimated_appeal, reasoning, why_now, reference_basis, target_reader, content_lane, topic_kind, evidence_refs.",
                 "- angle should explain the account-owned perspective, not just paraphrase the hot topic title.",
+                "- If the topic is grounded in a paper or repo, topic_kind and evidence_refs must reflect that evidence explicitly.",
             ]
         )
 
@@ -214,6 +249,12 @@ Rules:
                         "reference_basis": str(item.get("reference_basis") or "").strip(),
                         "target_reader": str(item.get("target_reader") or "").strip(),
                         "content_lane": str(item.get("content_lane") or "").strip(),
+                        "topic_kind": str(item.get("topic_kind") or "general_analysis").strip() or "general_analysis",
+                        "evidence_refs": [
+                            str(ref).strip()
+                            for ref in item.get("evidence_refs", [])
+                            if str(ref).strip()
+                        ] if isinstance(item.get("evidence_refs"), list) else [],
                     }
                 )
         return {"topics": normalized}

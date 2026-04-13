@@ -49,6 +49,9 @@ LEGACY_CONTENT_FALLBACK_NODE = {
         "hot_topics": "hot_topics",
         "account_context": "account_context",
         "ops_context": "ops_context",
+        "selected_evidence": "selected_evidence",
+        "evidence_summaries": "evidence_summaries",
+        "citation_guardrails": "citation_guardrails",
     },
     "output_key": "content",
     "required": True,
@@ -71,6 +74,9 @@ DEFAULT_WORKFLOW_NODES = [
             "profile": "profile",
             "account_context": "account_context",
             "ops_context": "ops_context",
+            "selected_evidence": "selected_evidence",
+            "evidence_summaries": "evidence_summaries",
+            "citation_guardrails": "citation_guardrails",
         },
         "output_key": "hot_topics",
         "required": True,
@@ -87,6 +93,9 @@ DEFAULT_WORKFLOW_NODES = [
             "query_plan": "query_plan",
             "reference_digest": "reference_digest",
             "source_candidates": "source_candidates",
+            "selected_evidence": "selected_evidence",
+            "evidence_summaries": "evidence_summaries",
+            "citation_guardrails": "citation_guardrails",
         },
         "output_key": "topics",
         "required": True,
@@ -103,6 +112,9 @@ DEFAULT_WORKFLOW_NODES = [
             "query_plan": "query_plan",
             "reference_digest": "reference_digest",
             "source_candidates": "source_candidates",
+            "selected_evidence": "selected_evidence",
+            "evidence_summaries": "evidence_summaries",
+            "citation_guardrails": "citation_guardrails",
         },
         "output_key": "titles",
         "required": True,
@@ -121,6 +133,9 @@ DEFAULT_WORKFLOW_NODES = [
             "query_plan": "query_plan",
             "reference_digest": "reference_digest",
             "source_candidates": "source_candidates",
+            "selected_evidence": "selected_evidence",
+            "evidence_summaries": "evidence_summaries",
+            "citation_guardrails": "citation_guardrails",
         },
         "output_key": "outline_plan",
         "required": True,
@@ -140,6 +155,9 @@ DEFAULT_WORKFLOW_NODES = [
             "query_plan": "query_plan",
             "reference_digest": "reference_digest",
             "source_candidates": "source_candidates",
+            "selected_evidence": "selected_evidence",
+            "evidence_summaries": "evidence_summaries",
+            "citation_guardrails": "citation_guardrails",
         },
         "output_key": "section_drafts",
         "required": True,
@@ -177,6 +195,9 @@ DEFAULT_WORKFLOW_NODES = [
             "query_plan": "query_plan",
             "reference_digest": "reference_digest",
             "source_candidates": "source_candidates",
+            "selected_evidence": "selected_evidence",
+            "evidence_summaries": "evidence_summaries",
+            "citation_guardrails": "citation_guardrails",
         },
         "output_key": "style_review",
         "required": False,
@@ -197,6 +218,9 @@ DEFAULT_WORKFLOW_NODES = [
             "query_plan": "query_plan",
             "reference_digest": "reference_digest",
             "source_candidates": "source_candidates",
+            "selected_evidence": "selected_evidence",
+            "evidence_summaries": "evidence_summaries",
+            "citation_guardrails": "citation_guardrails",
         },
         "output_key": "structure_review",
         "required": False,
@@ -219,6 +243,9 @@ DEFAULT_WORKFLOW_NODES = [
             "query_plan": "query_plan",
             "reference_digest": "reference_digest",
             "source_candidates": "source_candidates",
+            "selected_evidence": "selected_evidence",
+            "evidence_summaries": "evidence_summaries",
+            "citation_guardrails": "citation_guardrails",
         },
         "output_key": "rewrite_result",
         "required": False,
@@ -231,6 +258,8 @@ DEFAULT_WORKFLOW_NODES = [
             "titles": "titles",
             "content": "content",
             "profile": "profile",
+            "selected_evidence": "selected_evidence",
+            "citation_guardrails": "citation_guardrails",
         },
         "output_key": "audit_result",
         "required": False,
@@ -337,7 +366,15 @@ class OrchestratorEngine:
             )
 
             try:
-                result = await self._execute_node(node_def, agent_input, workspace.snapshot(), trace_id, db)
+                result = await self._execute_node(
+                    node_def,
+                    agent_input,
+                    workspace.snapshot(),
+                    trace_id,
+                    db,
+                    task.id,
+                    task.account_id,
+                )
                 if result.is_success:
                     self._store_node_result(workspace, node_def, result.data or {})
                     node_run.status = "completed"
@@ -531,6 +568,8 @@ class OrchestratorEngine:
         context: dict[str, Any],
         trace_id: str,
         db: AsyncSession,
+        task_id: str,
+        account_id: str | None,
     ) -> AgentResult:
         if node_def.get("executor") == "service":
             return await self._execute_service_node(node_def, input_data)
@@ -543,6 +582,10 @@ class OrchestratorEngine:
         )
         enriched_context = dict(context)
         enriched_context["system_prompt"] = effective_prompt
+        enriched_context["db"] = db
+        enriched_context["task_id"] = task_id
+        enriched_context["account_id"] = account_id
+        enriched_context["trace_id"] = trace_id
         return await self._execute_agent_with_timeout(agent, input_data, enriched_context, trace_id)
 
     async def _execute_service_node(
@@ -629,7 +672,15 @@ class OrchestratorEngine:
         )
 
         try:
-            result = await self._execute_node(node_def, agent_input, workspace.snapshot(), trace_id, db)
+            result = await self._execute_node(
+                node_def,
+                agent_input,
+                workspace.snapshot(),
+                trace_id,
+                db,
+                task_id,
+                None,
+            )
             if not result.is_success:
                 fallback_result = await self._execute_agent_fallback(
                     node_def["agent_id"],
@@ -694,7 +745,17 @@ class OrchestratorEngine:
         node_id = node_def["node_id"]
         if node_id == "hot_topic_analysis":
             workspace.set(node_def["output_key"], data)
-            for key in ("query_plan", "source_candidates", "source_snippets", "reference_digest"):
+            for key in (
+                "query_plan",
+                "source_candidates",
+                "source_snippets",
+                "reference_digest",
+                "external_evidence",
+                "fetched_evidence",
+                "selected_evidence",
+                "evidence_summaries",
+                "citation_guardrails",
+            ):
                 if key in data:
                     workspace.set(key, data.get(key))
             return

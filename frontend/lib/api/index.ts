@@ -63,6 +63,92 @@ interface ApiEnvelope<T> {
 
 const LOCAL_DEV_API_ORIGIN = "http://127.0.0.1:8000";
 
+interface LLMProviderTemplate {
+  provider_id: string;
+  name: string;
+  description: string;
+  base_url: string;
+  default_model: string;
+  supported_models: string[];
+}
+
+interface LLMProviderCreateRequest {
+  provider_id: string;
+  name: string;
+  description?: string;
+  api_key?: string;
+  base_url?: string;
+  default_model?: string;
+  supported_models?: string[];
+  is_enabled?: boolean;
+  is_default?: boolean;
+  timeout?: number;
+  extra_config?: Record<string, unknown> | null;
+}
+
+interface LLMProviderUpdateRequest {
+  name?: string;
+  description?: string;
+  api_key?: string;
+  base_url?: string;
+  default_model?: string;
+  supported_models?: string[];
+  is_enabled?: boolean;
+  is_default?: boolean;
+  timeout?: number;
+  extra_config?: Record<string, unknown> | null;
+  status?: string;
+}
+
+interface LLMProviderTestRequest {
+  provider_id: string;
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+}
+
+interface LLMProviderTestResponse {
+  success: boolean;
+  latency_ms?: number;
+  response_preview?: string;
+  error_message?: string;
+}
+
+export const LLM_PROVIDER_TEMPLATES: LLMProviderTemplate[] = [
+  {
+    provider_id: "dashscope",
+    name: "DashScope",
+    description: "Alibaba DashScope compatible endpoint for Qwen models.",
+    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    default_model: "qwen-turbo",
+    supported_models: ["qwen-turbo", "qwen-plus", "qwen-max"],
+  },
+  {
+    provider_id: "openai",
+    name: "OpenAI",
+    description: "OpenAI API for GPT models.",
+    base_url: "https://api.openai.com/v1",
+    default_model: "gpt-4o-mini",
+    supported_models: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1"],
+  },
+  {
+    provider_id: "deepseek",
+    name: "DeepSeek",
+    description: "DeepSeek compatible chat completion endpoint.",
+    base_url: "https://api.deepseek.com/v1",
+    default_model: "deepseek-chat",
+    supported_models: ["deepseek-chat", "deepseek-reasoner"],
+  },
+  {
+    provider_id: "compatible",
+    name: "Compatible API",
+    description: "OpenAI-compatible self-hosted or third-party endpoint.",
+    base_url: "http://localhost:8000/v1",
+    default_model: "custom-model",
+    supported_models: ["custom-model"],
+  },
+];
+
 export class ApiError extends Error {
   status: number;
   code?: number;
@@ -614,6 +700,42 @@ export async function listLLMProviders(): Promise<LLMProviderInfo[]> {
   return request<LLMProviderInfo[]>("/llm-providers");
 }
 
+export async function createLLMProvider(data: LLMProviderCreateRequest): Promise<LLMProviderInfo> {
+  return request<LLMProviderInfo>("/llm-providers", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateLLMProvider(
+  providerId: string,
+  data: LLMProviderUpdateRequest,
+): Promise<LLMProviderInfo> {
+  return request<LLMProviderInfo>(`/llm-providers/${providerId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteLLMProvider(providerId: string): Promise<void> {
+  await request(`/llm-providers/${providerId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function testLLMProvider(data: LLMProviderTestRequest): Promise<LLMProviderTestResponse> {
+  return request<LLMProviderTestResponse>("/llm-providers/test", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function setDefaultLLMProvider(providerId: string): Promise<{ provider_id: string; message: string }> {
+  return request<{ provider_id: string; message: string }>(`/llm-providers/active/default/${providerId}`, {
+    method: "POST",
+  });
+}
+
 export async function listAgents(): Promise<{ agents: AgentInfo[] }> {
   return request<{ agents: AgentInfo[] }>("/agents");
 }
@@ -633,6 +755,42 @@ export async function updateAgentConfig(
   return request<{ agent_id: string; updated_fields: string[] }>(`/agents/${agentId}/config`, {
     method: "PUT",
     body: JSON.stringify(config),
+  });
+}
+
+export interface AgentCreateRequest {
+  agent_id: string;
+  name?: string;
+  description?: string;
+  prompt_template?: string;
+  model_config_data?: Record<string, unknown>;
+  retry_config?: Record<string, unknown>;
+}
+
+export interface AgentCreateResponse {
+  agent_id: string;
+  name: string;
+  description: string | null;
+  prompt_template: string | null;
+  model_config_data: Record<string, unknown> | null;
+  retry_config: Record<string, unknown> | null;
+  created_at: string | null;
+}
+
+export async function createAgent(
+  config: AgentCreateRequest,
+): Promise<AgentCreateResponse> {
+  return request<AgentCreateResponse>("/agents", {
+    method: "POST",
+    body: JSON.stringify(config),
+  });
+}
+
+export async function deleteAgentConfig(
+  agentId: string,
+): Promise<{ agent_id: string; deleted: boolean }> {
+  return request<{ agent_id: string; deleted: boolean }>(`/agents/${agentId}/config`, {
+    method: "DELETE",
   });
 }
 
@@ -687,4 +845,4 @@ export async function updateGlobalLanguage(locale: AppLocale): Promise<void> {
   await upsertSystemConfig("ui_language", locale, "string");
 }
 
-export type { PaginationMeta };
+export type { AgentInfo, LLMProviderInfo, PaginationMeta, SkillInfo };

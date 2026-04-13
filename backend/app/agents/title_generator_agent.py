@@ -30,6 +30,9 @@ class TitleGeneratorAgent(BaseAgent):
             "query_plan": {"type": "object"},
             "reference_digest": {"type": "object"},
             "source_candidates": {"type": "array"},
+            "selected_evidence": {"type": "array"},
+            "evidence_summaries": {"type": "object"},
+            "citation_guardrails": {"type": "object"},
         },
         "required": ["profile", "topics"],
     }
@@ -62,6 +65,7 @@ Rules:
 - Titles must reflect the chosen topic package, account voice, and source-backed angle.
 - Avoid empty shock-value or titles that could belong to any account.
 - Show style diversity, but keep the title promises compatible with the outline the team will later write.
+- Do not invent specific paper names or repo names that are absent from the evidence list.
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
@@ -120,6 +124,8 @@ Rules:
                 ops_context=ops_context,
             )
         reference_digest = input_data.get("reference_digest") or {}
+        selected_evidence = input_data.get("selected_evidence") or []
+        evidence_summaries = input_data.get("evidence_summaries") or {}
 
         sorted_topics = self._sorted_topics(topics)
         topic_package = sorted_topics[:3]
@@ -144,6 +150,12 @@ Rules:
                 "REFERENCE DIGEST",
                 article_assembler_service.to_pretty_json(reference_digest),
                 "",
+                "EVIDENCE SUMMARIES",
+                article_assembler_service.to_pretty_json(evidence_summaries),
+                "",
+                "SELECTED EVIDENCE",
+                article_assembler_service.to_pretty_json(selected_evidence[:8] if isinstance(selected_evidence, list) else []),
+                "",
                 "TOPIC CANDIDATES",
                 article_assembler_service.to_pretty_json(topic_package),
                 "",
@@ -151,6 +163,7 @@ Rules:
                 "- Return JSON with selected_topic and titles.",
                 "- titles must include text, style, score, reasoning.",
                 "- Generate 4-6 options with real style diversity, but keep them consistent with the chosen topic package.",
+                "- If a title mentions a paper or repository by name, that name must appear in SELECTED EVIDENCE.",
             ]
         )
 

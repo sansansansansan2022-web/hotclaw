@@ -1,49 +1,41 @@
-"""Audit agent: reviews content for risks and compliance.
+"""Audit agent: reviews content for risks and evidence grounding."""
 
-Calls LLM to audit article content for compliance and quality.
-
-【内容审核智能体】
-职责：输出风险判断与问题列表
-不负责：直接修改状态、不直接发文
-"""
+from __future__ import annotations
 
 import json
+import re
+
 import litellm
-from app.agents.base import BaseAgent, AgentResult
+
+from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
 
 
 class AuditAgent(BaseAgent):
-    """
-    内容审核智能体
-
-    Agent Contract:
-    - input: titles, content, profile, account_context (optional)
-    - output: passed, risk_level, issues, overall_comment
-    - supported_skills: []
-    """
+    """Review generated content for compliance, quality, and evidence grounding."""
 
     agent_id = "audit_agent"
-    name = "审核智能体"
-    description = "对生成的文章进行风险检测和合规性审核"
+    name = "Audit Agent"
+    description = "Audit generated content for compliance risks and unsupported evidence claims."
 
-    # Agent Contract
     input_schema = {
         "type": "object",
         "properties": {
-            "titles": {"type": "object", "description": "候选标题列表 {titles: [...]}"},
-            "content": {"type": "object", "description": "文章正文数据 {content_markdown: ...}"},
-            "profile": {"type": "object", "description": "账号画像"},
-            "account_context": {"type": "object", "description": "账号上下文（可选）"}
+            "titles": {"type": "object"},
+            "content": {"type": "object"},
+            "profile": {"type": "object"},
+            "account_context": {"type": "object"},
+            "selected_evidence": {"type": "array"},
+            "citation_guardrails": {"type": "object"},
         },
-        "required": ["titles", "content", "profile"]
+        "required": ["titles", "content", "profile"],
     }
 
     output_schema = {
         "type": "object",
         "properties": {
-            "passed": {"type": "boolean", "description": "是否通过审核"},
-            "risk_level": {"type": "string", "enum": ["low", "medium", "high"], "description": "风险等级"},
+            "passed": {"type": "boolean"},
+            "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
             "issues": {
                 "type": "array",
                 "items": {
@@ -52,58 +44,46 @@ class AuditAgent(BaseAgent):
                         "type": {"type": "string"},
                         "description": {"type": "string"},
                         "severity": {"type": "string"},
-                        "location": {"type": "string"}
-                    }
-                }
+                        "location": {"type": "string"},
+                    },
+                },
             },
-            "overall_comment": {"type": "string", "description": "综合评价"}
-        }
+            "overall_comment": {"type": "string"},
+        },
     }
 
     supported_skills = []
 
-    default_system_prompt = """\
-你是一位内容合规审核专家，负责对自动生成的公众号文章进行全面的风险检测和质量评估。
+    default_system_prompt = """You are a content audit specialist.
 
-## 任务
-对生成的文章标题和正文进行合规性审核和质量评估。
+Review the generated article and return strict JSON with:
+- passed
+- risk_level
+- issues
+- overall_comment
 
-## 输入
-- titles (object): 候选标题列表
-- content (object): 文章正文数据
-- profile (object): 账号画像数据
-
-## 输出要求
-必须输出 JSON 对象，包含：
-- passed (bool): 是否通过审核（true=可发布, false=需修改）
-- risk_level (string): 风险等级 "low" / "medium" / "high"
-- issues (array): 发现的问题列表，每个包含：
-  - type (string): 问题类型（sensitive_word/political_risk/false_info/exaggeration/clickbait/tone_mismatch/quality）
-  - description (string): 问题描述
-  - severity (string): 严重程度 "low" / "medium" / "high"
-  - location (string): 问题位置（如"标题"、"第2段"）
-- overall_comment (string): 综合评价，100字以内
-
-## 审核维度
-1. **敏感词检测**：政治敏感、违禁词、低俗用语
-2. **事实核查**：是否包含可验证的虚假数据或不存在的研究
-3. **夸大宣传**：是否有绝对化用语（"最"、"第一"、"100%"等）
-4. **标题党程度**：标题是否与正文内容严重不符
-5. **调性匹配**：文章风格是否与账号定位(profile.tone)一致
-6. **内容质量**：结构完整性、论述逻辑性、可读性
-
-## 约束
-- issues 数组为空时 passed 应为 true
-- 存在任何 high severity 问题时 passed 必须为 false
-- risk_level 取 issues 中最高 severity 等级
-- 审核应客观公正，不过度严苛也不放过真正的问题"""
+Rules:
+- Flag unsupported paper titles or repository names that do not exist in the evidence list.
+- Flag claims like 顶会, 顶刊, 高水平, 爆火, state-of-the-art, best, first if the evidence does not support them.
+- Balance compliance and readability, but do not let unsupported claims pass.
+"""
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
         profile = input_data.get("profile", {})
         titles_data = input_data.get("titles", {})
         content_data = input_data.get("content", {})
+        selected_evidence = input_data.get("selected_evidence") or []
+        citation_guardrails = input_data.get("citation_guardrails") or {}
         system_prompt = context.get("system_prompt") or self.default_system_prompt
-        user_prompt = self._build_user_prompt(profile, titles_data, content_data)
+        user_prompt = self._build_user_prompt(
+            profile=profile,
+            titles_data=titles_data,
+            content_data=content_data,
+            selected_evidence=selected_evidence,
+            citation_guardrails=citation_guardrails,
+        )
+
+        heuristic_issues = self._detect_grounding_issues(content_data, selected_evidence)
 
         try:
             model = settings.llm_model_name
@@ -122,67 +102,170 @@ class AuditAgent(BaseAgent):
                 custom_llm_provider="dashscope",
             )
             content = response.choices[0].message.content
-
-            # 解析 JSON
             data = self._parse_json(content)
+            issues = data.get("issues") if isinstance(data.get("issues"), list) else []
+            issues.extend(heuristic_issues)
+            data["issues"] = issues
+            data["risk_level"] = self._derive_risk_level(issues)
+            data["passed"] = not any(issue.get("severity") == "high" for issue in issues)
+            if heuristic_issues:
+                prefix = "Heuristic grounding checks found additional evidence issues. "
+                data["overall_comment"] = prefix + str(data.get("overall_comment") or "").strip()
             return self._success(data)
 
-        except json.JSONDecodeError as e:
-            return self._failure(code="JSON_PARSE_ERROR", message=f"JSON 解析失败: {str(e)}")
-        except Exception as e:
-            return self._failure(code="LLM_ERROR", message=str(e))
+        except json.JSONDecodeError as exc:
+            return self._success(self._fallback_audit(heuristic_issues, f"Failed to parse audit JSON: {exc}"))
+        except Exception as exc:
+            return self._success(self._fallback_audit(heuristic_issues, str(exc)))
 
-    def _build_user_prompt(self, profile: dict, titles_data: dict, content_data: dict) -> str:
-        """构建用户提示词"""
-        tone = profile.get("tone", "中性")
-        domain = profile.get("domain", "未知")
+    def _build_user_prompt(
+        self,
+        *,
+        profile: dict,
+        titles_data: dict,
+        content_data: dict,
+        selected_evidence: list[dict],
+        citation_guardrails: dict[str, bool],
+    ) -> str:
+        tone = profile.get("tone", "neutral")
+        domain = profile.get("domain", "unknown")
         title_list = titles_data.get("titles", []) if isinstance(titles_data, dict) else []
         content_md = content_data.get("content_markdown", "") if isinstance(content_data, dict) else ""
 
+        content_preview = content_md[:5000] + "..." if len(content_md) > 5000 else content_md
         prompt_parts = [
-            "请对以下文章进行合规性审核和质量评估。",
+            "Audit the following article.",
             "",
-            "## 账号信息",
-            f"- 主领域: {domain}",
-            f"- 内容调性: {tone}",
+            "ACCOUNT",
+            json.dumps({"domain": domain, "tone": tone}, ensure_ascii=False, indent=2),
+            "",
+            "TITLE CANDIDATES",
+            json.dumps(title_list[:4], ensure_ascii=False, indent=2),
+            "",
+            "SELECTED EVIDENCE",
+            json.dumps(selected_evidence[:12], ensure_ascii=False, indent=2),
+            "",
+            "CITATION GUARDRAILS",
+            json.dumps(citation_guardrails, ensure_ascii=False, indent=2),
+            "",
+            "ARTICLE",
+            content_preview,
+            "",
+            "REQUIREMENTS",
+            "- Output strict JSON only.",
+            "- Check compliance, exaggeration, tone fit, and unsupported evidence claims.",
         ]
-
-        # 标题信息
-        if title_list:
-            prompt_parts.append("")
-            prompt_parts.append("## 候选标题")
-            for t in title_list[:3]:
-                prompt_parts.append(f"- {t.get('text', '')}")
-
-        # 文章内容
-        if content_md:
-            # 限制内容长度，避免超出 token 限制
-            content_preview = content_md[:3000] + "..." if len(content_md) > 3000 else content_md
-            prompt_parts.append("")
-            prompt_parts.append("## 文章正文")
-            prompt_parts.append(content_preview)
-
-        prompt_parts.append("")
-        prompt_parts.append("请输出审核结果。")
-
         return "\n".join(prompt_parts)
 
+    def _detect_grounding_issues(self, content_data: dict, selected_evidence: list[dict]) -> list[dict]:
+        content_md = str((content_data or {}).get("content_markdown") or "")
+        evidence_titles = {
+            self._normalize_name(item.get("title"))
+            for item in selected_evidence
+            if isinstance(item, dict) and self._normalize_name(item.get("title"))
+        }
+        evidence_repo_names = {
+            self._normalize_name(item.get("source_id"))
+            for item in selected_evidence
+            if isinstance(item, dict)
+            and str(item.get("source_type") or "").startswith("github")
+            and self._normalize_name(item.get("source_id"))
+        }
+
+        issues: list[dict] = []
+        repo_mentions = {
+            self._normalize_name(match)
+            for match in re.findall(r"\b[\w.-]+/[\w.-]+\b", content_md)
+            if self._normalize_name(match)
+        }
+        for repo_name in sorted(repo_mentions):
+            if repo_name not in evidence_repo_names:
+                issues.append(
+                    {
+                        "type": "unsupported_repo_reference",
+                        "description": f"Repository name '{repo_name}' does not appear in selected evidence.",
+                        "severity": "medium",
+                        "location": "content",
+                    }
+                )
+
+        title_mentions = {
+            self._normalize_name(match)
+            for match in re.findall(r"[《“\"]([^》”\"]{8,120})[》”\"]", content_md)
+            if self._normalize_name(match)
+        }
+        for title in sorted(title_mentions):
+            if title not in evidence_titles and "/" not in title:
+                issues.append(
+                    {
+                        "type": "unsupported_paper_reference",
+                        "description": f"Quoted title '{title}' does not appear in selected evidence.",
+                        "severity": "medium",
+                        "location": "content",
+                    }
+                )
+
+        if re.search(r"顶会|顶刊|高水平|爆火|state[- ]of[- ]the[- ]art|SOTA|最强|第一", content_md, re.IGNORECASE):
+            strong_authority = any(
+                isinstance(item, dict) and float(item.get("authority_score") or 0.0) >= 0.85
+                for item in selected_evidence
+            )
+            if not strong_authority:
+                issues.append(
+                    {
+                        "type": "unsupported_hype_claim",
+                        "description": "The article uses strong authority or hype claims without strong evidence support.",
+                        "severity": "medium",
+                        "location": "content",
+                    }
+                )
+        return issues
+
+    def _fallback_audit(self, heuristic_issues: list[dict], error_message: str) -> dict:
+        issues = list(heuristic_issues)
+        if error_message:
+            issues.append(
+                {
+                    "type": "audit_runtime_error",
+                    "description": f"Audit model failed: {error_message}",
+                    "severity": "medium",
+                    "location": "system",
+                }
+            )
+        risk_level = self._derive_risk_level(issues)
+        return {
+            "passed": not any(issue.get("severity") == "high" for issue in issues),
+            "risk_level": risk_level,
+            "issues": issues,
+            "overall_comment": "Audit fell back to deterministic grounding checks.",
+        }
+
+    def _derive_risk_level(self, issues: list[dict]) -> str:
+        severities = {str(item.get("severity") or "").lower() for item in issues if isinstance(item, dict)}
+        if "high" in severities:
+            return "high"
+        if "medium" in severities:
+            return "medium"
+        return "low"
+
+    def _normalize_name(self, value: object) -> str:
+        raw = str(value or "").strip().lower()
+        return re.sub(r"\s+", " ", raw)
+
     def _parse_json(self, content: str) -> dict:
-        """解析 LLM 返回的 JSON，处理 markdown 代码块"""
-        content = content.strip()
-        if content.startswith("```"):
-            parts = content.split("```")
+        text = content.strip()
+        if text.startswith("```"):
+            parts = text.split("```")
             if len(parts) >= 2:
-                content = parts[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
-        return json.loads(content)
+                text = parts[1]
+                if text.startswith("json"):
+                    text = text[4:]
+                text = text.strip()
+        return json.loads(text)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
-        return self._success({
-            "passed": False,
-            "risk_level": "unknown",
-            "issues": [{"type": "system", "description": "审核服务异常，请人工复核", "severity": "medium"}],
-            "overall_comment": "审核服务降级，建议人工复核后发布。",
-        })
+        heuristic_issues = self._detect_grounding_issues(
+            input_data.get("content") or {},
+            input_data.get("selected_evidence") or [],
+        )
+        return self._success(self._fallback_audit(heuristic_issues, str(error)))

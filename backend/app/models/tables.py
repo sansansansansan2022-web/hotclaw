@@ -348,6 +348,61 @@ class SkillModel(Base):
     )
 
 
+class SkillInvocationLogModel(Base):
+    """Runtime log for each skill invocation."""
+    __tablename__ = "skill_invocation_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    account_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    skill_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    input_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="started")
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+
+class EvidenceItemModel(Base):
+    """Structured evidence produced by research skills."""
+    __tablename__ = "evidence_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    task_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    account_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    skill_name: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    normalized_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    authority_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    freshness_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    practical_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    selected_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    risk_flags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+
+class SkillCacheModel(Base):
+    """Cache for stable external skill responses."""
+    __tablename__ = "skill_cache"
+
+    cache_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    skill_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    response_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+
+
 class WorkflowTemplateModel(Base):
     """Workflow template definitions."""
     __tablename__ = "workflow_templates"

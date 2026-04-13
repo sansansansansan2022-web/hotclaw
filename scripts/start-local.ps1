@@ -3,6 +3,7 @@ param(
     [int]$FrontendPort = 3460,
     [ValidateSet('Auto', 'Start', 'Dev')]
     [string]$FrontendMode = 'Auto',
+    [switch]$DisableScheduler,
     [switch]$DemoMode,
     [switch]$SkipBuild,
     [switch]$SkipStop
@@ -268,11 +269,12 @@ try {
 $backendOut = Join-Path $logDir "backend-$BackendPort.out.log"
 $backendErr = Join-Path $logDir "backend-$BackendPort.err.log"
 $backendCommand = ('"{0}" -m uvicorn app.main:app --host 127.0.0.1 --port {1} 1>"{2}" 2>"{3}"' -f $backendPython, $BackendPort, $backendOut, $backendErr)
+$schedulerEnabled = -not $DisableScheduler
 Write-Step 'Starting backend'
-Start-DetachedCmd -WorkingDirectory $backendDir -InnerCommand $backendCommand -Environment @{ HOTCLAW_AUTO_CREATE_TABLES = '0'; HOTCLAW_ENABLE_SCHEDULER = '0'; HOTCLAW_E2E_TEST_MODE = $(if ($DemoMode) { '1' } else { '0' }) }
+Start-DetachedCmd -WorkingDirectory $backendDir -InnerCommand $backendCommand -Environment @{ HOTCLAW_AUTO_CREATE_TABLES = '0'; HOTCLAW_ENABLE_SCHEDULER = $(if ($schedulerEnabled) { '1' } else { '0' }); HOTCLAW_E2E_TEST_MODE = $(if ($DemoMode) { '1' } else { '0' }) }
 Wait-ComponentReady -Name 'backend' -Url "$apiOrigin/api/v1/health" -StdoutLog $backendOut -StderrLog $backendErr
 $backendPid = Resolve-ListenerPid -Port $BackendPort
-Write-PidFile -Path (Join-Path $pidDir 'backend.pid.json') -Payload @{ name = 'backend'; pid = $backendPid; port = $BackendPort; started_at = (Get-Date).ToString('s'); log_out = $backendOut; log_err = $backendErr; scheduler_enabled = $false; demo_mode = [bool]$DemoMode }
+Write-PidFile -Path (Join-Path $pidDir 'backend.pid.json') -Payload @{ name = 'backend'; pid = $backendPid; port = $BackendPort; started_at = (Get-Date).ToString('s'); log_out = $backendOut; log_err = $backendErr; scheduler_enabled = $schedulerEnabled; demo_mode = [bool]$DemoMode }
 
 $frontendOut = Join-Path $logDir "frontend-$FrontendPort.out.log"
 $frontendErr = Join-Path $logDir "frontend-$FrontendPort.err.log"
@@ -290,5 +292,5 @@ Write-PidFile -Path (Join-Path $pidDir 'frontend.pid.json') -Payload @{ name = '
 Write-Host 'HotClaw local runtime is ready.'
 Write-Host "Frontend: http://127.0.0.1:$FrontendPort/accounts"
 Write-Host "Backend:  $apiOrigin/api/v1/health"
-Write-Host "Mode:     frontend=$frontendLaunchMode scheduler=disabled demo=$([bool]$DemoMode)"
+Write-Host "Mode:     frontend=$frontendLaunchMode scheduler=$($(if ($schedulerEnabled) { 'enabled' } else { 'disabled' })) demo=$([bool]$DemoMode)"
 Write-Host "Logs:     $logDir"

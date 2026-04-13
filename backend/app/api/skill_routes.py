@@ -1,4 +1,6 @@
-"""Skill configuration API routes."""
+"""Skill configuration and debug execution API routes."""
+
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -6,10 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.common import ApiResponse
-from app.schemas.skill import SkillConfigUpdateRequest
+from app.schemas.skill import (
+    GitHubSkillDebugRequest,
+    ScholarSkillDebugRequest,
+    SkillConfigUpdateRequest,
+)
 from app.skills.registry import skill_registry
 from app.models.tables import SkillModel
-from app.core.exceptions import SkillNotFoundError
+from app.skills.services.skill_runtime_service import skill_runtime_service
 
 router = APIRouter(prefix="/api/v1/skills", tags=["skills"])
 
@@ -58,3 +64,41 @@ async def update_skill_config(
     await db.flush()
 
     return ApiResponse(data={"skill_id": skill_id, "updated": True})
+
+
+@router.post("/scholar/search")
+async def debug_scholar_search(
+    req: ScholarSkillDebugRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    task_id = (req.task_id or f"debug_scholar_{uuid4().hex[:12]}").strip()
+    workspace_id = (req.workspace_id or task_id).strip()
+    result = await skill_runtime_service.invoke(
+        skill_name="scholar_paper_search_skill",
+        input_data=req.model_dump(exclude={"task_id", "workspace_id", "account_id"}),
+        db=db,
+        task_id=task_id,
+        workspace_id=workspace_id,
+        account_id=req.account_id,
+    )
+    await db.commit()
+    return ApiResponse(data=result)
+
+
+@router.post("/github/curate")
+async def debug_github_curate(
+    req: GitHubSkillDebugRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    task_id = (req.task_id or f"debug_github_{uuid4().hex[:12]}").strip()
+    workspace_id = (req.workspace_id or task_id).strip()
+    result = await skill_runtime_service.invoke(
+        skill_name="github_project_curator_skill",
+        input_data=req.model_dump(exclude={"task_id", "workspace_id", "account_id"}),
+        db=db,
+        task_id=task_id,
+        workspace_id=workspace_id,
+        account_id=req.account_id,
+    )
+    await db.commit()
+    return ApiResponse(data=result)

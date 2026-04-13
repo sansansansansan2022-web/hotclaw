@@ -28,6 +28,7 @@ from app.core.logger import setup_logging, get_logger
 from app.core.tracer import generate_trace_id, set_trace_id
 from app.core.exceptions import HotClawError
 from app.schemas.common import ApiErrorResponse
+import app.skills  # noqa: F401
 
 # Import routes
 from app.api.task_routes import router as task_router

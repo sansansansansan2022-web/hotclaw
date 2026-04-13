@@ -296,13 +296,6 @@ async def run_account(
             task_id=task.id,
             status=task.status,
             operation_mode=account.operation_mode,
-            effective_mode=(
-                task.input_data.get("ops_context", {})
-                .get("run_strategy", {})
-                .get("effective_mode")
-                if isinstance(task.input_data, dict)
-                else None
-            ),
         )
     except AccountNotFoundError as e:
         logger.warning("account_run_not_found", account_id=account_id)

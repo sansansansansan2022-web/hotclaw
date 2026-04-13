@@ -1,531 +1,701 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
+import { useEffect, useState } from "react";
+import { AppShell } from "@/components/console/layout";
+import { Icon } from "@/components/console/icons";
 import {
-  listLLMProviders,
-  createLLMProvider,
-  updateLLMProvider,
-  deleteLLMProvider,
-  testLLMProvider,
-  setDefaultLLMProvider,
-  LLMProviderInfo,
+  Badge,
+  Button,
+  Card,
+  ConfirmDialog,
+  EmptyState,
+  ErrorState,
+  Input,
+  PageHeader,
+  SkeletonRows,
+  StatCard,
+  Textarea,
+} from "@/components/console/ui";
+import { cn } from "@/lib/utils";
+import {
   LLM_PROVIDER_TEMPLATES,
+  createLLMProvider,
+  deleteLLMProvider,
+  listLLMProviders,
+  setDefaultLLMProvider,
+  testLLMProvider,
+  updateLLMProvider,
+  type LLMProviderInfo,
 } from "@/lib/api";
+
+type ProviderMode = "view" | "edit" | "create";
+type NoticeTone = "success" | "danger" | "info";
+
+interface ProviderFormState {
+  provider_id: string;
+  name: string;
+  description: string;
+  api_key: string;
+  base_url: string;
+  default_model: string;
+  supported_models: string;
+  timeout: string;
+  is_enabled: boolean;
+  is_default: boolean;
+}
+
+interface NoticeState {
+  tone: NoticeTone;
+  message: string;
+}
+
+interface TestResultState {
+  success: boolean;
+  message: string;
+  latency?: number;
+}
+
+const emptyForm: ProviderFormState = {
+  provider_id: "",
+  name: "",
+  description: "",
+  api_key: "",
+  base_url: "",
+  default_model: "",
+  supported_models: "",
+  timeout: "60",
+  is_enabled: true,
+  is_default: false,
+};
+
+function providerToForm(provider: LLMProviderInfo): ProviderFormState {
+  return {
+    provider_id: provider.provider_id,
+    name: provider.name,
+    description: provider.description || "",
+    api_key: provider.api_key || "",
+    base_url: provider.base_url || "",
+    default_model: provider.default_model || "",
+    supported_models: (provider.supported_models || []).join(", "),
+    timeout: String(provider.timeout || 60),
+    is_enabled: provider.is_enabled,
+    is_default: provider.is_default,
+  };
+}
+
+function NoticeBanner({ notice }: { notice: NoticeState | null }) {
+  if (!notice) return null;
+
+  const className =
+    notice.tone === "success"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+      : notice.tone === "danger"
+        ? "border-rose-200 bg-rose-50 text-rose-700"
+        : "border-sky-200 bg-sky-50 text-sky-700";
+
+  return <div className={cn("rounded-2xl border px-4 py-3 text-sm", className)}>{notice.message}</div>;
+}
 
 export default function LLMProvidersPage() {
   const [providers, setProviders] = useState<LLMProviderInfo[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
   const [selected, setSelected] = useState<LLMProviderInfo | null>(null);
-  const [editing, setEditing] = useState(false);
-
-  // Form state
-  const [formData, setFormData] = useState({
-    provider_id: "",
-    name: "",
-    description: "",
-    api_key: "",
-    base_url: "",
-    default_model: "",
-    supported_models: [] as string[],
-    is_enabled: false,
-    is_default: false,
-    timeout: 60,
-  });
-
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    success: boolean;
-    message: string;
-    latency?: number;
-  } | null>(null);
-
+  const [form, setForm] = useState<ProviderFormState>(emptyForm);
+  const [mode, setMode] = useState<ProviderMode>("view");
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<NoticeState | null>(null);
+  const [testResult, setTestResult] = useState<TestResultState | null>(null);
 
-  useEffect(() => {
-    loadProviders();
-  }, []);
+  const enabledCount = providers.filter((provider) => provider.is_enabled).length;
+  const defaultProvider = providers.find((provider) => provider.is_default) || null;
+  const isEditing = mode === "edit" || mode === "create";
 
-  async function loadProviders() {
+  function setField<K extends keyof ProviderFormState>(key: K, value: ProviderFormState[K]) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function loadProviders(preferredProviderId?: string) {
     setLoading(true);
     try {
-      const data = await listLLMProviders();
-      setProviders(data);
-    } catch {
-      // ignore
+      const response = await listLLMProviders();
+      setProviders(response);
+
+      const nextSelected =
+        response.find((provider) => provider.provider_id === preferredProviderId) ||
+        response.find((provider) => provider.provider_id === selected?.provider_id) ||
+        response[0] ||
+        null;
+
+      if (nextSelected) {
+        setSelected(nextSelected);
+        setForm(providerToForm(nextSelected));
+        setMode("view");
+      } else {
+        setSelected(null);
+        setForm(emptyForm);
+        setMode("view");
+      }
+
+      setError(null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Unable to load LLM providers.");
     } finally {
       setLoading(false);
     }
   }
 
-  function resetForm() {
-    setFormData({
-      provider_id: "",
-      name: "",
-      description: "",
-      api_key: "",
-      base_url: "",
-      default_model: "",
-      supported_models: [],
-      is_enabled: false,
-      is_default: false,
-      timeout: 60,
-    });
-    setTestResult(null);
-  }
-
-  function handleAdd() {
-    resetForm();
-    setSelected(null);
-    setEditing(true);
-    setShowAdd(true);
-  }
+  useEffect(() => {
+    void loadProviders();
+  }, []);
 
   function handleSelect(provider: LLMProviderInfo) {
     setSelected(provider);
-    setFormData({
-      provider_id: provider.provider_id,
-      name: provider.name,
-      description: provider.description || "",
-      api_key: provider.api_key || "",
-      base_url: provider.base_url || "",
-      default_model: provider.default_model || "",
-      supported_models: provider.supported_models || [],
-      is_enabled: provider.is_enabled,
-      is_default: provider.is_default,
-      timeout: provider.timeout,
-    });
-    setEditing(false);
-    setShowAdd(false);
+    setForm(providerToForm(provider));
+    setMode("view");
+    setNotice(null);
     setTestResult(null);
-    setMessage("");
   }
 
-  function handleTemplateSelect(providerId: string) {
-    const template = LLM_PROVIDER_TEMPLATES.find((t) => t.provider_id === providerId);
-    if (template) {
-      setFormData((prev) => ({
-        ...prev,
-        provider_id: template.provider_id,
-        name: template.name,
-        description: template.description,
-        base_url: template.base_url,
-        default_model: template.default_model,
-        supported_models: [...template.supported_models],
-      }));
+  function handleCreate() {
+    setSelected(null);
+    setForm(emptyForm);
+    setMode("create");
+    setNotice(null);
+    setTestResult(null);
+  }
+
+  function applyTemplate(providerId: string) {
+    const template = LLM_PROVIDER_TEMPLATES.find((item) => item.provider_id === providerId);
+    if (!template) return;
+
+    setForm((current) => ({
+      ...current,
+      provider_id: template.provider_id,
+      name: template.name,
+      description: template.description,
+      base_url: template.base_url,
+      default_model: template.default_model,
+      supported_models: template.supported_models.join(", "),
+    }));
+  }
+
+  function parseSupportedModels() {
+    return form.supported_models
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  async function handleSave() {
+    if (!form.provider_id.trim() || !form.name.trim()) {
+      setNotice({ tone: "danger", message: "Provider ID and display name are required." });
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const payload = {
+        provider_id: form.provider_id.trim(),
+        name: form.name.trim(),
+        description: form.description.trim() || undefined,
+        api_key: form.api_key.trim() || undefined,
+        base_url: form.base_url.trim() || undefined,
+        default_model: form.default_model.trim() || undefined,
+        supported_models: parseSupportedModels(),
+        timeout: Number(form.timeout) || 60,
+        is_enabled: form.is_enabled,
+        is_default: form.is_default,
+      };
+
+      if (mode === "create") {
+        await createLLMProvider(payload);
+        await loadProviders(payload.provider_id);
+        setNotice({ tone: "success", message: `Created provider ${payload.name}.` });
+      } else if (selected) {
+        await updateLLMProvider(selected.provider_id, payload);
+        await loadProviders(selected.provider_id);
+        setNotice({ tone: "success", message: `Saved changes for ${payload.name}.` });
+      }
+    } catch (saveError) {
+      setNotice({
+        tone: "danger",
+        message: saveError instanceof Error ? saveError.message : "Unable to save this provider.",
+      });
+    } finally {
+      setSaving(false);
     }
   }
 
   async function handleTest() {
-    if (!formData.api_key) {
-      setTestResult({ success: false, message: "请先输入 API Key" });
+    if (!form.api_key.trim()) {
+      setTestResult({ success: false, message: "Enter an API key before testing the provider." });
       return;
     }
 
     setTesting(true);
     setTestResult(null);
-
     try {
       const result = await testLLMProvider({
-        provider_id: formData.provider_id,
-        api_key: formData.api_key,
-        base_url: formData.base_url,
-        model: formData.default_model,
+        provider_id: form.provider_id.trim(),
+        api_key: form.api_key.trim(),
+        base_url: form.base_url.trim() || undefined,
+        model: form.default_model.trim() || undefined,
       });
 
       if (result.success) {
         setTestResult({
           success: true,
-          message: result.response_preview || "测试成功",
+          message: result.response_preview || "Connection test succeeded.",
           latency: result.latency_ms,
         });
       } else {
         setTestResult({
           success: false,
-          message: result.error_message || "测试失败",
+          message: result.error_message || "Connection test failed.",
         });
       }
-    } catch (err) {
+    } catch (testError) {
       setTestResult({
         success: false,
-        message: err instanceof Error ? err.message : "测试请求失败",
+        message: testError instanceof Error ? testError.message : "Unable to test this provider.",
       });
     } finally {
       setTesting(false);
     }
   }
 
-  async function handleSave() {
-    setSaving(true);
-    setMessage("");
+  async function handleSetDefault() {
+    if (!selected) return;
 
     try {
-      if (showAdd) {
-        await createLLMProvider({
-          provider_id: formData.provider_id,
-          name: formData.name,
-          description: formData.description || undefined,
-          api_key: formData.api_key || undefined,
-          base_url: formData.base_url || undefined,
-          default_model: formData.default_model || undefined,
-          supported_models: formData.supported_models.length > 0 ? formData.supported_models : undefined,
-          is_enabled: formData.is_enabled,
-          is_default: formData.is_default,
-          timeout: formData.timeout,
-        });
-        setMessage("创建成功");
-      } else if (selected) {
-        await updateLLMProvider(selected.provider_id, {
-          name: formData.name,
-          description: formData.description || undefined,
-          api_key: formData.api_key || undefined,
-          base_url: formData.base_url || undefined,
-          default_model: formData.default_model || undefined,
-          supported_models: formData.supported_models.length > 0 ? formData.supported_models : undefined,
-          is_enabled: formData.is_enabled,
-          is_default: formData.is_default,
-          timeout: formData.timeout,
-        });
-        setMessage("保存成功");
-      }
-
-      setEditing(false);
-      await loadProviders();
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "保存失败");
-    } finally {
-      setSaving(false);
+      await setDefaultLLMProvider(selected.provider_id);
+      await loadProviders(selected.provider_id);
+      setNotice({ tone: "success", message: `${selected.name} is now the default provider.` });
+    } catch (defaultError) {
+      setNotice({
+        tone: "danger",
+        message: defaultError instanceof Error ? defaultError.message : "Unable to change the default provider.",
+      });
     }
   }
 
   async function handleDelete() {
     if (!selected) return;
-    if (!confirm(`确定删除 ${selected.name}?`)) return;
 
+    setSaving(true);
     try {
       await deleteLLMProvider(selected.provider_id);
-      setSelected(null);
-      resetForm();
+      setDeleteOpen(false);
       await loadProviders();
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "删除失败");
+      setNotice({ tone: "success", message: `Deleted provider ${selected.name}.` });
+    } catch (deleteError) {
+      setNotice({
+        tone: "danger",
+        message: deleteError instanceof Error ? deleteError.message : "Unable to delete this provider.",
+      });
+    } finally {
+      setSaving(false);
     }
   }
 
-  async function handleSetDefault(providerId: string) {
-    try {
-      await setDefaultLLMProvider(providerId);
-      await loadProviders();
-      setMessage("已设为默认 Provider");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "设置失败");
+  function handleCancel() {
+    if (selected) {
+      setForm(providerToForm(selected));
+      setMode("view");
+    } else {
+      const firstProvider = providers[0];
+      if (firstProvider) {
+        handleSelect(firstProvider);
+      } else {
+        setForm(emptyForm);
+        setMode("view");
+      }
     }
+    setTestResult(null);
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
-      <header className="bg-slate-800/80 backdrop-blur-sm border-b border-slate-700 px-6 py-4 sticky top-0 z-20">
-        <div className="max-w-[1000px] mx-auto flex items-center gap-4">
-          <Link href="/settings" className="text-cyan-400 hover:text-cyan-300 text-sm">
-            &larr; 设置中心
-          </Link>
-          <span className="text-slate-500">/</span>
-          <span className="text-white font-medium text-sm">LLM Provider 配置</span>
-        </div>
-      </header>
+    <AppShell>
+      <div className="space-y-8">
+        <PageHeader
+          eyebrow="Provider Setup"
+          title="LLM Providers"
+          description="Manage provider records, test connectivity, and control which model provider becomes the runtime default."
+          actions={
+            <>
+              <Button variant="secondary" onClick={() => void loadProviders(selected?.provider_id)}>
+                <Icon name="refresh" className="h-4 w-4" />
+                Refresh
+              </Button>
+              <Button onClick={handleCreate}>
+                <Icon name="plus" className="h-4 w-4" />
+                New Provider
+              </Button>
+            </>
+          }
+        />
 
-      <main className="max-w-[1000px] mx-auto p-6 flex gap-6">
-        {/* Provider list */}
-        <div className="w-[280px] shrink-0">
-          <div className="flex items-center justify-between mb-2 border-b border-gray-700/50 pb-1">
-            <span className="text-[10px] text-cyan-400/80">已配置 Provider</span>
-            <button
-              onClick={handleAdd}
-              className="text-[9px] text-cyan-400 hover:text-cyan-300 border border-cyan-600/50 px-2 py-0.5 rounded-sm"
-            >
-              + 添加
-            </button>
-          </div>
-
-          {loading ? (
-            <div className="text-[10px] text-gray-500 py-4">加载中...</div>
-          ) : providers.length === 0 ? (
-            <div className="text-[10px] text-gray-500 py-4">暂无配置，点击添加</div>
-          ) : (
-            <div className="space-y-1">
-              {providers.map((p) => (
-                <button
-                  key={p.provider_id}
-                  onClick={() => handleSelect(p)}
-                  className={`w-full text-left px-3 py-2 rounded-sm text-[11px] transition-colors border ${
-                    selected?.provider_id === p.provider_id
-                      ? "bg-cyan-900/30 border-cyan-600/50 text-cyan-300"
-                      : "bg-gray-900/30 border-gray-700/50 text-gray-300 hover:border-gray-600"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold">{p.name}</span>
-                    {p.is_default && (
-                      <span className="text-[8px] text-yellow-400 border border-yellow-600/30 px-1 rounded-sm">
-                        默认
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[9px] text-gray-500 mt-0.5">{p.provider_id}</div>
-                  <div className="text-[9px] text-gray-500">
-                    {p.default_model || "(未设置模型)"}
-                  </div>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span
-                      className={`text-[8px] px-1.5 py-0.5 rounded-sm border ${
-                        p.is_enabled
-                          ? "text-green-400 border-green-600/30"
-                          : "text-gray-500 border-gray-600/30"
-                      }`}
-                    >
-                      {p.is_enabled ? "启用" : "禁用"}
-                    </span>
-                    {p.test_status && (
-                      <span
-                        className={`text-[8px] px-1.5 py-0.5 rounded-sm border ${
-                          p.test_status === "success"
-                            ? "text-green-400 border-green-600/30"
-                            : "text-red-400 border-red-600/30"
-                        }`}
-                      >
-                        {p.test_status === "success" ? "测试OK" : "测试失败"}
-                      </span>
-                    )}
-                  </div>
-                </button>
-              ))}
+        {loading ? (
+          <SkeletonRows rows={5} />
+        ) : error ? (
+          <ErrorState title="Providers failed to load" description={error} retry={() => void loadProviders(selected?.provider_id)} />
+        ) : (
+          <>
+            <div className="grid gap-5 md:grid-cols-3">
+              <StatCard
+                label="Configured Providers"
+                value={String(providers.length)}
+                hint="All provider records currently stored in the backend."
+                tone="info"
+                icon={<Icon name="settings" className="h-6 w-6" />}
+              />
+              <StatCard
+                label="Enabled Providers"
+                value={String(enabledCount)}
+                hint="Providers currently allowed to serve model traffic."
+                tone="success"
+                icon={<Icon name="check" className="h-6 w-6" />}
+              />
+              <StatCard
+                label="Default Provider"
+                value={defaultProvider?.name || "None"}
+                hint="The provider the backend will prefer by default."
+                tone="warning"
+                icon={<Icon name="workspace" className="h-6 w-6" />}
+              />
             </div>
-          )}
-        </div>
 
-        {/* Detail / Form */}
-        <div className="flex-1 min-w-0">
-          {!selected && !showAdd ? (
-            <div className="text-[11px] text-gray-500 py-12 text-center">
-              选择左侧 Provider 查看详情，或点击&quot;+ 添加&quot;新建配置
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {/* Provider selector for new */}
-              {showAdd && (
-                <div className="bg-gray-900/50 border border-gray-700 rounded-sm p-4">
-                  <div className="text-[10px] text-cyan-400/80 mb-3">选择 Provider 类型</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {LLM_PROVIDER_TEMPLATES.map((t) => (
-                      <button
-                        key={t.provider_id}
-                        onClick={() => handleTemplateSelect(t.provider_id)}
-                        className={`text-left px-3 py-2 rounded-sm text-[10px] border transition-colors ${
-                          formData.provider_id === t.provider_id
-                            ? "bg-cyan-900/30 border-cyan-600/50 text-cyan-300"
-                            : "bg-gray-800/50 border-gray-700/50 text-gray-300 hover:border-gray-600"
-                        }`}
-                      >
-                        <div className="font-bold">{t.name}</div>
-                        <div className="text-[9px] text-gray-500 mt-0.5 truncate">{t.description}</div>
-                      </button>
-                    ))}
+            <div className="grid gap-6 xl:grid-cols-[0.95fr_1.25fr]">
+              <Card title="Available Providers" description="Select a provider to review or edit its configuration.">
+                {providers.length ? (
+                  <div className="space-y-3">
+                    {providers.map((provider) => {
+                      const active = selected?.provider_id === provider.provider_id && mode !== "create";
+                      return (
+                        <button
+                          key={provider.provider_id}
+                          type="button"
+                          onClick={() => handleSelect(provider)}
+                          className={cn(
+                            "w-full rounded-2xl border p-4 text-left transition",
+                            active
+                              ? "border-brand-200 bg-brand-50"
+                              : "border-slate-200 bg-white hover:border-brand-200 hover:bg-brand-50/50",
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-900">{provider.name}</p>
+                              <p className="mt-1 truncate text-xs text-slate-500">{provider.provider_id}</p>
+                            </div>
+                            <div className="flex flex-wrap justify-end gap-2">
+                              {provider.is_default ? <Badge tone="warning">Default</Badge> : null}
+                              <Badge tone={provider.is_enabled ? "success" : "muted"}>
+                                {provider.is_enabled ? "Enabled" : "Disabled"}
+                              </Badge>
+                            </div>
+                          </div>
+                          <p className="mt-3 text-sm leading-6 text-slate-500">
+                            {provider.description || "No provider description is stored yet."}
+                          </p>
+                        </button>
+                      );
+                    })}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <EmptyState
+                    title="No providers yet"
+                    description="Create the first provider record to configure model access for the console."
+                    action={
+                      <Button onClick={handleCreate}>
+                        <Icon name="plus" className="h-4 w-4" />
+                        Create Provider
+                      </Button>
+                    }
+                  />
+                )}
+              </Card>
 
-              {/* Form */}
-              <div className="bg-gray-900/50 border border-gray-700 rounded-sm p-4 space-y-3">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] text-cyan-400/80">
-                    {showAdd ? "新建 Provider" : "Provider 配置"}
-                  </span>
-                  {editing && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleSave}
-                        disabled={saving}
-                        className="text-[9px] text-cyan-400 hover:text-cyan-300 border border-cyan-600/50 px-2 py-0.5 rounded-sm disabled:opacity-50"
-                      >
-                        {saving ? "保存中..." : "保存"}
-                      </button>
-                      <button
-                        onClick={() => {
-                          setEditing(false);
-                          if (selected) handleSelect(selected);
-                          if (showAdd) resetForm();
-                        }}
-                        className="text-[9px] text-gray-400 hover:text-white border border-gray-600 px-2 py-0.5 rounded-sm"
-                      >
-                        取消
-                      </button>
+              <div className="space-y-6">
+                <NoticeBanner notice={notice} />
+
+                {mode === "create" ? (
+                  <Card title="Provider Templates" description="Start from a known provider template and then adjust the details below.">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {LLM_PROVIDER_TEMPLATES.map((template) => (
+                        <button
+                          key={template.provider_id}
+                          type="button"
+                          onClick={() => applyTemplate(template.provider_id)}
+                          className={cn(
+                            "rounded-2xl border p-4 text-left transition",
+                            form.provider_id === template.provider_id
+                              ? "border-brand-200 bg-brand-50"
+                              : "border-slate-200 bg-slate-50/50 hover:border-brand-200 hover:bg-brand-50/60",
+                          )}
+                        >
+                          <p className="text-sm font-semibold text-slate-900">{template.name}</p>
+                          <p className="mt-2 text-sm leading-6 text-slate-500">{template.description}</p>
+                        </button>
+                      ))}
                     </div>
-                  )}
-                </div>
+                  </Card>
+                ) : null}
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[9px] text-gray-400 block mb-1">Provider ID</label>
-                    <input
-                      type="text"
-                      value={formData.provider_id}
-                      onChange={(e) => setFormData({ ...formData, provider_id: e.target.value })}
-                      disabled={!showAdd}
-                      className="w-full bg-gray-800 border border-gray-600 rounded-sm px-2 py-1.5 text-[10px] text-gray-200 disabled:opacity-50"
-                      placeholder="如: openai"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9px] text-gray-400 block mb-1">显示名称</label>
-                    <input
-                      type="text"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      disabled={!editing}
-                      className="w-full bg-gray-800 border border-gray-600 rounded-sm px-2 py-1.5 text-[10px] text-gray-200 disabled:opacity-50"
-                      placeholder="如: OpenAI GPT-4"
-                    />
-                  </div>
-                </div>
+                {selected || mode === "create" ? (
+                  <>
+                    <Card
+                      title={mode === "create" ? "New Provider" : "Provider Configuration"}
+                      description="Use the same editing flow as the WeChat settings page: review the current state on the right, then edit and save."
+                      action={
+                        <div className="flex flex-wrap gap-2">
+                          {isEditing ? (
+                            <>
+                              <Button variant="secondary" onClick={handleCancel}>
+                                Cancel
+                              </Button>
+                              <Button variant="secondary" onClick={() => void handleTest()} disabled={testing}>
+                                {testing ? "Testing..." : "Test Connection"}
+                              </Button>
+                              <Button onClick={() => void handleSave()} disabled={saving}>
+                                {saving ? "Saving..." : mode === "create" ? "Create Provider" : "Save Changes"}
+                              </Button>
+                            </>
+                          ) : (
+                            <>
+                              {selected && !selected.is_default ? (
+                                <Button variant="secondary" onClick={() => void handleSetDefault()}>
+                                  Set as Default
+                                </Button>
+                              ) : null}
+                              {selected ? (
+                                <Button variant="secondary" onClick={() => setMode("edit")}>
+                                  <Icon name="edit" className="h-4 w-4" />
+                                  Edit Provider
+                                </Button>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                      }
+                    >
+                      <div className="grid gap-5">
+                        <div className="grid gap-5 md:grid-cols-2">
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">Provider ID</label>
+                            <Input
+                              value={form.provider_id}
+                              onChange={(event) => setField("provider_id", event.target.value)}
+                              disabled={mode !== "create"}
+                              placeholder="openai"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">Display Name</label>
+                            <Input
+                              value={form.name}
+                              onChange={(event) => setField("name", event.target.value)}
+                              disabled={!isEditing}
+                              placeholder="OpenAI"
+                            />
+                          </div>
+                        </div>
 
-                <div>
-                  <label className="text-[9px] text-gray-400 block mb-1">API Key</label>
-                  <input
-                    type="password"
-                    value={formData.api_key}
-                    onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                    disabled={!editing}
-                    className="w-full bg-gray-800 border border-gray-600 rounded-sm px-2 py-1.5 text-[10px] text-gray-200 disabled:opacity-50"
-                    placeholder="sk-..."
-                  />
-                </div>
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-slate-700">Description</label>
+                          <Textarea
+                            value={form.description}
+                            onChange={(event) => setField("description", event.target.value)}
+                            disabled={!isEditing}
+                            className="min-h-24"
+                            placeholder="Describe the provider, endpoint role, or expected model family."
+                          />
+                        </div>
 
-                <div>
-                  <label className="text-[9px] text-gray-400 block mb-1">Base URL</label>
-                  <input
-                    type="text"
-                    value={formData.base_url}
-                    onChange={(e) => setFormData({ ...formData, base_url: e.target.value })}
-                    disabled={!editing}
-                    className="w-full bg-gray-800 border border-gray-600 rounded-sm px-2 py-1.5 text-[10px] text-gray-200 disabled:opacity-50"
-                    placeholder="https://api.openai.com/v1"
-                  />
-                </div>
+                        <div className="grid gap-5 md:grid-cols-2">
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">API Key</label>
+                            <Input
+                              type="password"
+                              value={form.api_key}
+                              onChange={(event) => setField("api_key", event.target.value)}
+                              disabled={!isEditing}
+                              placeholder="Enter the provider API key"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">Base URL</label>
+                            <Input
+                              value={form.base_url}
+                              onChange={(event) => setField("base_url", event.target.value)}
+                              disabled={!isEditing}
+                              placeholder="https://api.openai.com/v1"
+                            />
+                          </div>
+                        </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[9px] text-gray-400 block mb-1">默认模型</label>
-                    <input
-                      type="text"
-                      value={formData.default_model}
-                      onChange={(e) => setFormData({ ...formData, default_model: e.target.value })}
-                      disabled={!editing}
-                      className="w-full bg-gray-800 border border-gray-600 rounded-sm px-2 py-1.5 text-[10px] text-gray-200 disabled:opacity-50"
-                      placeholder="gpt-4o-mini"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[9px] text-gray-400 block mb-1">超时时间 (秒)</label>
-                    <input
-                      type="number"
-                      value={formData.timeout}
-                      onChange={(e) => setFormData({ ...formData, timeout: parseInt(e.target.value) || 60 })}
-                      disabled={!editing}
-                      min={5}
-                      max={300}
-                      className="w-full bg-gray-800 border border-gray-600 rounded-sm px-2 py-1.5 text-[10px] text-gray-200 disabled:opacity-50"
-                    />
-                  </div>
-                </div>
+                        <div className="grid gap-5 md:grid-cols-3">
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">Default Model</label>
+                            <Input
+                              value={form.default_model}
+                              onChange={(event) => setField("default_model", event.target.value)}
+                              disabled={!isEditing}
+                              placeholder="gpt-4o-mini"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">Timeout Seconds</label>
+                            <Input
+                              type="number"
+                              value={form.timeout}
+                              onChange={(event) => setField("timeout", event.target.value)}
+                              disabled={!isEditing}
+                              min={5}
+                              max={300}
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-2 block text-sm font-medium text-slate-700">Supported Models</label>
+                            <Input
+                              value={form.supported_models}
+                              onChange={(event) => setField("supported_models", event.target.value)}
+                              disabled={!isEditing}
+                              placeholder="Comma-separated model IDs"
+                            />
+                          </div>
+                        </div>
 
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 text-[10px]">
-                    <input
-                      type="checkbox"
-                      checked={formData.is_enabled}
-                      onChange={(e) => setFormData({ ...formData, is_enabled: e.target.checked })}
-                      disabled={!editing}
-                      className="w-3 h-3"
-                    />
-                    <span className="text-gray-300">启用</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-[10px]">
-                    <input
-                      type="checkbox"
-                      checked={formData.is_default}
-                      onChange={(e) => setFormData({ ...formData, is_default: e.target.checked })}
-                      disabled={!editing}
-                      className="w-3 h-3"
-                    />
-                    <span className="text-gray-300">设为默认</span>
-                  </label>
-                </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <label className="flex items-center justify-between rounded-2xl border border-slate-200 p-4">
+                            <span>
+                              <span className="block text-sm font-medium text-slate-900">Enabled</span>
+                              <span className="text-sm text-slate-500">Allow this provider to be used at runtime.</span>
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={form.is_enabled}
+                              onChange={(event) => setField("is_enabled", event.target.checked)}
+                              disabled={!isEditing}
+                            />
+                          </label>
+                          <label className="flex items-center justify-between rounded-2xl border border-slate-200 p-4">
+                            <span>
+                              <span className="block text-sm font-medium text-slate-900">Default Provider</span>
+                              <span className="text-sm text-slate-500">Mark this provider as the default backend choice.</span>
+                            </span>
+                            <input
+                              type="checkbox"
+                              checked={form.is_default}
+                              onChange={(event) => setField("is_default", event.target.checked)}
+                              disabled={!isEditing}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    </Card>
 
-                {message && (
-                  <div className="text-[9px] text-cyan-400 mt-2">{message}</div>
+                    {selected ? (
+                      <div className="grid gap-6 md:grid-cols-2">
+                        <Card title="Current Status" description="A compact runtime summary for the selected provider.">
+                          <div className="grid gap-4 text-sm text-slate-600">
+                            <div className="flex items-center justify-between gap-4">
+                              <span className="text-slate-500">Provider</span>
+                              <span className="font-medium text-slate-900">{selected.name}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-4">
+                              <span className="text-slate-500">Default Model</span>
+                              <span className="font-medium text-slate-900">{selected.default_model || "Not set"}</span>
+                            </div>
+                            <div className="flex items-center justify-between gap-4">
+                              <span className="text-slate-500">Enabled</span>
+                              <Badge tone={selected.is_enabled ? "success" : "muted"}>
+                                {selected.is_enabled ? "Yes" : "No"}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center justify-between gap-4">
+                              <span className="text-slate-500">Default</span>
+                              <Badge tone={selected.is_default ? "warning" : "muted"}>
+                                {selected.is_default ? "Default" : "Secondary"}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center justify-between gap-4">
+                              <span className="text-slate-500">Last Test</span>
+                              <Badge
+                                tone={
+                                  selected.test_status === "success"
+                                    ? "success"
+                                    : selected.test_status === "failed"
+                                      ? "danger"
+                                      : "muted"
+                                }
+                              >
+                                {selected.test_status || "Unknown"}
+                              </Badge>
+                            </div>
+                          </div>
+                        </Card>
+
+                        <Card
+                          title="Connection Feedback"
+                          description="Latest test feedback or provider-level maintenance actions."
+                          action={
+                            selected ? (
+                              <Button variant="destructive" onClick={() => setDeleteOpen(true)} disabled={saving}>
+                                Delete Provider
+                              </Button>
+                            ) : null
+                          }
+                        >
+                          {testResult ? (
+                            <div
+                              className={cn(
+                                "rounded-2xl border px-4 py-3 text-sm",
+                                testResult.success
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-rose-200 bg-rose-50 text-rose-700",
+                              )}
+                            >
+                              <p>{testResult.message}</p>
+                              {typeof testResult.latency === "number" ? (
+                                <p className="mt-1 text-xs opacity-80">Latency: {testResult.latency} ms</p>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-500">
+                              {selected.test_message || "No recent test feedback is available for this provider yet."}
+                            </div>
+                          )}
+                        </Card>
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <Card title="Provider Configuration" description="Create or select a provider to work with.">
+                    <EmptyState
+                      title="Choose a provider"
+                      description="Pick an existing provider from the list or create a new one to start editing."
+                    />
+                  </Card>
                 )}
               </div>
-
-              {/* Actions */}
-              {selected && (
-                <div className="flex gap-3">
-                  {!editing ? (
-                    <button
-                      onClick={() => setEditing(true)}
-                      className="text-[10px] text-cyan-400 hover:text-cyan-300 border border-cyan-600/50 px-3 py-1.5 rounded-sm"
-                    >
-                      编辑配置
-                    </button>
-                  ) : (
-                    <button
-                      onClick={handleTest}
-                      disabled={testing}
-                      className="text-[10px] text-green-400 hover:text-green-300 border border-green-600/50 px-3 py-1.5 rounded-sm disabled:opacity-50"
-                    >
-                      {testing ? "测试中..." : "测试连接"}
-                    </button>
-                  )}
-
-                  {!editing && !selected.is_default && (
-                    <button
-                      onClick={() => handleSetDefault(selected.provider_id)}
-                      className="text-[10px] text-yellow-400 hover:text-yellow-300 border border-yellow-600/50 px-3 py-1.5 rounded-sm"
-                    >
-                      设为默认
-                    </button>
-                  )}
-
-                  <button
-                    onClick={handleDelete}
-                    className="text-[10px] text-red-400 hover:text-red-300 border border-red-600/50 px-3 py-1.5 rounded-sm"
-                  >
-                    删除
-                  </button>
-                </div>
-              )}
-
-              {/* Test result */}
-              {testResult && (
-                <div
-                  className={`bg-gray-900/50 border rounded-sm p-3 ${
-                    testResult.success ? "border-green-600/50" : "border-red-600/50"
-                  }`}
-                >
-                  <div className={`text-[10px] ${testResult.success ? "text-green-400" : "text-red-400"}`}>
-                    {testResult.success ? "[测试成功]" : "[测试失败]"}
-                  </div>
-                  <div className="text-[9px] text-gray-400 mt-1">{testResult.message}</div>
-                  {testResult.latency && (
-                    <div className="text-[9px] text-gray-500 mt-1">耗时: {testResult.latency}ms</div>
-                  )}
-                </div>
-              )}
             </div>
-          )}
-        </div>
-      </main>
-    </div>
+          </>
+        )}
+      </div>
+
+      <ConfirmDialog
+        open={deleteOpen}
+        title="Delete Provider"
+        description={`This permanently removes ${selected?.name ?? "the selected provider"} from the backend configuration list.`}
+        confirmLabel="Delete Provider"
+        tone="danger"
+        onConfirm={() => void handleDelete()}
+        onCancel={() => setDeleteOpen(false)}
+      />
+    </AppShell>
   );
 }

@@ -1,12 +1,12 @@
 """Agent configuration API routes."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.schemas.common import ApiResponse
-from app.schemas.agent import AgentConfigUpdateRequest
+from app.schemas.agent import AgentConfigUpdateRequest, AgentCreateRequest
 from app.agents.registry import agent_registry
 from app.models.tables import AgentModel
 from app.core.exceptions import AgentNotFoundError
@@ -111,4 +111,94 @@ async def update_agent_config(
     return ApiResponse(data={
         "agent_id": agent_id,
         "updated_fields": updated_fields,
+    })
+
+
+@router.post("")
+async def create_agent_config(
+    req: AgentCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    """
+    Create a custom agent configuration.
+
+    This creates a database record for customizing an agent's settings
+    (prompt_template, model_config, retry_config) without modifying the
+    base agent definition.
+    """
+    # Verify agent exists in registry
+    try:
+        base_agent = agent_registry.get(req.agent_id)
+    except AgentNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Agent '{req.agent_id}' not found in registry. Available agents: {[a.agent_id for a in agent_registry.list_all()]}"
+        )
+
+    # Check if config already exists
+    stmt = select(AgentModel).where(AgentModel.agent_id == req.agent_id)
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+
+    if existing is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Configuration for agent '{req.agent_id}' already exists. Use PUT to update."
+        )
+
+    # Create new configuration
+    db_agent = AgentModel(
+        agent_id=req.agent_id,
+        name=req.name or base_agent.name,
+        description=req.description,
+        module_path=f"app.agents.{req.agent_id}",
+        model_config_data=req.model_config_data,
+        prompt_template=req.prompt_template,
+        retry_config=req.retry_config,
+    )
+
+    db.add(db_agent)
+    await db.flush()
+
+    return ApiResponse(data={
+        "agent_id": req.agent_id,
+        "name": db_agent.name,
+        "description": db_agent.description,
+        "prompt_template": db_agent.prompt_template,
+        "model_config_data": db_agent.model_config_data,
+        "retry_config": db_agent.retry_config,
+        "created_at": db_agent.created_at.isoformat() if db_agent.created_at else None,
+    })
+
+
+@router.delete("/{agent_id}/config")
+async def delete_agent_config(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    """
+    Delete a custom agent configuration.
+
+    This removes the database record but does not delete the base agent
+    from the registry. The agent will revert to using its default configuration.
+    """
+    # Verify agent exists in registry
+    agent_registry.get(agent_id)
+
+    stmt = select(AgentModel).where(AgentModel.agent_id == agent_id)
+    result = await db.execute(stmt)
+    db_agent = result.scalar_one_or_none()
+
+    if db_agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No custom configuration found for agent '{agent_id}'"
+        )
+
+    await db.delete(db_agent)
+    await db.flush()
+
+    return ApiResponse(data={
+        "agent_id": agent_id,
+        "deleted": True,
     })
