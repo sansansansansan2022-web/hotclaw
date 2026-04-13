@@ -1,5 +1,21 @@
 """Audit agent: reviews content for risks and evidence grounding."""
 
+# ============================================================================
+# 审核 Agent (Audit Agent)
+# ============================================================================
+# 职责说明：
+# - 审核生成的文章内容
+# - 检查引用真实性（论文、项目名等是否有证据支撑）
+# - 检查夸大宣传（如"顶会"、"最火"等是否合理）
+# - 检查内容合规性和语气适当性
+# - 评估风险等级并提供改进建议
+#
+# 协作关系：
+# - 输入：标题 (TitleGeneratorAgent)、内容 (ContentWriterAgent)、证据
+# - 输出：审核结果（通过/不通过、风险等级、问题列表）
+# - 是内容发布的最后一道质量关卡
+# ============================================================================
+
 from __future__ import annotations
 
 import json
@@ -12,12 +28,34 @@ from app.core.config import settings
 
 
 class AuditAgent(BaseAgent):
-    """Review generated content for compliance, quality, and evidence grounding."""
+    """审核 Agent - 审核内容质量、合规性和引用真实性。
 
+    核心职责：
+    1. 检查文章引用的论文/项目是否在证据列表中
+    2. 检查夸大宣传语是否合理
+    3. 检查内容风格与账号定位的匹配度
+    4. 评估整体风险等级（low/medium/high）
+    5. 提供问题清单和改进建议
+
+    特点：
+    - 启发式检查 + LLM 审查双重保障
+    - 风险等级基于问题严重程度自动判定
+    - 高严重度问题直接导致不通过
+    - 平衡合规性和可读性
+    """
+
+    # Agent 唯一标识符
     agent_id = "audit_agent"
     name = "Audit Agent"
     description = "Audit generated content for compliance risks and unsupported evidence claims."
 
+    # 输入数据结构定义
+    # titles: 标题候选列表
+    # content: 文章内容
+    # profile: 账号画像
+    # account_context: 账号上下文
+    # selected_evidence: 选中的证据
+    # citation_guardrails: 引用规范
     input_schema = {
         "type": "object",
         "properties": {
@@ -31,6 +69,11 @@ class AuditAgent(BaseAgent):
         "required": ["titles", "content", "profile"],
     }
 
+    # 输出数据结构定义
+    # passed: 是否通过审核
+    # risk_level: 风险等级（low/medium/high）
+    # issues: 问题列表
+    # overall_comment: 整体评语
     output_schema = {
         "type": "object",
         "properties": {
@@ -52,8 +95,10 @@ class AuditAgent(BaseAgent):
         },
     }
 
+    # 该 Agent 不使用任何 Skill
     supported_skills = []
 
+    # 默认系统提示词
     default_system_prompt = """You are a content audit specialist.
 
 Review the generated article and return strict JSON with:
@@ -69,12 +114,30 @@ Rules:
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
+        """执行内容审核。
+
+        主要步骤：
+        1. 提取输入数据
+        2. 执行启发式证据核查
+        3. 调用 LLM 进行深度审核
+        4. 合并启发式问题和 LLM 问题
+        5. 计算风险等级和通过状态
+
+        Args:
+            input_data: 包含标题、内容、证据等的输入数据
+            context: 执行上下文
+
+        Returns:
+            AgentResult: 包含审核结果、问题列表、风险等级
+        """
         profile = input_data.get("profile", {})
         titles_data = input_data.get("titles", {})
         content_data = input_data.get("content", {})
         selected_evidence = input_data.get("selected_evidence") or []
         citation_guardrails = input_data.get("citation_guardrails") or {}
         system_prompt = context.get("system_prompt") or self.default_system_prompt
+
+        # 构建审核提示词
         user_prompt = self._build_user_prompt(
             profile=profile,
             titles_data=titles_data,
@@ -83,9 +146,12 @@ Rules:
             citation_guardrails=citation_guardrails,
         )
 
+        # 步骤1: 执行启发式证据核查
+        # 检查文章中引用的仓库名和论文名是否在证据中
         heuristic_issues = self._detect_grounding_issues(content_data, selected_evidence)
 
         try:
+            # 步骤2: 调用 LLM 进行深度审核
             model = settings.llm_model_name
             if not model.startswith("dashscope/"):
                 model = f"dashscope/{model}"
@@ -103,19 +169,30 @@ Rules:
             )
             content = response.choices[0].message.content
             data = self._parse_json(content)
+
+            # 步骤3: 合并问题列表
             issues = data.get("issues") if isinstance(data.get("issues"), list) else []
             issues.extend(heuristic_issues)
             data["issues"] = issues
+
+            # 步骤4: 计算风险等级
             data["risk_level"] = self._derive_risk_level(issues)
+
+            # 步骤5: 确定通过状态（高严重度问题导致不通过）
             data["passed"] = not any(issue.get("severity") == "high" for issue in issues)
+
+            # 如果有启发式检查发现的问题，在评语中说明
             if heuristic_issues:
                 prefix = "Heuristic grounding checks found additional evidence issues. "
                 data["overall_comment"] = prefix + str(data.get("overall_comment") or "").strip()
+
             return self._success(data)
 
         except json.JSONDecodeError as exc:
+            # JSON 解析失败时使用启发式检查结果作为降级
             return self._success(self._fallback_audit(heuristic_issues, f"Failed to parse audit JSON: {exc}"))
         except Exception as exc:
+            # 其他异常时也使用启发式检查结果
             return self._success(self._fallback_audit(heuristic_issues, str(exc)))
 
     def _build_user_prompt(
@@ -127,11 +204,27 @@ Rules:
         selected_evidence: list[dict],
         citation_guardrails: dict[str, bool],
     ) -> str:
+        """构建审核提示词。
+
+        整合账号信息、标题、证据和文章内容，
+        生成完整的审核指令。
+
+        Args:
+            profile: 账号画像
+            titles_data: 标题列表
+            content_data: 文章内容
+            selected_evidence: 选中的证据
+            citation_guardrails: 引用规范
+
+        Returns:
+            str: 完整的用户提示词
+        """
         tone = profile.get("tone", "neutral")
         domain = profile.get("domain", "unknown")
         title_list = titles_data.get("titles", []) if isinstance(titles_data, dict) else []
         content_md = content_data.get("content_markdown", "") if isinstance(content_data, dict) else ""
 
+        # 截取文章预览（最多 5000 字符）
         content_preview = content_md[:5000] + "..." if len(content_md) > 5000 else content_md
         prompt_parts = [
             "Audit the following article.",
@@ -158,12 +251,30 @@ Rules:
         return "\n".join(prompt_parts)
 
     def _detect_grounding_issues(self, content_data: dict, selected_evidence: list[dict]) -> list[dict]:
+        """启发式证据核查。
+
+        使用正则表达式检测文章中引用的：
+        1. GitHub 仓库名（格式：owner/repo）
+        2. 论文/书名（用书名号或引号包裹）
+        3. 夸大宣传语（顶会、顶刊、SOTA 等）
+
+        Args:
+            content_data: 文章内容
+            selected_evidence: 选中的证据列表
+
+        Returns:
+            list[dict]: 发现的问题列表
+        """
         content_md = str((content_data or {}).get("content_markdown") or "")
+
+        # 提取证据中的论文标题集合
         evidence_titles = {
             self._normalize_name(item.get("title"))
             for item in selected_evidence
             if isinstance(item, dict) and self._normalize_name(item.get("title"))
         }
+
+        # 提取证据中的 GitHub 仓库名集合
         evidence_repo_names = {
             self._normalize_name(item.get("source_id"))
             for item in selected_evidence
@@ -173,12 +284,16 @@ Rules:
         }
 
         issues: list[dict] = []
+
+        # 检查 GitHub 仓库引用
+        # 匹配格式：owner/repo 或 owner/repo-name
         repo_mentions = {
             self._normalize_name(match)
             for match in re.findall(r"\b[\w.-]+/[\w.-]+\b", content_md)
             if self._normalize_name(match)
         }
         for repo_name in sorted(repo_mentions):
+            # 如果引用的仓库不在证据中，记录问题
             if repo_name not in evidence_repo_names:
                 issues.append(
                     {
@@ -189,12 +304,15 @@ Rules:
                     }
                 )
 
+        # 检查论文/书名引用
+        # 匹配书名号《》或引号""包裹的文本
         title_mentions = {
             self._normalize_name(match)
-            for match in re.findall(r"[《“\"]([^》”\"]{8,120})[》”\"]", content_md)
+            for match in re.findall(r"[《""]([^》""]{8,120})[》""]", content_md)
             if self._normalize_name(match)
         }
         for title in sorted(title_mentions):
+            # 如果引用的标题不在证据中且不是仓库名，记录问题
             if title not in evidence_titles and "/" not in title:
                 issues.append(
                     {
@@ -205,7 +323,10 @@ Rules:
                     }
                 )
 
+        # 检查夸大宣传语
+        # 匹配：顶会、顶刊、高水平、爆火、SOTA、最强、第一等
         if re.search(r"顶会|顶刊|高水平|爆火|state[- ]of[- ]the[- ]art|SOTA|最强|第一", content_md, re.IGNORECASE):
+            # 检查是否有权威证据支持
             strong_authority = any(
                 isinstance(item, dict) and float(item.get("authority_score") or 0.0) >= 0.85
                 for item in selected_evidence
@@ -222,7 +343,20 @@ Rules:
         return issues
 
     def _fallback_audit(self, heuristic_issues: list[dict], error_message: str) -> dict:
+        """审核失败时的降级处理。
+
+        当 LLM 审核不可用时，
+        使用启发式检查结果作为审核结论。
+
+        Args:
+            heuristic_issues: 启发式检查发现的问题
+            error_message: 错误消息
+
+        Returns:
+            dict: 基于启发式检查的审核结果
+        """
         issues = list(heuristic_issues)
+        # 添加系统错误问题
         if error_message:
             issues.append(
                 {
@@ -232,6 +366,7 @@ Rules:
                     "location": "system",
                 }
             )
+        # 计算风险等级
         risk_level = self._derive_risk_level(issues)
         return {
             "passed": not any(issue.get("severity") == "high" for issue in issues),
@@ -241,6 +376,18 @@ Rules:
         }
 
     def _derive_risk_level(self, issues: list[dict]) -> str:
+        """根据问题严重程度计算风险等级。
+
+        - 包含 high 级别问题 → high
+        - 包含 medium 级别问题 → medium
+        - 只有 low 或无问题 → low
+
+        Args:
+            issues: 问题列表
+
+        Returns:
+            str: 风险等级（low/medium/high）
+        """
         severities = {str(item.get("severity") or "").lower() for item in issues if isinstance(item, dict)}
         if "high" in severities:
             return "high"
@@ -249,10 +396,31 @@ Rules:
         return "low"
 
     def _normalize_name(self, value: object) -> str:
+        """标准化名称用于比较。
+
+        - 转换为小写
+        - 去除多余空白
+
+        Args:
+            value: 原始值
+
+        Returns:
+            str: 标准化后的名称
+        """
         raw = str(value or "").strip().lower()
         return re.sub(r"\s+", " ", raw)
 
     def _parse_json(self, content: str) -> dict:
+        """解析 LLM 返回的 JSON 内容。
+
+        处理可能包含 markdown 代码块的格式。
+
+        Args:
+            content: LLM 返回的原始文本
+
+        Returns:
+            dict: 解析后的数据字典
+        """
         text = content.strip()
         if text.startswith("```"):
             parts = text.split("```")
@@ -264,6 +432,18 @@ Rules:
         return json.loads(text)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
+        """完全失败时的降级处理。
+
+        执行纯启发式检查作为最终审核。
+
+        Args:
+            error: 发生的异常
+            input_data: 原始输入数据
+
+        Returns:
+            AgentResult: 基于启发式检查的审核结果
+        """
+        # 执行启发式证据核查
         heuristic_issues = self._detect_grounding_issues(
             input_data.get("content") or {},
             input_data.get("selected_evidence") or [],

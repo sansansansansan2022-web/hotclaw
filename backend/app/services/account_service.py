@@ -1,4 +1,18 @@
-"""Account service: business logic for account lifecycle management."""
+"""
+Account Service - 账号服务模块
+
+本模块负责公众号账号生命周期管理的核心业务逻辑，包括：
+- 账号 CRUD 操作（创建、查询、更新、启用/禁用）
+- 账号运行触发（手动运行、自动调度）
+- 账号运行状态跟踪（成功/失败状态更新）
+- 定时调度辅助（获取到期账号、计算下次运行时间）
+- 账号上下文构建（供 Agent 使用）
+
+运营模式：
+- manual: 手动模式，生成内容后需人工确认发布
+- semi_auto: 半自动模式，生成内容自动进入待审核状态
+- full_auto: 全自动模式，生成内容自动发布
+"""
 
 from datetime import datetime, timezone, timedelta
 from typing import Any
@@ -297,7 +311,11 @@ class AccountService:
     # -------------------------------------------------------------------------
 
     async def run_account(
-        self, account_id: str, db: AsyncSession, allow_auto: bool = False
+        self,
+        account_id: str,
+        db: AsyncSession,
+        allow_auto: bool = False,
+        explicit_input: dict[str, Any] | None = None,
     ) -> tuple[AccountModel, TaskModel]:
         """
         Manually trigger a task for the account.
@@ -371,15 +389,21 @@ class AccountService:
 
         # Create task with account positioning
         try:
+            task_input = {
+                "positioning": account.positioning,
+                "ops_context": ops_context,
+            }
+            if isinstance(explicit_input, dict):
+                for key, value in explicit_input.items():
+                    if value is not None:
+                        task_input[key] = value
+
             task = TaskModel(
                 id=generate_task_id(),
                 account_id=account_id,
                 workflow_id="default_pipeline",
                 status="pending",
-                input_data={
-                    "positioning": account.positioning,
-                    "ops_context": ops_context,
-                },
+                input_data=task_input,
             )
             db.add(task)
             await db.flush()
@@ -396,6 +420,8 @@ class AccountService:
             allow_run=run_strategy.get("allow_run", True),
             effective_mode=run_strategy.get("effective_mode"),
             allow_auto_publish=run_strategy.get("allow_auto_publish"),
+            has_explicit_input=bool(explicit_input),
+            selection_session_id=(explicit_input or {}).get("selection_session_id") if isinstance(explicit_input, dict) else None,
         )
 
         return account, task

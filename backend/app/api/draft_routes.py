@@ -1,4 +1,38 @@
-"""Draft API endpoints."""
+"""
+Draft 草稿箱 API 路由
+
+【草稿箱 API 路由】
+提供内容草稿的查询、审核、发布和废弃等功能。
+
+联动模块：
+- Service: app.services.draft_service (草稿业务逻辑)
+- Schema: app.schemas.draft (请求/响应序列化)
+- Exception: app.core.exceptions (Draft 相关异常)
+
+草稿状态机：
+- draft: 初始草稿状态（manual 模式任务完成后）
+- pending_review: 待审核状态（semi_auto 模式任务完成后）
+- approved: 已批准状态（确认发布后）
+- rejected: 已拒绝状态（审核未通过）
+- discarded: 已废弃状态（手动废弃）
+
+API 端点：
+- GET    /api/v1/drafts                    草稿列表（分页、筛选）
+- GET    /api/v1/drafts/pending-count       待审核数量统计
+- GET    /api/v1/drafts/{id}                草稿详情
+- POST   /api/v1/drafts/{id}/confirm-publish  确认发布
+- POST   /api/v1/drafts/{id}/discard        废弃草稿
+- POST   /api/v1/drafts/{id}/reject         拒绝草稿
+- POST   /api/v1/drafts/{id}/rerun          从草稿重跑
+- POST   /api/v1/drafts/{id}/publish-to-wechat  发布到微信公众号
+- GET    /api/v1/drafts/{id}/wechat-status  微信公众号发布状态
+- GET    /api/v1/drafts/{id}/publish-records  发布记录列表
+- POST   /api/v1/drafts/{id}/retry-publish  重试发布
+
+调用方：
+- 前端: frontend/app/drafts/* (草稿箱页面)
+- 前端: frontend/app/accounts/[id]/page.tsx (账号详情页草稿入口)
+"""
 
 from fastapi import APIRouter, Body, Depends, Query, status
 from fastapi.responses import JSONResponse
@@ -52,7 +86,22 @@ async def list_drafts(
     publish_status: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """List drafts with pagination and filters."""
+    """
+    【草稿列表查询】
+
+    分页查询草稿列表，支持多维度筛选。
+
+    查询参数：
+    - page: 页码（从 1 开始）
+    - page_size: 每页数量（最大 100）
+    - account_id: 按账号 ID 筛选（可选）
+    - draft_status: 按草稿状态筛选（可选，如 pending_review）
+    - publish_status: 按发布状态筛选（可选，如 published）
+
+    调用方：
+    - 前端: frontend/app/drafts/page.tsx (草稿箱列表页)
+    - 前端: frontend/app/accounts/[id]/page.tsx (账号详情页草稿入口)
+    """
     try:
         drafts, total = await draft_service.list_drafts(
             db,
@@ -170,9 +219,21 @@ async def discard_draft(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Discard a draft.
+    【废弃草稿】
 
-    State transition: pending_review -> discarded
+    手动废弃不需要的草稿，将草稿状态从 pending_review 转为 discarded。
+
+    状态转换：
+    - pending_review -> discarded
+
+    注意：已发布的草稿不能废弃
+
+    调用方：
+    - 前端: frontend/app/drafts/[id]/page.tsx (详情页废弃按钮)
+
+    异常：
+    - DraftNotFoundError: 草稿不存在
+    - DraftInvalidStatusError: 草稿状态不允许此操作
     """
     try:
         draft = await draft_service.discard_draft(draft_id, db)
@@ -453,11 +514,26 @@ async def retry_publish_draft(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Retry failed publish for a draft.
+    【重试发布草稿】
 
-    Only allowed when:
-    - Draft has a failed publish record
-    - Retry count < 3
+    重新尝试发布失败的草稿到微信公众号。
+
+    限制条件：
+    - 草稿必须有失败的发布记录
+    - 重试次数不能超过 3 次
+
+    工作流程：
+    1. 验证重试条件
+    2. 调用微信公众号 API 重新发布
+    3. 更新发布记录
+
+    调用方：
+    - 前端: frontend/app/drafts/[id]/page.tsx (详情页重试按钮)
+
+    异常：
+    - PublishRecordError: 重试次数超限或状态不允许
+    - PublishDecisionError: 发布决策阻止
+    - DraftPublishError: 微信 API 调用失败
     """
     try:
         draft, result = await draft_service.retry_publish_to_wechat(draft_id, db)

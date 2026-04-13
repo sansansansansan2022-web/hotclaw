@@ -22,6 +22,26 @@ def generate_account_id() -> str:
     return f"acct_{nanoid(size=12)}"
 
 
+def generate_analysis_snapshot_id() -> str:
+    """Generate a new account analysis snapshot ID. Format: ins_{nanoid(12)}"""
+    return f"ins_{nanoid(size=12)}"
+
+
+def generate_recommendation_id() -> str:
+    """Generate a new recommendation item ID. Format: rec_{nanoid(12)}"""
+    return f"rec_{nanoid(size=12)}"
+
+
+def generate_selection_session_id() -> str:
+    """Generate a new compose selection session ID. Format: sel_{nanoid(12)}"""
+    return f"sel_{nanoid(size=12)}"
+
+
+def generate_workspace_id() -> str:
+    """Generate a new workspace-like correlation ID. Format: ws_{nanoid(12)}"""
+    return f"ws_{nanoid(size=12)}"
+
+
 def get_trace_id() -> str:
     return _trace_id_var.get()
 

@@ -1,4 +1,20 @@
-"""Draft service: business logic for draft lifecycle management."""
+"""
+Draft Service - 草稿服务模块
+
+本模块负责内容草稿生命周期管理的核心业务逻辑，包括：
+- 从任务结果自动创建草稿
+- 草稿详情查询与列表分页
+- 草稿发布确认流程（confirm_publish）
+- 草稿发布到微信公众号
+- 草稿废弃/拒绝/重跑操作
+- 发布状态与账号发布状态同步
+
+草稿状态机：
+- draft（草稿） -> pending_review（待审核） -> approved（已批准） -> published（已发布）
+- draft（草稿） -> discarded（已废弃）
+- pending_review（待审核） -> rejected（已拒绝） / discarded（已废弃）
+- approved（已批准） -> published（已发布）
+"""
 
 from datetime import datetime, timezone
 from typing import Any

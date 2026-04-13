@@ -288,6 +288,20 @@ async def get_task_evidence(task_id: str, db: AsyncSession = Depends(get_db)) ->
 
 @router.get("/{task_id}/skill-invocations")
 async def get_task_skill_invocations(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
+    """
+    【任务技能调用记录查询】
+
+    获取任务执行过程中调用的 Skill 技能记录。
+    包括技能名称、输入参数、输出结果、执行时间等信息。
+
+    返回数据结构：
+    - task_id: 任务 ID
+    - invocations: 技能调用记录列表
+    - count: 调用次数
+
+    调用方：
+    - 前端: frontend/app/task/[id]/page.tsx (任务详情页 - 技能调用 Tab)
+    """
     await task_service.get_task(task_id, db)
     rows = await skill_runtime_service.list_task_invocations(db, task_id)
     return ApiResponse(

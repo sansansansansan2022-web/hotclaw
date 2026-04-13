@@ -40,6 +40,7 @@ from app.core.logger import get_logger
 from app.schemas.account import (
     AccountCreateRequest,
     AccountUpdateRequest,
+    AccountRunRequest,
     AccountSummary,
     AccountDetail,
     AccountCreateData,
@@ -47,6 +48,7 @@ from app.schemas.account import (
     AccountListResponse,
 )
 from app.services.account_service import account_service
+from app.services.compose_preview_service import compose_preview_service
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/accounts", tags=["accounts"])
@@ -257,6 +259,7 @@ async def update_account(
 @router.post("/{account_id}/run", response_model=AccountRunData)
 async def run_account(
     account_id: str,
+    req: AccountRunRequest | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -286,7 +289,28 @@ async def run_account(
     - 500: TaskCreateError - 任务创建失败
     """
     try:
-        account, task = await account_service.run_account(account_id, db, allow_auto=False)
+        explicit_input = None
+        if req and (req.selection_session_id or req.preview_payload or req.creation_note):
+            selection_session_id = req.selection_session_id
+            preview_payload = req.preview_payload if isinstance(req.preview_payload, dict) else None
+            if not selection_session_id:
+                raise HTTPException(status_code=400, detail="selection_session_id is required when explicit creation input is provided")
+
+            preview_bundle = await compose_preview_service.build_preview_bundle(
+                account_id=account_id,
+                selection_session_id=selection_session_id,
+                creation_note=req.creation_note,
+                preview_payload=preview_payload,
+                db=db,
+            )
+            explicit_input = preview_bundle["runtime_payload"]
+
+        account, task = await account_service.run_account(
+            account_id,
+            db,
+            allow_auto=False,
+            explicit_input=explicit_input,
+        )
         await db.commit()
         bg_task = asyncio.create_task(_run_account_task_in_background(task.id, account.id))
         _background_tasks[task.id] = bg_task
@@ -296,10 +320,13 @@ async def run_account(
             task_id=task.id,
             status=task.status,
             operation_mode=account.operation_mode,
+            selection_session_id=(explicit_input or {}).get("selection_session_id") if isinstance(explicit_input, dict) else None,
         )
     except AccountNotFoundError as e:
         logger.warning("account_run_not_found", account_id=account_id)
         raise HTTPException(status_code=404, detail=e.message)
+    except HTTPException:
+        raise
     except AccountInactiveError as e:
         logger.warning("account_run_inactive", account_id=account_id)
         raise HTTPException(status_code=400, detail=e.message)

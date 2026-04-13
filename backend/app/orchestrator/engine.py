@@ -74,6 +74,9 @@ DEFAULT_WORKFLOW_NODES = [
             "profile": "profile",
             "account_context": "account_context",
             "ops_context": "ops_context",
+            "query_plan": "query_plan",
+            "source_candidates": "source_candidates",
+            "reference_digest": "reference_digest",
             "selected_evidence": "selected_evidence",
             "evidence_summaries": "evidence_summaries",
             "citation_guardrails": "citation_guardrails",
@@ -96,6 +99,7 @@ DEFAULT_WORKFLOW_NODES = [
             "selected_evidence": "selected_evidence",
             "evidence_summaries": "evidence_summaries",
             "citation_guardrails": "citation_guardrails",
+            "outline_seed": "outline_seed",
         },
         "output_key": "topics",
         "required": True,
@@ -303,6 +307,19 @@ class OrchestratorEngine:
                 task_id=task.id,
                 effective_mode=(ops_context.get("run_strategy") or {}).get("effective_mode"),
             )
+
+        if isinstance(task.input_data, dict):
+            explicit_payload = self._extract_explicit_input_payload(task.input_data)
+            for key, value in explicit_payload.items():
+                workspace.set(key, value)
+            if explicit_payload:
+                logger.info(
+                    "explicit_creation_input_injected",
+                    task_id=task.id,
+                    account_id=task.account_id,
+                    keys=sorted(explicit_payload.keys()),
+                    selection_session_id=explicit_payload.get("selection_session_id"),
+                )
 
         if task.status != "running":
             task.status = "running"
@@ -982,6 +999,31 @@ class OrchestratorEngine:
         if not result.error:
             return "unknown agent failure"
         return str(result.error.get("message") or "unknown agent failure")
+
+    def _extract_explicit_input_payload(self, input_data: dict[str, Any]) -> dict[str, Any]:
+        explicit_keys = (
+            "selection_session_id",
+            "selected_recommendations",
+            "selected_reference_sources",
+            "compose_preview",
+            "query_plan",
+            "source_candidates",
+            "source_snippets",
+            "reference_digest",
+            "outline_seed",
+            "creation_note",
+            "external_evidence",
+            "fetched_evidence",
+            "selected_evidence",
+            "evidence_summaries",
+            "citation_guardrails",
+        )
+        payload: dict[str, Any] = {}
+        for key in explicit_keys:
+            value = input_data.get(key)
+            if value is not None:
+                payload[key] = value
+        return payload
 
     def _summarize_output(self, output: dict | None) -> str:
         if not output:

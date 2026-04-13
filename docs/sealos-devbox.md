@@ -19,7 +19,7 @@ bash scripts/start-devbox.sh
 ```
 
 - Public service port: `3000`
-- Domain: bind your Sealos public domain, for example `hzh.sealos.run`
+- Domain: use the generated Sealos public domain or bind a real custom domain you own
 
 ## Optional environment variables
 
@@ -36,3 +36,4 @@ HOTCLAW_API_ORIGIN=http://127.0.0.1:8000
 - `HOTCLAW_FRONTEND_MODE=auto` tries a production build first, then falls back to dev mode if needed.
 - `HOTCLAW_ENABLE_SCHEDULER=0` is recommended for public demo or review environments.
 - If you need real external integrations, add the required environment variables in the DevBox project settings instead of committing them into the repo.
+- Do not try to bind the application to the Sealos console domain itself.

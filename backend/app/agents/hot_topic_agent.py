@@ -98,6 +98,23 @@ Rules:
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
+        """执行热点话题发现。
+
+        主要步骤：
+        1. 获取账号画像和上下文信息
+        2. 构建查询计划 (query_plan)
+        3. 收集外部证据（学术论文、GitHub 项目等）
+        4. 通过技能获取搜索结果
+        5. 整合来源侦察包
+        6. 使用 LLM 分析并返回热点话题
+
+        Args:
+            input_data: 包含 profile、account_context、ops_context 等
+            context: 执行上下文（包含 db、task_id 等）
+
+        Returns:
+            AgentResult: 包含热点话题、来源候选、证据摘要
+        """
         profile = input_data.get("profile") or {}
         account_context = input_data.get("account_context") or {}
         ops_context = input_data.get("ops_context") or {}

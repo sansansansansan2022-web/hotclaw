@@ -271,7 +271,7 @@ $backendErr = Join-Path $logDir "backend-$BackendPort.err.log"
 $backendCommand = ('"{0}" -m uvicorn app.main:app --host 127.0.0.1 --port {1} 1>"{2}" 2>"{3}"' -f $backendPython, $BackendPort, $backendOut, $backendErr)
 $schedulerEnabled = -not $DisableScheduler
 Write-Step 'Starting backend'
-Start-DetachedCmd -WorkingDirectory $backendDir -InnerCommand $backendCommand -Environment @{ HOTCLAW_AUTO_CREATE_TABLES = '0'; HOTCLAW_ENABLE_SCHEDULER = $(if ($schedulerEnabled) { '1' } else { '0' }); HOTCLAW_E2E_TEST_MODE = $(if ($DemoMode) { '1' } else { '0' }) }
+Start-DetachedCmd -WorkingDirectory $backendDir -InnerCommand $backendCommand -Environment @{ HOTCLAW_AUTO_CREATE_TABLES = '0'; HOTCLAW_ENABLE_SYSTEM_CONFIG_INIT = '1'; HOTCLAW_ENABLE_SCHEDULER = $(if ($schedulerEnabled) { '1' } else { '0' }); HOTCLAW_E2E_TEST_MODE = $(if ($DemoMode) { '1' } else { '0' }) }
 Wait-ComponentReady -Name 'backend' -Url "$apiOrigin/api/v1/health" -StdoutLog $backendOut -StderrLog $backendErr
 $backendPid = Resolve-ListenerPid -Port $BackendPort
 Write-PidFile -Path (Join-Path $pidDir 'backend.pid.json') -Payload @{ name = 'backend'; pid = $backendPid; port = $BackendPort; started_at = (Get-Date).ToString('s'); log_out = $backendOut; log_err = $backendErr; scheduler_enabled = $schedulerEnabled; demo_mode = [bool]$DemoMode }

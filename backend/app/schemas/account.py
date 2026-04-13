@@ -72,6 +72,14 @@ class AccountUpdateRequest(BaseModel):
     min_interval_minutes: int | None = Field(default=None, ge=1, le=1440)
 
 
+class AccountRunRequest(BaseModel):
+    """Optional payload for explicit pre-generation decisions."""
+
+    selection_session_id: str | None = None
+    preview_payload: dict | None = None
+    creation_note: str | None = None
+
+
 # =============================================================================
 # Response
 # =============================================================================
@@ -164,6 +172,7 @@ class AccountRunData(BaseModel):
     status: str
     operation_mode: str
     effective_mode: str | None = None
+    selection_session_id: str | None = None
 
 
 class AccountListResponse(BaseModel):

@@ -67,6 +67,15 @@ class AccountModel(Base):
     reference_sources: Mapped[list["ReferenceSourceModel"]] = relationship(
         back_populates="account", cascade="all, delete-orphan"
     )
+    analysis_snapshots: Mapped[list["AccountAnalysisSnapshotModel"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+    recommendations: Mapped[list["RecommendedContentItemModel"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+    compose_selection_sessions: Mapped[list["ComposeSelectionSessionModel"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
 
 
 # =============================================================================
@@ -270,6 +279,84 @@ class ReferenceSourceModel(Base):
     )
 
     account: Mapped["AccountModel"] = relationship(back_populates="reference_sources")
+
+
+class AccountAnalysisSnapshotModel(Base):
+    """Persisted account-level insight snapshot for pre-generation decisions."""
+    __tablename__ = "account_analysis_snapshots"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("accounts.id"), nullable=False, index=True
+    )
+    positioning_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    audience_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tone_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_lanes_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    style_keywords_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    banned_angles_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    recent_topics_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    reference_overview_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    latest_ops_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ready")
+    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    account: Mapped["AccountModel"] = relationship(back_populates="analysis_snapshots")
+
+
+class RecommendedContentItemModel(Base):
+    """Account-scoped recommended content candidates used before generation."""
+    __tablename__ = "recommended_content_items"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("accounts.id"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    authority_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    freshness_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    topic_tags_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    source_payload_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="new", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    account: Mapped["AccountModel"] = relationship(back_populates="recommendations")
+
+
+class ComposeSelectionSessionModel(Base):
+    """Persist the current creation basket before formal task execution."""
+    __tablename__ = "compose_selection_sessions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    account_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("accounts.id"), nullable=False, index=True
+    )
+    selected_recommendation_ids_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    selected_reference_source_ids_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    creation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preferred_lane: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    title_direction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    account: Mapped["AccountModel"] = relationship(back_populates="compose_selection_sessions")
 
 
 class AutomationPlanModel(Base):

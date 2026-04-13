@@ -33,6 +33,7 @@ class OutlinePlannerAgent(BaseAgent):
             "query_plan": {"type": "object"},
             "reference_digest": {"type": "object"},
             "source_candidates": {"type": "array"},
+            "outline_seed": {"type": "object"},
         },
         "required": ["profile", "topics", "titles"],
     }
@@ -91,6 +92,10 @@ Non-negotiable requirements:
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
+        outline_seed = input_data.get("outline_seed")
+        if isinstance(outline_seed, dict) and outline_seed.get("sections"):
+            return self._success(self._normalize_outline(outline_seed, input_data))
+
         system_prompt = self.get_system_prompt(context)
         user_prompt = self._build_user_prompt(input_data)
         selected_title = article_assembler_service.extract_selected_title(input_data.get("titles"))

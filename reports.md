@@ -1,5 +1,61 @@
 # HotClaw 执行报告
 
+## 2026-04-13 — Agent 配置管理功能增强
+
+### 任务说明
+在前端界面中为 Agent 添加用户可自助创建和编辑配置的功能。
+
+### 完成情况
+
+| 模块 | 文件 | 状态 |
+|------|------|------|
+| 后端 Schema | `backend/app/schemas/agent.py` | ✅ 新增 AgentCreateRequest, AgentCreateResponse |
+| 后端 API | `backend/app/api/agent_routes.py` | ✅ 新增 POST /api/v1/agents (创建配置), DELETE /api/v1/agents/{id}/config (删除配置) |
+| 前端类型 | `frontend/types/index.ts` | ✅ 新增 AgentCreateRequest, AgentCreateResponse, AgentUpdateRequest |
+| 前端 API | `frontend/lib/api/index.ts` | ✅ 新增 createAgent(), deleteAgentConfig() |
+| Agent 设置页 | `frontend/app/settings/agents/page.tsx` | ✅ 完全重写，新增创建弹窗和编辑功能 |
+
+### 核心功能
+
+#### 1. 创建自定义 Agent 配置
+- 新建配置按钮打开模态框
+- 下拉选择要配置的智能体
+- 可选填自定义名称、描述、System Prompt
+- 409 Conflict 处理（已存在配置时提示）
+
+#### 2. 编辑 Agent 配置
+- 点击「编辑」按钮进入编辑模式
+- 可修改名称、描述、System Prompt
+- 保存前自动对比差异，只提交变更
+- 支持恢复默认配置
+
+#### 3. 删除自定义配置
+- 「删除自定义配置」按钮
+- 确认对话框防止误操作
+- 删除后恢复使用默认配置
+
+#### 4. UI 优化
+- 统一视觉风格（参考设置中心其他页面）
+- 加载状态、错误提示、成功消息
+- 默认模板预览功能
+- 自定义配置标签高亮显示
+
+### API 端点
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| GET | /api/v1/agents | 列出所有智能体 |
+| GET | /api/v1/agents/{agent_id} | 获取智能体详情 |
+| POST | /api/v1/agents | **新建** 自定义配置 |
+| PUT | /api/v1/agents/{agent_id}/config | 更新配置 |
+| DELETE | /api/v1/agents/{agent_id}/config | **删除** 自定义配置 |
+
+### 验证结果
+- 前端 TypeScript 检查：`tsc --noEmit` ✅ 通过
+- 后端 Python 导入检查：`from app.api.agent_routes import router` ✅ OK
+
+---
+
 ## 2026-04-03 — E2E Scheduler 测试补齐
 
 ### 任务说明

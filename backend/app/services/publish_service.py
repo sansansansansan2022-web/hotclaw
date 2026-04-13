@@ -1,17 +1,18 @@
-"""Publish service: placeholder for real WeChat official account publishing.
+"""
+Publish Service - 发布服务模块（占位实现）
 
-This module is a placeholder for future real publishing integration.
+本模块是微信公众号发布的占位服务，用于未来真实发布集成。
 
-Current strategy:
-- confirm_publish in draft_service marks draft as 'published' directly
-- published_at is set to current time
-- This simulates successful publishing for MVP
+当前策略（MVP 阶段）：
+- confirm_publish 在 draft_service 中直接标记草稿为已发布
+- 设置 published_at 为当前时间戳
+- 模拟成功发布以便快速验证流程
 
-Future integration points:
-- Real WeChat API calls
-- OAuth token management
-- Media upload
-- Draft publishing
+未来集成点：
+- 真实的微信 API 调用
+- OAuth Token 管理
+- 媒体素材上传
+- 草稿发布接口调用
 """
 
 from datetime import datetime, timezone
