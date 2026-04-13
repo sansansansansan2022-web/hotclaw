@@ -1,171 +1,160 @@
-<div align="center">
-  <img src="./frontend/public/images/hotclaw-hero.png" alt="HotClaw" width="100%" />
+# HotClaw
 
-  # HotClaw
+HotClaw is a FastAPI + Next.js content operations platform for WeChat official accounts.  
+The current codebase centers on four product objects:
 
-  **Multi-Agent Content Production Platform for WeChat Official Accounts**
+- `Account`: account profile, positioning, operating mode, WeChat config
+- `Task`: a single generation run with node-level execution history
+- `Draft`: generated article content plus review and publish actions
+- `Skill`: runtime research capabilities that agents can call during execution
 
-  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-  [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
-  [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
-  [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
-</div>
+## What It Does
 
----
+HotClaw currently supports:
 
-## 项目简介
+- Multi-agent generation flow for profile parsing, topic discovery, topic planning, title generation, content writing, and auditing
+- Task orchestration with execution logs, reruns, node status, and terminal failure visibility
+- Draft review workflow with confirm, reject, discard, rerun, and publish-related state transitions
+- WeChat publishing infrastructure with config testing, publish records, retry paths, and status sync
+- Research skill integration for:
+  - GitHub repository curation via the real GitHub REST API
+  - Scholar-style paper search via OpenAlex + Crossref adapters
+- Settings management for providers, agents, skills, and WeChat configuration
+- Local development startup scripts for Windows and Sealos DevBox
 
-HotClaw 是一个面向微信公众号内容生产与运营的全栈平台。系统围绕“账号托管 -> 任务编排 -> 草稿审核 -> 微信发布”构建，既支持人工介入，也支持半自动和全自动运营模式。
+## Tech Stack
 
-当前仓库包含：
+### Backend
 
-- `backend/`: FastAPI + SQLAlchemy + Pydantic 的业务后端
-- `frontend/`: Next.js 16 + React 19 + TailwindCSS + Zustand 的控制台前端
-
----
-
-## 当前能力
-
-### 1. 多 Agent 内容工作流
-
-- 6 个核心 Agent 链路：`Profile -> HotTopic -> Topic -> Title -> Content -> Audit`
-- 基于 Task 的编排与节点追踪
-- 支持任务历史、节点执行明细、失败重跑
-
-### 2. 三种运营模式
-
-| 模式 | 行为 |
-| --- | --- |
-| `manual` | 手动触发任务，只生成内部草稿 |
-| `semi_auto` | 自动生成草稿，进入 `pending_review`，人工确认后再发布 |
-| `full_auto` | 任务完成后在满足规则时自动触发微信发布 |
-
-### 3. 草稿工作流
-
-- Draft 状态：`draft` / `pending_review` / `approved` / `rejected` / `discarded` / `published`
-- 支持确认发布、拒绝、丢弃、从草稿重跑任务
-- 草稿详情页可查看审核结果、发布记录和允许的后续动作
-
-### 4. 微信公众号发布基础设施
-
-- 每个账号绑定独立微信公众号配置
-- 测试公众号连接
-- Access Token 获取与数据库缓存
-- 正文图片上传与 HTML 图片替换
-- 封面素材上传
-- 创建微信草稿并提交发布
-- 发布记录落库、状态追踪、重试入口
-
-### 5. 控制台前端
-
-- 统一 Shell：侧边栏、顶部栏、内容区、全局 Toast
-- 关键页面：
-  - `/login`
-  - `/dashboard`
-  - `/workspace`
-  - `/accounts`
-  - `/accounts/new`
-  - `/accounts/[id]`
-  - `/accounts/[id]/edit`
-  - `/drafts`
-  - `/drafts/[id]`
-  - `/publish-logs`
-  - `/tasks/history`
-  - `/settings`
-  - `/settings/wechat`
-- 已支持全局语言切换：`English` / `中文`
-- 全局 Toast 默认展示 5 秒后自动消失，同时支持手动关闭
-
----
-
-## 最近更新
-
-### 2026-04
-
-- 重建前端控制台结构，统一到 `frontend/components/console/*`
-- 接入微信公众号发布服务、配置服务、发布记录与相关测试
-- 新增全局语言设置，使用后端 `system-configs` 持久化 `ui_language`
-- 关键控制台页面支持中英文切换
-- 全局 Toast 调整为 5 秒后自动消失
-
----
-
-## 技术栈
-
-### 后端
-
+- Python 3.11+
 - FastAPI
 - SQLAlchemy Async
-- Pydantic v2
 - Alembic
-- APScheduler
+- Pydantic v2
 - httpx
-- SQLite 默认开发库
-- 支持通过 `database_url` 切换到其他 SQLAlchemy 异步数据库配置
+- litellm
+- SQLite by default
 
-### 前端
+### Frontend
 
+- Node.js 18+
 - Next.js 16
 - React 19
 - TypeScript
-- TailwindCSS
+- Tailwind CSS
 - Zustand
 
----
-
-## 目录结构
+## Repository Layout
 
 ```text
 hotclaw/
-├─ backend/
-│  ├─ app/
-│  │  ├─ agents/
-│  │  ├─ api/
-│  │  ├─ core/
-│  │  ├─ db/
-│  │  ├─ models/
-│  │  ├─ orchestrator/
-│  │  ├─ scheduler/
-│  │  ├─ schemas/
-│  │  ├─ services/
-│  │  └─ main.py
-│  ├─ alembic/
-│  ├─ tests/
-│  └─ pyproject.toml
-├─ frontend/
-│  ├─ app/
-│  ├─ components/
-│  │  ├─ command-center/
-│  │  ├─ console/
-│  │  └─ providers/
-│  ├─ lib/
-│  ├─ public/
-│  ├─ store/
-│  └─ types/
-└─ README.md
+|- backend/
+|  |- app/
+|  |  |- agents/
+|  |  |- api/
+|  |  |- core/
+|  |  |- models/
+|  |  |- orchestrator/
+|  |  |- schemas/
+|  |  |- services/
+|  |  `- skills/
+|  |- alembic/
+|  `- tests/
+|- frontend/
+|  |- app/
+|  |- components/
+|  |- lib/
+|  |- public/
+|  `- types/
+|- docs/
+|- scripts/
+`- tests/
 ```
 
----
+## Quick Start
 
-## 快速启动
-
-### 环境要求
-
-- Python 3.11+
-- Node.js 18+
-
-### 1. 克隆项目
+### 1. Clone
 
 ```bash
 git clone https://github.com/sansansansansan2022-web/hotclaw.git
 cd hotclaw
 ```
 
-### 2. 启动后端
+### 2. Configure Environment
+
+Copy the example environment file and fill in the values you actually need:
+
+```bash
+cp .env.example backend/.env
+```
+
+At minimum for normal local startup:
+
+- `DATABASE_URL`
+- `LLM_API_KEY`
+- `LLM_API_BASE_URL`
+- `LLM_MODEL_NAME`
+
+If you want runtime research skills:
+
+- GitHub skill:
+  - `ENABLE_GITHUB_SKILL=true`
+  - `GITHUB_TOKEN`
+- Scholar skill:
+  - `ENABLE_SCHOLAR_SKILL=true`
+  - `SCHOLAR_PROVIDER=openalex+crossref`
+  - `OPENALEX_API_KEY`
+  - recommended: `OPENALEX_MAILTO`, `CROSSREF_MAILTO`
+
+HotClaw does not fall back to fake data when these research skill configs are missing.  
+If a skill is enabled but its required config is absent, the call fails explicitly.
+
+## Local Development
+
+### Recommended Windows Startup
+
+The fastest supported local startup path is:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1
+```
+
+Default local ports:
+
+- Frontend: [http://127.0.0.1:3460](http://127.0.0.1:3460)
+- Backend health: [http://127.0.0.1:8140/api/v1/health](http://127.0.0.1:8140/api/v1/health)
+- Backend docs: [http://127.0.0.1:8140/docs](http://127.0.0.1:8140/docs)
+
+What this script does:
+
+- stops stale local frontend/backend processes
+- runs Alembic migrations
+- builds or starts the frontend
+- starts the backend
+- writes logs to `output/local-runtime/`
+
+Useful options:
+
+```powershell
+# Disable scheduler noise for a local debug session
+powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1 -DisableScheduler
+
+# Force frontend dev mode
+powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1 -FrontendMode Dev
+```
+
+Stop local processes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/stop-local.ps1
+```
+
+### Manual Startup
+
+#### Backend
 
 ```bash
 cd backend
-
 python -m venv .venv
 
 # Windows
@@ -175,112 +164,127 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -e ".[dev]"
-python -m uvicorn app.main:app --reload --port 8000
+python -m alembic upgrade head
+uvicorn app.main:app --reload --port 8000
 ```
 
-说明：
-
-- 后端会在启动时自动初始化数据库表和默认系统配置
-- 默认数据库是 `backend/hotclaw.db`
-- 配置文件读取路径是 `backend/.env`
-
-### 3. 启动前端
+#### Frontend
 
 ```bash
 cd frontend
 npm install
+```
 
-# PowerShell
+PowerShell:
+
+```powershell
 $env:NEXT_PUBLIC_HOTCLAW_API_ORIGIN="http://127.0.0.1:8000"
 npm run dev
 ```
 
-### 4. 访问地址
+Bash:
 
-- Frontend: [http://127.0.0.1:3000](http://127.0.0.1:3000)
-- Backend API: [http://127.0.0.1:8000/api/v1](http://127.0.0.1:8000/api/v1)
-- Swagger: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+```bash
+NEXT_PUBLIC_HOTCLAW_API_ORIGIN=http://127.0.0.1:8000 npm run dev
+```
 
----
+## Sealos DevBox Deployment
 
-## 常用命令
+HotClaw can run inside Sealos DevBox with only the frontend port exposed publicly.
 
-### 后端
+Startup command:
+
+```bash
+bash scripts/start-devbox.sh
+```
+
+Recommended DevBox environment:
+
+```bash
+HOTCLAW_FRONTEND_MODE=auto
+HOTCLAW_BACKEND_PORT=8000
+HOTCLAW_FRONTEND_PORT=3000
+HOTCLAW_ENABLE_SCHEDULER=0
+HOTCLAW_API_ORIGIN=http://127.0.0.1:8000
+```
+
+Important notes:
+
+- expose port `3000`
+- keep the backend internal on `8000`
+- use the generated Sealos public domain or a real custom domain you own
+- do not try to bind the app to the Sealos console domain itself
+
+See [docs/sealos-devbox.md](/D:/project/hotclaw/docs/sealos-devbox.md) for the deployment notes currently bundled in the repo.
+
+## Runtime Research Skills
+
+Two runtime skills are wired into the backend:
+
+- `github_project_curator_skill`
+- `scholar_paper_search_skill`
+
+They are designed to:
+
+- be registered as first-class skills
+- run through the backend skill runtime service
+- persist invocation logs
+- persist evidence items
+- write evidence back into workspace context for downstream agents
+
+Related debug endpoints:
+
+- `POST /api/v1/skills/github/curate`
+- `POST /api/v1/skills/scholar/search`
+- `GET /api/v1/tasks/{task_id}/evidence`
+- `GET /api/v1/tasks/{task_id}/skill-invocations`
+
+## Common Commands
+
+### Backend
 
 ```bash
 cd backend
 
-# 运行全部测试
+# all backend tests
 pytest -q
 
-# 运行微信相关测试
-pytest tests/test_wechat_config_api.py tests/test_wechat_publish_service.py tests/test_wechat_draft_workflow.py -q
-
-# 运行 e2e 测试
-pytest tests/e2e -q
+# focused skill runtime tests
+pytest tests/test_skill_runtime_contract.py -q
 ```
 
-### 前端
+### Frontend
 
 ```bash
 cd frontend
 
-# 类型检查（项目里 lint 脚本即 tsc）
+# type check
 npm run lint
 
-# 生产构建
+# production build
 npm run build
 
-# 本地开发
+# local dev
 npm run dev
 ```
 
----
+### Root E2E
 
-## 微信发布链路说明
+```bash
+npm run test:e2e
+```
 
-当前工程里，微信公众号发布能力已经是系统基础设施的一部分，而不是独立 demo。
+## Notes About Generated Files
 
-核心路径：
-
-1. 账号绑定微信公众号配置
-2. 测试连接并缓存 access token
-3. 草稿进入允许发布的状态
-4. 走 `publish_decision_service` 做前置检查
-5. 上传正文图片 / 封面素材
-6. 创建微信草稿
-7. 提交微信发布
-8. 写入 `publish_records`
-9. 在草稿详情和发布日志中追踪状态
-
----
-
-## 前端全局语言设置
-
-控制台现在支持 `English` 和 `中文` 切换。
-
-实现方式：
-
-- 前端通过 Zustand 保存当前语言
-- 后端通过 `system-configs` 保存全局值 `ui_language`
-- 根布局启动时自动同步后端设置
-- 顶部栏和 Settings 页面都可以切换语言
-
----
-
-## 当前文档约定
-
-下面这些目录当前不作为发布源码的一部分：
+These directories are not part of the product source of truth:
 
 - `.qoder/`
 - `output/`
 - `tmp/`
+- `.playwright-cli/`
 
-它们可能包含本地生成文档、截图或调试输出，不应默认纳入提交。
+They may contain local artifacts, generated docs, runtime logs, browser automation traces, or debug output.
 
----
+## License
 
-## 许可证
-
-MIT License。详见 [LICENSE](LICENSE)。
-
+MIT. See [LICENSE](LICENSE).

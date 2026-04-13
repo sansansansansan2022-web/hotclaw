@@ -36,6 +36,9 @@ class HotTopicAgent(BaseAgent):
             "account_context": {"type": "object"},
             "ops_context": {"type": "object"},
             "history_summary": {"type": "string"},
+            "query_plan": {"type": "object"},
+            "source_candidates": {"type": "array"},
+            "reference_digest": {"type": "object"},
             "selected_evidence": {"type": "array"},
             "evidence_summaries": {"type": "object"},
             "citation_guardrails": {"type": "object"},
@@ -101,11 +104,13 @@ Rules:
         system_prompt = self.get_system_prompt(context)
 
         try:
-            query_plan = query_planner_service.build_plan(
-                profile=profile,
-                account_context=account_context,
-                ops_context=ops_context,
-            )
+            query_plan = input_data.get("query_plan") if isinstance(input_data.get("query_plan"), dict) else None
+            if not isinstance(query_plan, dict):
+                query_plan = query_planner_service.build_plan(
+                    profile=profile,
+                    account_context=account_context,
+                    ops_context=ops_context,
+                )
             logger.info("hot_topic_query_plan_ready", lane=query_plan.get("lane"))
 
             evidence_payload = await self._collect_external_evidence(
@@ -114,13 +119,17 @@ Rules:
                 query_plan=query_plan,
                 context=context,
             )
+            evidence_payload = self._merge_explicit_evidence_payload(evidence_payload, input_data)
 
-            skill_result = await self._fetch_with_skill(query_plan)
-            if skill_result.get("status") != "success":
-                error = skill_result.get("error", {})
-                raise RuntimeError(f"Skill failed: {error.get('message') or error.get('code') or 'unknown'}")
-
-            search_results = skill_result.get("data", {}).get("results", [])
+            explicit_search_results = self._source_candidates_to_search_results(input_data.get("source_candidates") or [])
+            if explicit_search_results:
+                search_results = explicit_search_results
+            else:
+                skill_result = await self._fetch_with_skill(query_plan)
+                if skill_result.get("status") != "success":
+                    error = skill_result.get("error", {})
+                    raise RuntimeError(f"Skill failed: {error.get('message') or error.get('code') or 'unknown'}")
+                search_results = skill_result.get("data", {}).get("results", [])
             evidence_results = self._evidence_to_search_results(
                 evidence_payload.get("selected_evidence") or []
             )
@@ -142,7 +151,7 @@ Rules:
                 evidence_payload.get("selected_evidence") or [],
             )
             merged_reference_digest = self._merge_reference_digest(
-                scout_package.get("reference_digest", {}),
+                input_data.get("reference_digest") if isinstance(input_data.get("reference_digest"), dict) else scout_package.get("reference_digest", {}),
                 evidence_payload.get("evidence_summaries", {}),
             )
             logger.info(
@@ -476,6 +485,67 @@ Rules:
                 }
             )
         return results
+
+    def _source_candidates_to_search_results(self, source_candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for item in source_candidates:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("source_title") or item.get("title") or "").strip()
+            if not title:
+                continue
+            source_type = str(item.get("source_type") or "selected_recommendation").strip() or "selected_recommendation"
+            results.append(
+                {
+                    "title": title,
+                    "source": str(item.get("source_name") or source_type).strip(),
+                    "source_type": source_type,
+                    "url": item.get("url"),
+                    "snippet": str(item.get("snippet") or item.get("why_selected") or title).strip(),
+                    "source_id": item.get("source_id"),
+                }
+            )
+        return results
+
+    def _merge_explicit_evidence_payload(
+        self,
+        merged_payload: dict[str, Any],
+        input_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload = dict(merged_payload or {})
+        explicit_selected = input_data.get("selected_evidence") if isinstance(input_data.get("selected_evidence"), list) else []
+        explicit_fetched = input_data.get("fetched_evidence") if isinstance(input_data.get("fetched_evidence"), list) else []
+        explicit_summaries = input_data.get("evidence_summaries") if isinstance(input_data.get("evidence_summaries"), dict) else {}
+        explicit_guardrails = input_data.get("citation_guardrails") if isinstance(input_data.get("citation_guardrails"), dict) else {}
+
+        payload["fetched_evidence"] = self._merge_evidence_lists(explicit_fetched, payload.get("fetched_evidence") or [])
+        payload["selected_evidence"] = self._merge_evidence_lists(explicit_selected, payload.get("selected_evidence") or [])
+        payload["evidence_summaries"] = {**explicit_summaries, **(payload.get("evidence_summaries") or {})}
+        payload["citation_guardrails"] = {**(payload.get("citation_guardrails") or {}), **explicit_guardrails}
+        payload["external_evidence"] = {
+            "fetched_evidence": payload["fetched_evidence"],
+            "selected_evidence": payload["selected_evidence"],
+            "evidence_summaries": payload["evidence_summaries"],
+            "citation_guardrails": payload["citation_guardrails"],
+        }
+        return payload
+
+    def _merge_evidence_lists(
+        self,
+        primary: list[dict[str, Any]],
+        secondary: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in [*primary, *secondary]:
+            if not isinstance(item, dict):
+                continue
+            evidence_id = str(item.get("id") or item.get("source_id") or item.get("title") or "").strip()
+            if not evidence_id or evidence_id in seen:
+                continue
+            seen.add(evidence_id)
+            merged.append(item)
+        return merged
 
     def _merge_search_results(
         self,
