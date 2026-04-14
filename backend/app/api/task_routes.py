@@ -26,9 +26,15 @@ from app.db.session import get_db
 from app.core.logger import get_logger
 from app.models.tables import ArticleDraftModel
 from app.schemas.common import ApiResponse
-from app.schemas.task import TaskCreateRequest
+from app.schemas.task import (
+    TaskArtifactListResponse,
+    TaskArtifactResponse,
+    TaskCreateRequest,
+    TaskEffectiveInputResponse,
+)
 from app.orchestrator.engine import orchestrator_engine
 from app.services.task_service import task_service
+from app.services.task_artifact_service import task_artifact_service
 from app.services.account_harness_service import account_harness_service
 from app.skills.services.evidence_service import evidence_service
 from app.skills.services.skill_runtime_service import skill_runtime_service
@@ -271,6 +277,34 @@ async def get_task_nodes(task_id: str, db: AsyncSession = Depends(get_db)) -> Ap
         })
 
     return ApiResponse(data={"nodes": nodes_data})
+
+
+@router.get("/{task_id}/artifacts")
+async def get_task_artifacts(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
+    task = await task_service.get_task(task_id, db)
+    artifacts = await task_artifact_service.list_task_artifacts(task_id, db)
+    response = TaskArtifactListResponse(
+        task_id=task.id,
+        account_id=task.account_id,
+        status=task.status,
+        artifacts=[TaskArtifactResponse(**artifact) for artifact in artifacts],
+    )
+    return ApiResponse(data=response.model_dump(mode="json"))
+
+
+@router.get("/{task_id}/artifacts/{artifact_key}")
+async def get_task_artifact(task_id: str, artifact_key: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
+    await task_service.get_task(task_id, db)
+    artifact = await task_artifact_service.get_task_artifact(task_id, artifact_key, db)
+    response = TaskArtifactResponse(**artifact)
+    return ApiResponse(data=response.model_dump(mode="json"))
+
+
+@router.get("/{task_id}/effective-input")
+async def get_task_effective_input(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
+    effective_input = await task_artifact_service.get_effective_input(task_id, db)
+    response = TaskEffectiveInputResponse(**effective_input)
+    return ApiResponse(data=response.model_dump(mode="json"))
 
 
 @router.get("/{task_id}/evidence")

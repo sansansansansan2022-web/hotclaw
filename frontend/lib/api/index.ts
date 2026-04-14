@@ -7,6 +7,8 @@ import type {
   AutomationPlan,
   CreateAutomationPlanRequest,
   CreateReferenceSourceRequest,
+  ComposePreviewResponse,
+  ComposeSelectionSessionBundle,
   ExistingAccountAnalysisRequest,
   ExistingAccountAnalysisResponse,
   AccountListResponse,
@@ -17,6 +19,8 @@ import type {
   ApiOriginSource,
   AppLocale,
   AccountSummary,
+  RecommendationBucketedResponse,
+  RecommendationSelectResponse,
   ReferenceSource,
   ReferenceSourceListResponse,
   SyncReferenceSourceResponse,
@@ -38,6 +42,9 @@ import type {
   SystemConfigValue,
   TaskCreateData,
   TaskDetail,
+  TaskArtifact,
+  TaskArtifactListResponse,
+  TaskEffectiveInputResponse,
   TaskListResponse,
   TaskNodeListResponse,
   UpdateAutomationPlanRequest,
@@ -427,6 +434,18 @@ export async function getTaskNodes(taskId: string): Promise<TaskNodeListResponse
   return request<TaskNodeListResponse>(`/tasks/${taskId}/nodes`);
 }
 
+export async function getTaskArtifacts(taskId: string): Promise<TaskArtifactListResponse> {
+  return request<TaskArtifactListResponse>(`/tasks/${taskId}/artifacts`);
+}
+
+export async function getTaskArtifact(taskId: string, artifactKey: string): Promise<TaskArtifact> {
+  return request<TaskArtifact>(`/tasks/${taskId}/artifacts/${artifactKey}`);
+}
+
+export async function getTaskEffectiveInput(taskId: string): Promise<TaskEffectiveInputResponse> {
+  return request<TaskEffectiveInputResponse>(`/tasks/${taskId}/effective-input`);
+}
+
 export async function rerunTask(taskId: string): Promise<TaskCreateData> {
   return request<TaskCreateData>(`/tasks/${taskId}/rerun`, { method: "POST" });
 }
@@ -503,6 +522,150 @@ export async function updateAccount(accountId: string, data: AccountUpdateReques
 
 export async function listReferenceSources(accountId: string): Promise<ReferenceSourceListResponse> {
   return request<ReferenceSourceListResponse>(`/accounts/${accountId}/reference-sources`);
+}
+
+export async function createSelectionSession(
+  accountId: string,
+  data?: {
+    creation_note?: string;
+    preferred_lane?: string;
+    title_direction?: string;
+    reference_source_ids?: number[];
+  },
+): Promise<ComposeSelectionSessionBundle> {
+  return request<ComposeSelectionSessionBundle>(`/accounts/${accountId}/selection-sessions`, {
+    method: "POST",
+    body: JSON.stringify(data ?? {}),
+  });
+}
+
+export async function getSelectionSession(
+  accountId: string,
+  sessionId: string,
+): Promise<ComposeSelectionSessionBundle> {
+  return request<ComposeSelectionSessionBundle>(`/accounts/${accountId}/selection-sessions/${sessionId}`);
+}
+
+export async function getRecommendations(
+  accountId: string,
+  params?: {
+    source_type?: string;
+    sort_by?: "relevance" | "freshness";
+    status?: string;
+    min_count?: 5 | 8 | 10;
+  },
+): Promise<RecommendationBucketedResponse> {
+  return request<RecommendationBucketedResponse>(
+    `/accounts/${accountId}/recommendations${toQuery({
+      source_type: params?.source_type,
+      sort_by: params?.sort_by,
+      status: params?.status,
+      min_count: params?.min_count,
+    })}`,
+  );
+}
+
+export async function refreshRecommendations(
+  accountId: string,
+  params?: { min_count?: 5 | 8 | 10 },
+): Promise<RecommendationBucketedResponse> {
+  return request<RecommendationBucketedResponse>(
+    `/accounts/${accountId}/recommendations/refresh${toQuery({ min_count: params?.min_count })}`,
+    {
+      method: "POST",
+    },
+  );
+}
+
+export async function selectRecommendations(
+  accountId: string,
+  data: {
+    recommendation_ids: string[];
+    action: "use_for_creation" | "save_as_reference" | "dismiss" | "remove_from_creation";
+    selection_session_id?: string;
+  },
+): Promise<RecommendationSelectResponse> {
+  return request<RecommendationSelectResponse>(`/accounts/${accountId}/recommendations/select`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function selectReferenceSourcesForSession(
+  accountId: string,
+  sessionId: string,
+  data: { reference_source_ids: number[] },
+): Promise<ComposeSelectionSessionBundle> {
+  return request<ComposeSelectionSessionBundle>(
+    `/accounts/${accountId}/selection-sessions/${sessionId}/reference-sources/select`,
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+  );
+}
+
+export async function confirmSelectionSources(
+  accountId: string,
+  sessionId: string,
+  data?: { confirmed?: boolean },
+): Promise<ComposeSelectionSessionBundle> {
+  return request<ComposeSelectionSessionBundle>(
+    `/accounts/${accountId}/selection-sessions/${sessionId}/confirm-sources`,
+    {
+      method: "POST",
+      body: JSON.stringify(data ?? { confirmed: true }),
+    },
+  );
+}
+
+export async function confirmSelectionOutline(
+  accountId: string,
+  sessionId: string,
+  data: {
+    preview_version: number;
+    approved_outline_seed: Record<string, unknown>;
+  },
+): Promise<ComposeSelectionSessionBundle["selection_session"]> {
+  return request<ComposeSelectionSessionBundle["selection_session"]>(
+    `/accounts/${accountId}/selection-sessions/${sessionId}/confirm-outline`,
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+  );
+}
+
+export async function buildComposePreview(
+  accountId: string,
+  data: {
+    selection_session_id: string;
+    creation_note?: string;
+    preferred_lane?: string;
+    title_direction?: string;
+    preview_payload?: Record<string, unknown>;
+  },
+): Promise<ComposePreviewResponse> {
+  return request<ComposePreviewResponse>(`/accounts/${accountId}/compose-preview`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function submitSelectionSession(
+  accountId: string,
+  sessionId: string,
+  data?: {
+    creation_note?: string;
+    preferred_lane?: string;
+    title_direction?: string;
+    preview_payload?: Record<string, unknown>;
+  },
+): Promise<AccountRunData> {
+  return request<AccountRunData>(`/accounts/${accountId}/selection-sessions/${sessionId}/submit`, {
+    method: "POST",
+    body: JSON.stringify(data ?? {}),
+  });
 }
 
 export async function getAutomationPlan(accountId: string): Promise<AutomationPlan> {

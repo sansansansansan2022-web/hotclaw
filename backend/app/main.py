@@ -42,6 +42,7 @@ from app.api.account_insight_routes import router as account_insight_router
 from app.api.account_onboarding_routes import router as account_onboarding_router
 from app.api.automation_plan_routes import router as automation_plan_router
 from app.api.compose_preview_routes import router as compose_preview_router
+from app.api.compose_session_routes import router as compose_session_router
 from app.api.reference_source_routes import router as reference_source_router
 from app.api.recommendation_routes import router as recommendation_router
 from app.api.draft_routes import router as draft_router
@@ -275,6 +276,7 @@ app.include_router(account_insight_router)
 app.include_router(account_onboarding_router)
 app.include_router(automation_plan_router)
 app.include_router(recommendation_router)
+app.include_router(compose_session_router)
 app.include_router(compose_preview_router)
 app.include_router(reference_source_router)
 app.include_router(draft_router)

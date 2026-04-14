@@ -26,6 +26,7 @@ async def build_compose_preview(
             creation_note=req.creation_note,
             preferred_lane=req.preferred_lane,
             title_direction=req.title_direction,
+            preview_payload=req.preview_payload if isinstance(req.preview_payload, dict) else None,
             db=db,
         )
         await db.commit()

@@ -13,9 +13,20 @@ class ComposeSelectionSessionResponse(BaseModel):
     creation_note: str | None = None
     preferred_lane: str | None = None
     title_direction: str | None = None
+    source_confirmed: bool = False
+    outline_confirmed: bool = False
+    preview_version: int = 0
+    approved_outline_seed: dict | None = None
     status: str
     created_at: datetime
     updated_at: datetime
+
+
+class ComposeSelectionSessionCreateRequest(BaseModel):
+    creation_note: str | None = None
+    preferred_lane: str | None = None
+    title_direction: str | None = None
+    reference_source_ids: list[int] = Field(default_factory=list)
 
 
 class ComposePreviewRequest(BaseModel):
@@ -23,6 +34,14 @@ class ComposePreviewRequest(BaseModel):
     creation_note: str | None = None
     preferred_lane: str | None = None
     title_direction: str | None = None
+    preview_payload: dict | None = None
+
+
+class ComposeSubmitRequest(BaseModel):
+    creation_note: str | None = None
+    preferred_lane: str | None = None
+    title_direction: str | None = None
+    preview_payload: dict | None = None
 
 
 class SelectedSourceResponse(BaseModel):
@@ -132,3 +151,22 @@ class ComposePreviewResponse(BaseModel):
     title_directions: list[TitleDirectionResponse] = Field(default_factory=list)
     outline_preview: OutlinePreviewResponse
     citation_guardrails: CitationGuardrailsResponse
+
+
+class ComposeSelectionSessionBundleResponse(BaseModel):
+    selection_session: ComposeSelectionSessionResponse
+    selected_recommendations: list[SelectedSourceResponse] = Field(default_factory=list)
+    selected_reference_sources: list[SelectedReferenceSourceResponse] = Field(default_factory=list)
+
+
+class ComposeReferenceSourceSelectionRequest(BaseModel):
+    reference_source_ids: list[int] = Field(default_factory=list)
+
+
+class ComposeSourceConfirmationRequest(BaseModel):
+    confirmed: bool = True
+
+
+class ComposeOutlineConfirmationRequest(BaseModel):
+    preview_version: int = Field(..., ge=1)
+    approved_outline_seed: dict

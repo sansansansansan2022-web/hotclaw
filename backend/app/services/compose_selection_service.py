@@ -18,6 +18,14 @@ logger = get_logger(__name__)
 class ComposeSelectionService:
     """Maintain the current creation basket for an account."""
 
+    def _clear_outline_confirmation(self, session: ComposeSelectionSessionModel) -> None:
+        session.outline_confirmed = False
+        session.approved_outline_seed_json = None
+
+    def _invalidate_source_selection(self, session: ComposeSelectionSessionModel) -> None:
+        session.source_confirmed = False
+        self._clear_outline_confirmation(session)
+
     async def get_session(
         self,
         account_id: str,
@@ -50,6 +58,10 @@ class ComposeSelectionService:
             account_id=account_id,
             selected_recommendation_ids_json=[],
             selected_reference_source_ids_json=[],
+            source_confirmed=False,
+            outline_confirmed=False,
+            preview_version=0,
+            approved_outline_seed_json=None,
             status="draft",
         )
         db.add(session)
@@ -79,7 +91,95 @@ class ComposeSelectionService:
             session.status = status
         db.add(session)
         await db.flush()
+        await db.refresh(session)
         return session
+
+    async def confirm_sources(
+        self,
+        account_id: str,
+        session_id: str,
+        db: AsyncSession,
+    ) -> ComposeSelectionSessionModel:
+        session = await self.get_session(account_id, session_id, db)
+        total_selected = len(session.selected_recommendation_ids_json or []) + len(
+            session.selected_reference_source_ids_json or []
+        )
+        if total_selected <= 0:
+            raise ValueError("at least one selected source is required before confirming sources")
+        session.source_confirmed = True
+        db.add(session)
+        await db.flush()
+        await db.refresh(session)
+        return session
+
+    async def confirm_outline(
+        self,
+        account_id: str,
+        session_id: str,
+        *,
+        preview_version: int,
+        approved_outline_seed: dict[str, Any],
+        db: AsyncSession,
+    ) -> ComposeSelectionSessionModel:
+        session = await self.get_session(account_id, session_id, db)
+        if not session.source_confirmed:
+            raise ValueError("selected sources must be confirmed before confirming the outline")
+        if session.preview_version < 1:
+            raise ValueError("generate a compose preview before confirming the outline")
+        if preview_version != session.preview_version:
+            raise ValueError("outline confirmation is stale; regenerate the preview and try again")
+        sections = approved_outline_seed.get("sections") if isinstance(approved_outline_seed, dict) else None
+        if not isinstance(sections, list) or not sections:
+            raise ValueError("approved_outline_seed must include at least one outline section")
+        session.outline_confirmed = True
+        session.approved_outline_seed_json = approved_outline_seed
+        db.add(session)
+        await db.flush()
+        await db.refresh(session)
+        return session
+
+    async def validate_submit_ready(
+        self,
+        account_id: str,
+        session_id: str,
+        db: AsyncSession,
+    ) -> ComposeSelectionSessionModel:
+        session = await self.get_session(account_id, session_id, db)
+        total_selected = len(session.selected_recommendation_ids_json or []) + len(
+            session.selected_reference_source_ids_json or []
+        )
+        if total_selected <= 0:
+            raise ValueError("at least one selected source is required before generation")
+        if not session.source_confirmed:
+            raise ValueError("selected sources must be confirmed before generation")
+        if not session.outline_confirmed or not isinstance(session.approved_outline_seed_json, dict):
+            raise ValueError("outline must be confirmed before generation")
+        return session
+
+    async def replace_selected_reference_sources(
+        self,
+        *,
+        account_id: str,
+        session_id: str,
+        reference_source_ids: list[int],
+        db: AsyncSession,
+    ) -> tuple[ComposeSelectionSessionModel, list[ReferenceSourceModel]]:
+        session = await self.get_session(account_id, session_id, db)
+        selected_rows = await self._load_reference_sources(account_id, reference_source_ids, db)
+        if reference_source_ids and len(selected_rows) != len({int(item) for item in reference_source_ids}):
+            raise ValueError("reference_source_ids must all belong to the account")
+
+        session.selected_reference_source_ids_json = [str(row.id) for row in selected_rows]
+        self._invalidate_source_selection(session)
+        db.add(session)
+        await db.flush()
+        logger.info(
+            "compose_selection_reference_sources_replaced",
+            account_id=account_id,
+            session_id=session.id,
+            reference_source_count=len(selected_rows),
+        )
+        return session, selected_rows
 
     async def apply_recommendation_action(
         self,
@@ -105,6 +205,7 @@ class ComposeSelectionService:
                 row.status = "selected"
                 db.add(row)
             session.selected_recommendation_ids_json = selected_ids
+            self._invalidate_source_selection(session)
             session.status = "draft"
             db.add(session)
         elif action == "save_as_reference":
@@ -128,6 +229,7 @@ class ComposeSelectionService:
                     if str(row.id) not in selected_reference_ids:
                         selected_reference_ids.append(str(row.id))
                 session.selected_reference_source_ids_json = selected_reference_ids
+                self._invalidate_source_selection(session)
                 db.add(session)
         elif action == "dismiss":
             session = (
@@ -145,7 +247,24 @@ class ComposeSelectionService:
                     for item in (session.selected_recommendation_ids_json or [])
                     if str(item) not in dismissed_ids
                 ]
+                self._invalidate_source_selection(session)
                 db.add(session)
+        elif action == "remove_from_creation":
+            session = await self.get_session(account_id, selection_session_id, db) if selection_session_id else None
+            if session is None:
+                raise ValueError("selection_session_id is required for remove_from_creation")
+            removed_ids = {row.id for row in recommendations}
+            session.selected_recommendation_ids_json = [
+                item
+                for item in (session.selected_recommendation_ids_json or [])
+                if str(item) not in removed_ids
+            ]
+            self._invalidate_source_selection(session)
+            for row in recommendations:
+                if row.status == "selected":
+                    row.status = "new"
+                db.add(row)
+            db.add(session)
         else:
             raise ValueError(f"unsupported action: {action}")
 
@@ -212,6 +331,21 @@ class ComposeSelectionService:
         rows.sort(key=lambda row: order.get(row.id, len(order)))
         return rows
 
+    async def load_session_bundle(
+        self,
+        account_id: str,
+        session_id: str,
+        db: AsyncSession,
+    ) -> tuple[
+        ComposeSelectionSessionModel,
+        list[RecommendedContentItemModel],
+        list[ReferenceSourceModel],
+    ]:
+        session = await self.get_session(account_id, session_id, db)
+        selected_recommendations = await self.list_selected_recommendations(account_id, session, db)
+        selected_reference_sources = await self.list_selected_reference_sources(account_id, session, db)
+        return session, selected_recommendations, selected_reference_sources
+
     def serialize_session(self, session: ComposeSelectionSessionModel) -> dict[str, Any]:
         return {
             "id": session.id,
@@ -221,6 +355,10 @@ class ComposeSelectionService:
             "creation_note": session.creation_note,
             "preferred_lane": session.preferred_lane,
             "title_direction": session.title_direction,
+            "source_confirmed": session.source_confirmed,
+            "outline_confirmed": session.outline_confirmed,
+            "preview_version": session.preview_version,
+            "approved_outline_seed": session.approved_outline_seed_json,
             "status": session.status,
             "created_at": session.created_at,
             "updated_at": session.updated_at,
@@ -258,6 +396,28 @@ class ComposeSelectionService:
                 RecommendedContentItemModel.id.in_(valid_ids),
             )
             .order_by(desc(RecommendedContentItemModel.updated_at), desc(RecommendedContentItemModel.id))
+        )
+        rows = list(result.scalars().all())
+        order = {item: index for index, item in enumerate(valid_ids)}
+        rows.sort(key=lambda row: order.get(row.id, len(order)))
+        return rows
+
+    async def _load_reference_sources(
+        self,
+        account_id: str,
+        reference_source_ids: list[int],
+        db: AsyncSession,
+    ) -> list[ReferenceSourceModel]:
+        valid_ids = [int(item) for item in reference_source_ids if int(item) > 0]
+        if not valid_ids:
+            return []
+        result = await db.execute(
+            select(ReferenceSourceModel)
+            .where(
+                ReferenceSourceModel.account_id == account_id,
+                ReferenceSourceModel.id.in_(valid_ids),
+            )
+            .order_by(desc(ReferenceSourceModel.updated_at), desc(ReferenceSourceModel.id))
         )
         rows = list(result.scalars().all())
         order = {item: index for index, item in enumerate(valid_ids)}

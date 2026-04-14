@@ -47,6 +47,12 @@ function getAutomationPlan(
   locale: "en" | "zh-CN",
   token: (value?: string | null) => string,
 ) {
+  if (account.automation_plan_summary) {
+    return account.automation_plan_summary;
+  }
+
+  // Deprecated compatibility fallback only. Remove after workspace surfaces
+  // stop depending on Account legacy scheduling mirrors.
   const scheduleSummary = account.posting_frequency
     ? account.posting_time
       ? locale === "zh-CN"
@@ -57,36 +63,34 @@ function getAutomationPlan(
       ? "仅手动"
       : "Manual only";
 
-  return (
-    account.automation_plan_summary ?? {
-      id: null,
-      account_id: account.account_id,
-      config_source: "legacy_fallback" as const,
-      plan_type: account.operation_mode,
-      is_enabled: account.auto_run_enabled,
-      run_strategy:
-        account.operation_mode === "manual"
-          ? "manual_only"
-          : account.posting_frequency
-            ? "hybrid"
-            : "manual_only",
-      schedule_type: account.posting_frequency === "daily" ? "daily" : account.posting_frequency ? "weekly" : "none",
-      schedule_config: account.posting_time ? { time: account.posting_time } : null,
-      schedule_summary: scheduleSummary,
-      auto_publish_enabled: account.auto_publish_enabled,
-      publish_review_required: !account.auto_publish_enabled,
-      max_posts_per_day: account.max_posts_per_day,
-      min_interval_minutes: account.min_interval_minutes,
-      timezone: "Asia/Shanghai",
-      next_run_at: account.next_run_at,
-      last_run_at: account.last_run_at,
-      notes: null,
-      latest_status: account.last_run_status,
-      is_active_plan: true,
-      created_at: null,
-      updated_at: null,
-    }
-  );
+  return {
+    id: null,
+    account_id: account.account_id,
+    config_source: "legacy_fallback" as const,
+    plan_type: account.operation_mode,
+    is_enabled: account.auto_run_enabled,
+    run_strategy:
+      account.operation_mode === "manual"
+        ? "manual_only"
+        : account.posting_frequency
+          ? "hybrid"
+          : "manual_only",
+    schedule_type: account.posting_frequency === "daily" ? "daily" : account.posting_frequency ? "weekly" : "none",
+    schedule_config: account.posting_time ? { time: account.posting_time } : null,
+    schedule_summary: scheduleSummary,
+    auto_publish_enabled: account.auto_publish_enabled,
+    publish_review_required: !account.auto_publish_enabled,
+    max_posts_per_day: account.max_posts_per_day,
+    min_interval_minutes: account.min_interval_minutes,
+    timezone: "Asia/Shanghai",
+    next_run_at: account.next_run_at,
+    last_run_at: account.last_run_at,
+    notes: null,
+    latest_status: account.last_run_status,
+    is_active_plan: true,
+    created_at: null,
+    updated_at: null,
+  };
 }
 
 function getWeChatConnectionSummary(config: WeChatConfigDetail | null, locale: "en" | "zh-CN") {
@@ -146,15 +150,15 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
     ? {
         unexpectedError: "发生了意外错误。",
         loadError: "无法加载账号工作台。",
-        runQueuedTitle: "账号运行已排队",
-        runQueuedMessage: (taskId: string) => `任务 ${taskId} 已在这个账号工作台里启动。`,
-        runFailedTitle: "运行失败",
+        runQueuedTitle: "兼容直跑已排队",
+        runQueuedMessage: (taskId: string) => `旧实例任务 ${taskId} 已在这个账号工作台里启动。`,
+        runFailedTitle: "兼容直跑失败",
         pageEyebrow: "账号工作台",
         pageTitle: "账号工作台",
-        pageDescription: "在当前账号上下文里发起运行、查看该账号的任务和草稿，并把整条运营链路固定在这个账号上。",
+        pageDescription: "在当前账号上下文里新建任务、查看该账号的任务和草稿，并把整条运营链路固定在这个账号上。",
         backToAccount: "返回账号",
-        runNow: "立即运行",
-        running: "运行中...",
+        runNow: "兼容直跑（旧实例）",
+        running: "旧实例直跑中...",
         loadFailedTitle: "账号工作台加载失败",
         currentWorkspace: "当前账号工作台",
         onboardingChecklist: "接入清单",
@@ -260,15 +264,15 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
     : {
         unexpectedError: "Unexpected error.",
         loadError: "Unable to load account workspace.",
-        runQueuedTitle: "Account run queued",
-        runQueuedMessage: (taskId: string) => `Task ${taskId} started in this account workspace.`,
-        runFailedTitle: "Run failed",
+        runQueuedTitle: "Legacy run queued",
+        runQueuedMessage: (taskId: string) => `Legacy runtime task ${taskId} started in this account workspace.`,
+        runFailedTitle: "Legacy run failed",
         pageEyebrow: "Account Workspace",
         pageTitle: "Account Workspace",
-        pageDescription: "Run this account, inspect this account's tasks and drafts, and keep the whole operator path anchored to the current account.",
+        pageDescription: "Start new tasks, inspect this account's tasks and drafts, and keep the whole operator path anchored to the current account.",
         backToAccount: "Back to Account",
-        runNow: "Run Now",
-        running: "Running...",
+        runNow: "Legacy Quick Run",
+        running: "Running Legacy...",
         loadFailedTitle: "Account workspace failed to load",
         currentWorkspace: "Current Account Workspace",
         onboardingChecklist: "Onboarding Checklist",
@@ -547,10 +551,9 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
             <Link href={`/accounts/${accountId}`}>
               <Button variant="secondary">{copy.backToAccount}</Button>
             </Link>
-            <Button data-testid="account-workspace-run-button" onClick={() => void runNow()} disabled={running}>
-              <Icon name="play" className="h-4 w-4" />
-              {running ? copy.running : copy.runNow}
-            </Button>
+            <Link href={`/accounts/${accountId}/create`}>
+              <Button>{locale === "zh-CN" ? "新建任务" : "New Task"}</Button>
+            </Link>
           </>
         }
       />
@@ -807,6 +810,27 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
               </div>
             </Card>
           </div>
+
+          <Card
+            title={locale === "zh-CN" ? "兼容旧实例动作" : "Legacy Runtime Action"}
+            description={
+              locale === "zh-CN"
+                ? "账号工作台里的旧直跑入口先封存在这里，只给兼容链路、旧联调和应急场景使用。"
+                : "The old direct-run entry is archived here for compatibility paths, older integrations, and emergency use only."
+            }
+          >
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <p className="text-sm leading-6 text-slate-600">
+                {locale === "zh-CN"
+                  ? "主路径已经改成“新建任务”。如果只是正常运营这个账号，不应该再从这里直接跑系统。"
+                  : "The main path now starts from New Task. For normal operations, you should not run the system directly from here anymore."}
+              </p>
+              <Button data-testid="account-workspace-run-button" variant="secondary" onClick={() => void runNow()} disabled={running}>
+                <Icon name="play" className="h-4 w-4" />
+                {running ? copy.running : copy.runNow}
+              </Button>
+            </div>
+          </Card>
 
           {latestRunStrategy ? (
             <Card

@@ -55,3 +55,38 @@ class SyncReferenceSourceResponse(BaseModel):
 
     source: ReferenceSourceResponse
     message: str
+
+
+class WechatArticleSearchItemResponse(BaseModel):
+    """Normalized WeChat article search result."""
+
+    title: str
+    url: str
+    intermediate_url: str | None = None
+    summary: str | None = None
+    published_at: datetime | None = None
+    source_name: str | None = None
+    url_resolved: bool = False
+
+
+class WechatArticleSearchResponse(BaseModel):
+    """Response for account-scoped WeChat article search."""
+
+    account_id: str
+    query: str
+    total: int
+    articles: list[WechatArticleSearchItemResponse]
+
+
+class WechatArticleImportRequest(BaseModel):
+    """Import one searched WeChat article into account reference sources."""
+
+    title: str = Field(..., min_length=1, max_length=300)
+    url: str = Field(..., min_length=1)
+    summary: str | None = None
+    source_name: str | None = Field(default=None, max_length=200)
+    published_at: datetime | None = None
+    intermediate_url: str | None = None
+    url_resolved: bool = False
+    query: str | None = None
+    notes: str | None = None

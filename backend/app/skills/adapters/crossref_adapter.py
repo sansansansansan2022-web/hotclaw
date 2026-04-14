@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 from urllib.parse import quote
 
@@ -12,6 +13,15 @@ from app.core.exceptions import ExternalAPIError
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _get_proxy_url() -> str | None:
+    """Get HTTP proxy URL from environment variables."""
+    http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+    if http_proxy:
+        return http_proxy
+    https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+    return https_proxy
 
 
 class CrossrefAdapter:
@@ -30,7 +40,7 @@ class CrossrefAdapter:
         }
         headers = {"User-Agent": self._user_agent()}
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, proxy=_get_proxy_url(), trust_env=False) as client:
                 response = await client.get(f"{self.base_url}/works", params=params, headers=headers)
         except httpx.TimeoutException as exc:
             raise ExternalAPIError("Crossref request timed out", details={"title": title}) from exc

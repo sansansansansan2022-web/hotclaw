@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { getTaskDetail, getTaskNodes, rerunTask } from "@/lib/api";
+import { getTaskArtifacts, getTaskDetail, getTaskEffectiveInput, getTaskNodes, rerunTask } from "@/lib/api";
 import {
   normalizeContentMemories,
   normalizeEvaluation,
@@ -17,7 +17,7 @@ import {
 } from "@/lib/content-insights";
 import { useI18n } from "@/lib/i18n";
 import { formatDateTime, formatDuration, formatNumber, truncate } from "@/lib/utils";
-import type { NodeRun, SectionDraft, TaskDetail } from "@/types";
+import type { NodeRun, SectionDraft, TaskArtifact, TaskDetail, TaskEffectiveInputResponse } from "@/types";
 import {
   EvaluationScoreCard,
   InsightDisclosureCard,
@@ -38,6 +38,13 @@ function taskTone(status: string): "success" | "warning" | "danger" | "muted" {
   return "muted";
 }
 
+function artifactTone(status: string): "success" | "warning" | "danger" | "muted" {
+  if (status === "available") return "success";
+  if (status === "failed") return "danger";
+  if (status === "pending") return "warning";
+  return "muted";
+}
+
 function fallbackSections(detail: TaskDetail | null): SectionDraft[] {
   const sections = detail?.result_data?.content?.structure?.sections ?? [];
   return sections.map((section, index) => ({
@@ -51,6 +58,8 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
   const { locale, taskStatusLabel } = useI18n();
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [nodes, setNodes] = useState<NodeRun[]>([]);
+  const [artifacts, setArtifacts] = useState<TaskArtifact[]>([]);
+  const [effectiveInput, setEffectiveInput] = useState<TaskEffectiveInputResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -60,9 +69,16 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
         setLoading(true);
       }
       setError(null);
-      const [detailRes, nodesRes] = await Promise.all([getTaskDetail(taskId), getTaskNodes(taskId)]);
+      const [detailRes, nodesRes, artifactRes, effectiveInputRes] = await Promise.all([
+        getTaskDetail(taskId),
+        getTaskNodes(taskId),
+        getTaskArtifacts(taskId),
+        getTaskEffectiveInput(taskId),
+      ]);
       setDetail(detailRes);
       setNodes(nodesRes.nodes);
+      setArtifacts(artifactRes.artifacts);
+      setEffectiveInput(effectiveInputRes);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载任务详情。" : "Unable to load task detail.");
     } finally {
@@ -86,24 +102,46 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
     return () => window.clearTimeout(timer);
   }, [detail, taskId]);
 
+  const artifactMap = useMemo(
+    () => Object.fromEntries(artifacts.map((artifact) => [artifact.artifact_key, artifact])) as Record<string, TaskArtifact>,
+    [artifacts],
+  );
+
   const insights = useMemo(() => {
     const result = detail?.result_data;
-    const sections = normalizeSectionDrafts(result?.section_drafts);
+    const evidenceBundle = artifactMap.evidence_bundle?.display_payload as Record<string, unknown> | null | undefined;
+    const profileSnapshot = artifactMap.profile_snapshot?.display_payload as Record<string, unknown> | null | undefined;
+    const outlinePreview = artifactMap.outline_preview?.display_payload as Record<string, unknown> | null | undefined;
+    const sectionDrafts = artifactMap.section_drafts?.display_payload as Record<string, unknown> | null | undefined;
+    const reviewSummary = artifactMap.review_summary?.display_payload as Record<string, unknown> | null | undefined;
+    const rewriteSummary = artifactMap.rewrite_summary?.display_payload as Record<string, unknown> | null | undefined;
+    const auditSummary = artifactMap.audit_summary?.display_payload as Record<string, unknown> | null | undefined;
+    const sections = normalizeSectionDrafts((sectionDrafts?.section_drafts as unknown) ?? result?.section_drafts);
     return {
       memories: normalizeContentMemories(result?.retrieved_memories),
-      queryPlan: normalizeQueryPlan(result?.query_plan),
-      sourceCandidates: normalizeSourceCandidates(result?.source_candidates),
-      referenceDigest: normalizeReferenceDigest(result?.reference_digest),
-      styleProfile: normalizeStyleProfile(result?.style_profile, result?.profile ?? null),
-      outline: normalizeOutlinePlan(result?.outline_plan),
+      queryPlan: normalizeQueryPlan((evidenceBundle?.query_plan as unknown) ?? result?.query_plan),
+      sourceCandidates: normalizeSourceCandidates((evidenceBundle?.source_candidates as unknown) ?? result?.source_candidates),
+      referenceDigest: normalizeReferenceDigest((evidenceBundle?.reference_digest as unknown) ?? result?.reference_digest),
+      styleProfile: normalizeStyleProfile(
+        (profileSnapshot?.style_profile as unknown) ?? result?.style_profile,
+        (profileSnapshot?.profile as unknown) ?? result?.profile ?? null,
+      ),
+      outline: normalizeOutlinePlan((outlinePreview?.outline_plan as unknown) ?? result?.outline_plan),
       sections: sections.length ? sections : fallbackSections(detail),
-      reviews: normalizeReviewResults(result),
-      rewrite: normalizeRewriteResult(result?.rewrite_result),
-      evaluation: normalizeEvaluation(result?.evaluation),
+      reviews: normalizeReviewResults(reviewSummary ?? result),
+      rewrite: normalizeRewriteResult((rewriteSummary?.rewrite_result as unknown) ?? result?.rewrite_result),
+      evaluation: normalizeEvaluation(auditSummary ?? result),
+      topicSelection: artifactMap.topic_selection?.display_payload ?? null,
+      titleCandidates: artifactMap.title_candidates?.display_payload ?? null,
+      assembledArticle: artifactMap.assembled_article?.display_payload ?? null,
     };
-  }, [detail]);
+  }, [artifactMap, detail]);
 
   const inputSnapshot = useMemo(() => {
+    if (effectiveInput?.explicit_input && Object.keys(effectiveInput.explicit_input).length > 0) {
+      return JSON.stringify(effectiveInput.explicit_input, null, 2);
+    }
+
     if (!detail?.input_data) {
       return locale === "zh-CN" ? "暂无输入快照。" : "No input snapshot available.";
     }
@@ -113,7 +151,17 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
     }
 
     return JSON.stringify(detail.input_data, null, 2);
-  }, [detail, locale]);
+  }, [detail, effectiveInput, locale]);
+
+  const positioningSnapshot = useMemo(() => {
+    if (typeof effectiveInput?.positioning === "string" && effectiveInput.positioning.trim()) {
+      return effectiveInput.positioning;
+    }
+    if (typeof detail?.input_data?.positioning === "string" && detail.input_data.positioning.trim()) {
+      return detail.input_data.positioning;
+    }
+    return inputSnapshot;
+  }, [detail, effectiveInput, inputSnapshot]);
 
   const opsContext = detail?.ops_context ?? null;
   const runStrategy = opsContext?.run_strategy ?? null;
@@ -225,7 +273,7 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
                 </div>
                 <div className="md:col-span-2">
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{locale === "zh-CN" ? "定位摘要" : "Positioning Snapshot"}</p>
-                  <p className="mt-2 whitespace-pre-wrap leading-7 text-slate-600">{truncate(inputSnapshot, 260)}</p>
+                  <p className="mt-2 whitespace-pre-wrap leading-7 text-slate-600">{truncate(positioningSnapshot, 260)}</p>
                 </div>
               </div>
             </Card>
@@ -264,6 +312,39 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
               </dl>
             </Card>
           </div>
+
+          <Card
+"zh-CN" ? "阶段产物" : "Stage Artifacts"
+            description={
+              locale === "zh-CN"
+                ? "浠ュ眬閮ㄧ敤鎴疯瑙掓煡鐪嬭繖娆′换鍔＄湡姝ｅ唴鍚冧簡浠€涔堛€佷骇鍑轰簡浠€涔堬紝鑺傜偣杞ㄨ抗鏀惧埌浜岀骇瑙嗗浘銆?"
+                : "Review the user-facing stage artifacts first, then drop into node trace when you need lower-level debugging."
+            }
+          >
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+              {artifacts.map((artifact) => (
+                <div key={artifact.artifact_key} className="rounded-2xl border border-slate-200 p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{artifact.stage}</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">{artifact.title}</p>
+                    </div>
+                    <Badge tone={artifactTone(artifact.status)}>{artifact.status}</Badge>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500">
+"zh-CN" ? "暂无时间" : "No timestamp"
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {artifact.source_node_ids.map((nodeId) => (
+                      <Badge key={`${artifact.artifact_key}-${nodeId}`} tone="muted">
+                        {nodeId}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
 
           {detail.latest_draft ? (
             <Card
@@ -366,8 +447,12 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
           ) : null}
 
           <Card
-            title={locale === "zh-CN" ? "输入快照" : "Input Snapshot"}
-            description={locale === "zh-CN" ? "触发任务时的原始定位描述或上下文载荷。" : "The original positioning description or context payload used to trigger the task."}
+            title={locale === "zh-CN" ? "有效输入" : "Effective Input"}
+            description={
+              locale === "zh-CN"
+                ? "优先显示这次任务真正吃到的显式创作输入；如果没有，再回退到原始 task input。"
+                : "Prefer the explicit creation payload actually consumed by this run, then fall back to the raw task input."
+            }
           >
             <pre className="whitespace-pre-wrap text-sm leading-7 text-slate-600">{inputSnapshot}</pre>
           </Card>
@@ -475,6 +560,101 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
                 </div>
               </div>
             </InsightDisclosureCard>
+
+            <InsightDisclosureCard
+              title={locale === "zh-CN" ? "选题与标题产物" : "Topic & Title Artifacts"}
+              description={
+                locale === "zh-CN"
+                  ? "把选题、标题候选和最终成稿放在同一组里，先看阶段产物，再看底层节点轨迹。"
+                  : "Review topic selection, title candidates, and the assembled article as first-class artifacts before diving into node trace."
+              }
+            >
+              <div className="grid gap-6 xl:grid-cols-3">
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{locale === "zh-CN" ? "选题" : "Topic Selection"}</p>
+                  {insights.topicSelection ? (
+                    <div className="mt-3 space-y-3 text-sm text-slate-600">
+                      {(insights.topicSelection as { selected_topic?: string | null }).selected_topic ? (
+                        <p className="font-semibold text-slate-900">
+                          {(insights.topicSelection as { selected_topic?: string | null }).selected_topic}
+                        </p>
+                      ) : null}
+                      {Array.isArray((insights.topicSelection as { topics?: Array<{ title?: string }> }).topics) ? (
+                        <div className="flex flex-wrap gap-2">
+                          {((insights.topicSelection as { topics?: Array<{ title?: string }> }).topics ?? []).map((item) =>
+                            item?.title ? (
+                              <Badge key={item.title} tone="muted">
+                                {item.title}
+                              </Badge>
+                            ) : null,
+                          )}
+                        </div>
+                      ) : (
+                        <p>{locale === "zh-CN" ? "没有返回选题候选。" : "No topic candidates returned."}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">{locale === "zh-CN" ? "没有选题产物。" : "No topic artifact available."}</p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{locale === "zh-CN" ? "标题" : "Title Candidates"}</p>
+                  {insights.titleCandidates ? (
+                    <div className="mt-3 space-y-3 text-sm text-slate-600">
+                      {(insights.titleCandidates as { selected_title?: string | null }).selected_title ? (
+                        <p className="font-semibold text-slate-900">
+                          {(insights.titleCandidates as { selected_title?: string | null }).selected_title}
+                        </p>
+                      ) : null}
+                      {Array.isArray((insights.titleCandidates as { titles?: Array<{ text?: string }> }).titles) ? (
+                        <div className="flex flex-wrap gap-2">
+                          {((insights.titleCandidates as { titles?: Array<{ text?: string }> }).titles ?? []).map((item) =>
+                            item?.text ? (
+                              <Badge key={item.text} tone="brand">
+                                {item.text}
+                              </Badge>
+                            ) : null,
+                          )}
+                        </div>
+                      ) : (
+                        <p>{locale === "zh-CN" ? "没有返回标题候选。" : "No title candidates returned."}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">{locale === "zh-CN" ? "没有标题产物。" : "No title artifact available."}</p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{locale === "zh-CN" ? "成稿" : "Assembled Article"}</p>
+                  {insights.assembledArticle ? (
+                    <div className="mt-3 space-y-3 text-sm text-slate-600">
+                      {(insights.assembledArticle as { content?: { selected_title?: string | null } }).content?.selected_title ? (
+                        <p className="font-semibold text-slate-900">
+                          {(insights.assembledArticle as { content?: { selected_title?: string | null } }).content?.selected_title}
+                        </p>
+                      ) : null}
+                      {(insights.assembledArticle as { content?: { summary?: string | null } }).content?.summary ? (
+                        <p>{(insights.assembledArticle as { content?: { summary?: string | null } }).content?.summary}</p>
+                      ) : null}
+                      {(insights.assembledArticle as { content?: { content_markdown?: string | null } }).content?.content_markdown ? (
+                        <p className="text-xs leading-6 text-slate-500">
+                          {truncate(
+                            (insights.assembledArticle as { content?: { content_markdown?: string | null } }).content?.content_markdown ?? "",
+                            220,
+                          )}
+                        </p>
+                      ) : (
+                        <p>{locale === "zh-CN" ? "没有返回成稿正文。" : "No assembled article body returned."}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-sm text-slate-500">{locale === "zh-CN" ? "没有成稿产物。" : "No assembled article artifact available."}</p>
+                  )}
+                </div>
+              </div>
+            </InsightDisclosureCard>
             <InsightDisclosureCard
               title={locale === "zh-CN" ? "检索到的历史文章" : "Retrieved Article Memories"}
               description={locale === "zh-CN" ? "查看这次任务引用了哪些历史文章记忆。" : "Inspect which historical article memories were retrieved for this run."}
@@ -559,7 +739,7 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
           </div>
 
           <Card
-            title={locale === "zh-CN" ? "节点轨迹" : "Node Trace"}
+"zh-CN" ? "节点轨迹" : "Node Trace"
             description={locale === "zh-CN" ? "保留结构化内容链的节点调试表，方便排查提纲、分段、组装与回退行为。" : "Keep the structured content pipeline trace visible, including outline, sections, assembly and fallback behavior."}
           >
             {nodes.length ? (
@@ -583,7 +763,7 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
                 ))}
               </Table>
             ) : (
-              <EmptyState title={locale === "zh-CN" ? "暂无节点轨迹" : "No node trace available"} description={locale === "zh-CN" ? "这个任务还没有记录任何节点执行信息。" : "No node execution records were found for this task."} />
+"zh-CN" ? "暂无节点轨迹" : "No node trace available"
             )}
           </Card>
         </>

@@ -8,7 +8,7 @@ from app.skills.base import BaseSkill, SkillResult
 from app.skills.registry import skill_registry
 
 # 注册所有 Skill
-from app.skills.hot_topic_fetch_skill import HotTopicFetchSkill
+from app.skills.hot_topic_fetch_skill import HotTopicFetchSkill, hot_topic_fetch_skill
 from app.skills.external.github_project_curator_skill import GitHubProjectCuratorSkill
 from app.skills.external.scholar_paper_search_skill import ScholarPaperSearchSkill
 
@@ -21,6 +21,7 @@ __all__ = [
     "SkillResult",
     "skill_registry",
     "HotTopicFetchSkill",
+    "hot_topic_fetch_skill",
     "GitHubProjectCuratorSkill",
     "ScholarPaperSearchSkill",
 ]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urljoin
@@ -13,6 +14,15 @@ from app.core.exceptions import ConfigError, ExternalAPIError
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _get_proxy_url() -> str | None:
+    """Get HTTP proxy URL from environment variables."""
+    http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+    if http_proxy:
+        return http_proxy
+    https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+    return https_proxy
 
 
 class GitHubSearchAdapter:
@@ -99,7 +109,7 @@ class GitHubSearchAdapter:
 
         url = urljoin(self.base_url, path)
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, proxy=_get_proxy_url()) as client:
                 response = await client.get(url, params=params, headers=request_headers)
         except httpx.TimeoutException as exc:
             logger.error("github_request_timeout", path=path)

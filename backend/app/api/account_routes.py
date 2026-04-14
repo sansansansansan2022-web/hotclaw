@@ -23,8 +23,6 @@ API 端点：
 - 前端 API: frontend/lib/api.ts (createAccount, listAccounts 等)
 """
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,30 +46,11 @@ from app.schemas.account import (
     AccountListResponse,
 )
 from app.services.account_service import account_service
+from app.services.account_run_dispatch_service import account_run_dispatch_service
 from app.services.compose_preview_service import compose_preview_service
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/accounts", tags=["accounts"])
-_background_tasks: dict[str, asyncio.Task] = {}
-
-
-async def _run_account_task_in_background(task_id: str, account_id: str) -> None:
-    """Run an account-created task in a dedicated DB session."""
-    from app.db.session import async_session_factory
-    from app.core.tracer import set_task_id
-    from app.services.task_service import task_service
-
-    async with async_session_factory() as bg_db:
-        try:
-            set_task_id(task_id)
-            logger.info("account_run_background_started", account_id=account_id, task_id=task_id)
-            await task_service.run_task(task_id, bg_db)
-        except Exception:
-            import traceback
-
-            traceback.print_exc()
-        finally:
-            _background_tasks.pop(task_id, None)
 
 
 # =============================================================================
@@ -135,21 +114,7 @@ async def list_accounts(
         accounts, total = await account_service.list_accounts(db, page=page, page_size=page_size)
         return AccountListResponse(
             accounts=[
-                AccountSummary(
-                    account_id=a.id,
-                    name=a.name,
-                    category=a.category,
-                    positioning=a.positioning,
-                    operation_mode=a.operation_mode,
-                    posting_frequency=a.posting_frequency,
-                    auto_run_enabled=a.auto_run_enabled,
-                    is_active=a.is_active,
-                    last_run_at=a.last_run_at,
-                    next_run_at=a.next_run_at,
-                    last_run_status=a.last_run_status,
-                    last_error_message=a.last_error_message,
-                    created_at=a.created_at,
-                )
+                AccountSummary(**account_service.build_account_summary_payload(a))
                 for a in accounts
             ],
             pagination={
@@ -226,21 +191,7 @@ async def update_account(
         data = req.model_dump(exclude_unset=True)
         account = await account_service.update_account(account_id, data, db)
         await db.commit()
-        return AccountSummary(
-            account_id=account.id,
-            name=account.name,
-            category=account.category,
-            positioning=account.positioning,
-            operation_mode=account.operation_mode,
-            posting_frequency=account.posting_frequency,
-            auto_run_enabled=account.auto_run_enabled,
-            is_active=account.is_active,
-            last_run_at=account.last_run_at,
-            next_run_at=account.next_run_at,
-            last_run_status=account.last_run_status,
-            last_error_message=account.last_error_message,
-            created_at=account.created_at,
-        )
+        return AccountSummary(**account_service.build_account_summary_payload(account))
     except AccountNotFoundError as e:
         logger.warning("account_update_not_found", account_id=account_id)
         raise HTTPException(status_code=404, detail=e.message)
@@ -289,6 +240,8 @@ async def run_account(
     - 500: TaskCreateError - 任务创建失败
     """
     try:
+        # Account remains the workspace/container. This route is the compatibility
+        # manual trigger while explicit selection/preview-driven creation is phased in.
         explicit_input = None
         if req and (req.selection_session_id or req.preview_payload or req.creation_note):
             selection_session_id = req.selection_session_id
@@ -312,15 +265,15 @@ async def run_account(
             explicit_input=explicit_input,
         )
         await db.commit()
-        bg_task = asyncio.create_task(_run_account_task_in_background(task.id, account.id))
-        _background_tasks[task.id] = bg_task
-        logger.info("account_run_background_scheduled", account_id=account.id, task_id=task.id)
+        account_run_dispatch_service.schedule(task_id=task.id, account_id=account.id)
         return AccountRunData(
-            account_id=account.id,
-            task_id=task.id,
-            status=task.status,
-            operation_mode=account.operation_mode,
-            selection_session_id=(explicit_input or {}).get("selection_session_id") if isinstance(explicit_input, dict) else None,
+            **account_service.build_account_run_payload(
+                account,
+                task,
+                selection_session_id=(explicit_input or {}).get("selection_session_id")
+                if isinstance(explicit_input, dict)
+                else None,
+            )
         )
     except AccountNotFoundError as e:
         logger.warning("account_run_not_found", account_id=account_id)
@@ -365,21 +318,7 @@ async def enable_account(
     try:
         account = await account_service.enable_account(account_id, db)
         await db.commit()
-        return AccountSummary(
-            account_id=account.id,
-            name=account.name,
-            category=account.category,
-            positioning=account.positioning,
-            operation_mode=account.operation_mode,
-            posting_frequency=account.posting_frequency,
-            auto_run_enabled=account.auto_run_enabled,
-            is_active=account.is_active,
-            last_run_at=account.last_run_at,
-            next_run_at=account.next_run_at,
-            last_run_status=account.last_run_status,
-            last_error_message=account.last_error_message,
-            created_at=account.created_at,
-        )
+        return AccountSummary(**account_service.build_account_summary_payload(account))
     except AccountNotFoundError as e:
         logger.warning("account_enable_not_found", account_id=account_id)
         raise HTTPException(status_code=404, detail=e.message)
@@ -408,21 +347,8 @@ async def disable_account(
     """
     try:
         account = await account_service.disable_account(account_id, db)
-        return AccountSummary(
-            account_id=account.id,
-            name=account.name,
-            category=account.category,
-            positioning=account.positioning,
-            operation_mode=account.operation_mode,
-            posting_frequency=account.posting_frequency,
-            auto_run_enabled=account.auto_run_enabled,
-            is_active=account.is_active,
-            last_run_at=account.last_run_at,
-            next_run_at=account.next_run_at,
-            last_run_status=account.last_run_status,
-            last_error_message=account.last_error_message,
-            created_at=account.created_at,
-        )
+        await db.commit()
+        return AccountSummary(**account_service.build_account_summary_payload(account))
     except AccountNotFoundError as e:
         logger.warning("account_disable_not_found", account_id=account_id)
         raise HTTPException(status_code=404, detail=e.message)

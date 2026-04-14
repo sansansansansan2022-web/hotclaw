@@ -26,7 +26,7 @@ class Base(DeclarativeBase):
 
 
 class AccountModel(Base):
-    """WeChat Official Account managed by the platform."""
+    """Workspace-level content asset container for a managed account."""
     __tablename__ = "accounts"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -35,6 +35,8 @@ class AccountModel(Base):
     positioning: Mapped[str] = mapped_column(Text, nullable=False)
     audience: Mapped[str | None] = mapped_column(Text, nullable=True)
     tone_style: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Legacy scheduling mirror fields kept for compatibility.
+    # Runtime automation source of truth lives on AutomationPlanModel.
     posting_frequency: Mapped[str | None] = mapped_column(String(20), nullable=True)
     posting_time: Mapped[str | None] = mapped_column(String(10), nullable=True)
     content_strategy: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -84,7 +86,7 @@ class AccountModel(Base):
 
 
 class TaskModel(Base):
-    """Task table: stores each task's full lifecycle."""
+    """System runtime instance for a single workflow execution."""
     __tablename__ = "tasks"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -298,6 +300,8 @@ class AccountAnalysisSnapshotModel(Base):
     recent_topics_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     reference_overview_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
     latest_ops_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    recommendation_diagnostics_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    recommendation_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ready")
     generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
@@ -338,7 +342,7 @@ class RecommendedContentItemModel(Base):
 
 
 class ComposeSelectionSessionModel(Base):
-    """Persist the current creation basket before formal task execution."""
+    """Persist selection and preview inputs, not a full compose session lifecycle."""
     __tablename__ = "compose_selection_sessions"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
@@ -350,6 +354,10 @@ class ComposeSelectionSessionModel(Base):
     creation_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     preferred_lane: Mapped[str | None] = mapped_column(String(100), nullable=True)
     title_direction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    outline_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    preview_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    approved_outline_seed_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -360,7 +368,7 @@ class ComposeSelectionSessionModel(Base):
 
 
 class AutomationPlanModel(Base):
-    """Per-account automation plan used by runtime and scheduling logic."""
+    """Per-account automation strategy source of truth for runtime and scheduling."""
 
     __tablename__ = "automation_plans"
 

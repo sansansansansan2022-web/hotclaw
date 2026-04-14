@@ -5,6 +5,10 @@ from app.core.config import settings
 from app.models.tables import EvidenceItemModel, SkillInvocationLogModel, TaskModel
 from app.skills.adapters.github_search_adapter import github_search_adapter
 from app.skills.adapters.openalex_adapter import openalex_adapter
+from app.skills.adapters.crossref_adapter import crossref_adapter
+from app.skills.adapters.pubmed_adapter import pubmed_adapter
+from app.skills.adapters.semantic_scholar_adapter import semantic_scholar_adapter
+from app.skills.external.scholar_paper_search_skill import ScholarPaperSearchSkill
 from app.skills.rankers.paper_ranker import paper_ranker
 from app.skills.rankers.repo_ranker import repo_ranker
 from app.skills.services.evidence_service import evidence_service
@@ -277,3 +281,85 @@ async def test_task_evidence_and_invocation_routes(client, db_session):
     assert invocation_response.status_code == 200
     assert invocation_response.json()["data"]["count"] == 1
     assert invocation_response.json()["data"]["invocations"][0]["skill_name"] == "github_project_curator_skill"
+
+
+@pytest.mark.asyncio
+async def test_scholar_skill_combines_openalex_semantic_scholar_and_pubmed(monkeypatch):
+    monkeypatch.setattr(settings, "enable_scholar_skill", True)
+    monkeypatch.setattr(settings, "scholar_provider", "openalex+crossref+semanticscholar+pubmed")
+    monkeypatch.setattr(settings, "openalex_api_key", "oa-test-key")
+
+    async def _fake_openalex(**kwargs):
+        return {
+            "results": [
+                {
+                    "id": "https://openalex.org/W1",
+                    "doi": "https://doi.org/10.1000/shared-paper",
+                    "display_name": "Shared Paper",
+                    "publication_year": 2024,
+                    "cited_by_count": 12,
+                    "authorships": [{"author": {"display_name": "Alice"}}],
+                    "abstract_inverted_index": {"agent": [0], "systems": [1]},
+                    "primary_location": {"source": {"display_name": "NeurIPS"}},
+                    "type": "article",
+                }
+            ]
+        }
+
+    async def _fake_semantic_scholar(**kwargs):
+        return {
+            "data": [
+                {
+                    "title": "Shared Paper",
+                    "year": 2024,
+                    "abstract": "Agent systems abstract",
+                    "authors": [{"name": "Alice"}],
+                    "citationCount": 20,
+                    "venue": "NeurIPS",
+                    "externalIds": {"DOI": "10.1000/shared-paper"},
+                    "url": "https://www.semanticscholar.org/paper/shared",
+                    "publicationTypes": ["JournalArticle"],
+                }
+            ]
+        }
+
+    async def _fake_pubmed(**kwargs):
+        return {
+            "results": [
+                {
+                    "id": "123456",
+                    "pmid": "123456",
+                    "doi": "10.1000/pubmed-paper",
+                    "title": "PubMed Anchoring Paper",
+                    "year": 2023,
+                    "authors": ["Bob"],
+                    "abstract": "PubMed abstract",
+                    "venue": "Nature Medicine",
+                    "source": "pubmed",
+                }
+            ]
+        }
+
+    async def _fake_crossref(title: str):
+        return None
+
+    monkeypatch.setattr(openalex_adapter, "search_works", _fake_openalex)
+    monkeypatch.setattr(semantic_scholar_adapter, "search_papers", _fake_semantic_scholar)
+    monkeypatch.setattr(pubmed_adapter, "search_papers", _fake_pubmed)
+    monkeypatch.setattr(crossref_adapter, "enrich_by_title", _fake_crossref)
+
+    payload = await ScholarPaperSearchSkill().execute(
+        {
+            "topic": "agent systems",
+            "max_results": 5,
+        }
+    )
+
+    assert payload["status"] == "success"
+    result_titles = [item["title"] for item in payload["data"]["results"]]
+    assert "Shared Paper" in result_titles
+    assert "PubMed Anchoring Paper" in result_titles
+    assert len(result_titles) == 2
+    evidence_titles = [item["title"] for item in payload["data"]["evidence_items"]]
+    assert "Shared Paper" in evidence_titles
+    assert "PubMed Anchoring Paper" in evidence_titles

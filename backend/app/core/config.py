@@ -145,12 +145,19 @@ class Settings(BaseSettings):
 
     enable_github_skill: bool = Field(default=False, description="Enable GitHub research skill")
     enable_scholar_skill: bool = Field(default=False, description="Enable scholar research skill")
+    enable_news_feed_source: bool = Field(default=True, description="Enable real RSS/Atom news feed collection")
     skill_cache_ttl_seconds: int = Field(default=21600, description="Skill cache TTL in seconds")
 
     github_token: str = Field(default="", description="GitHub API token")
     github_api_mode: str = Field(default="rest", description="GitHub API mode")
     github_api_base_url: str = Field(default="https://api.github.com", description="GitHub API base URL")
     github_skill_timeout_seconds: int = Field(default=20, description="GitHub skill timeout in seconds")
+    news_feed_timeout_seconds: int = Field(default=15, description="News feed fetch timeout in seconds")
+    news_feed_max_results_per_query: int = Field(default=6, description="Max items fetched per news query/feed")
+    wechat_article_search_timeout_seconds: int = Field(
+        default=15,
+        description="WeChat article search timeout in seconds",
+    )
 
     scholar_provider: str = Field(default="", description="Scholar provider strategy")
     scholar_provider_api_key: str = Field(default="", description="Scholar provider API key")

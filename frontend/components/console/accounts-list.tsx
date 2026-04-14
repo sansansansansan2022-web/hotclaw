@@ -2,13 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { listAccounts, runAccount } from "@/lib/api";
+import { listAccounts } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatDateTime, formatNumber, truncate } from "@/lib/utils";
 import type { AccountSummary } from "@/types";
 import { Badge, Button, EmptyState, ErrorState, PageHeader, SkeletonRows, StatCard, Table } from "@/components/console/ui";
 import { Icon } from "@/components/console/icons";
-import { useAppStore } from "@/store/appStore";
 
 function accountTone(status: string | null): "success" | "warning" | "danger" | "muted" {
   if (status === "running") return "warning";
@@ -19,11 +18,9 @@ function accountTone(status: string | null): "success" | "warning" | "danger" | 
 
 export function AccountManagementPage() {
   const { locale, t, operationModeLabel, taskStatusLabel, token } = useI18n();
-  const pushToast = useAppStore((state) => state.pushToast);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [runningId, setRunningId] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -49,29 +46,8 @@ export function AccountManagementPage() {
     return { active, autoRun, attention };
   }, [accounts]);
 
-  const triggerRun = async (accountId: string) => {
-    try {
-      setRunningId(accountId);
-      const response = await runAccount(accountId);
-      pushToast({
-        tone: "success",
-        title: t("accounts.triggered"),
-        message:
-          locale === "zh-CN"
-            ? `任务 ${response.task_id} 已为账号 ${accountId} 开始执行。`
-            : `Task ${response.task_id} is now executing for account ${accountId}.`,
-      });
-      await load();
-    } catch (runError) {
-      pushToast({
-        tone: "danger",
-        title: t("accounts.runFailed"),
-        message: runError instanceof Error ? runError.message : (locale === "zh-CN" ? "发生了意外错误" : "Unexpected error"),
-      });
-    } finally {
-      setRunningId(null);
-    }
-  };
+  /* Legacy direct-run stays archived on account detail/workspace. The list page
+     should only route users into the new task flow. */
 
   return (
     <div className="space-y-8">
@@ -154,9 +130,11 @@ export function AccountManagementPage() {
                       {t("accounts.view")}
                     </Button>
                   </Link>
-                  <Button variant="ghost" size="sm" disabled={runningId === account.account_id || !account.is_active} onClick={() => void triggerRun(account.account_id)}>
-                    {runningId === account.account_id ? t("accounts.running") : t("accounts.run")}
-                  </Button>
+                  <Link href={`/accounts/${account.account_id}/create`}>
+                    <Button size="sm">
+                      {locale === "zh-CN" ? "新建任务" : "New Task"}
+                    </Button>
+                  </Link>
                 </div>
               </td>
             </tr>

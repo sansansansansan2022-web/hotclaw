@@ -140,3 +140,50 @@ async def test_article_url_reference_source_sync_failure_is_visible(client, monk
     assert sync_response.status_code == 200
     assert sync_response.json()["source"]["sync_status"] == "failed"
     assert sync_response.json()["source"]["latest_error_message"] == "Unable to fetch article source."
+
+
+async def test_wechat_article_search_and_import_workflow(client, monkeypatch):
+    account_id = await _create_account(client, "WeChat Search Account")
+
+    async def _fake_wechat_search(account_id: str, *, query: str, num: int, resolve_real_url: bool, db):
+        assert query == "AI 智能体"
+        assert num == 5
+        return [
+            {
+                "title": "AI 智能体正在重塑工作流",
+                "url": "https://mp.weixin.qq.com/s/example",
+                "intermediate_url": "https://weixin.sogou.com/link?url=example",
+                "summary": "一篇关于 AI 智能体工作流的公众号文章。",
+                "published_at": None,
+                "source_name": "智能体观察",
+                "url_resolved": True,
+            }
+        ]
+
+    monkeypatch.setattr(reference_source_service, "search_wechat_articles", _fake_wechat_search)
+
+    search_response = await client.get(
+        f"/api/v1/accounts/{account_id}/reference-sources/wechat-search?query=AI%20%E6%99%BA%E8%83%BD%E4%BD%93&num=5"
+    )
+    assert search_response.status_code == 200
+    payload = search_response.json()
+    assert payload["total"] == 1
+    assert payload["articles"][0]["title"] == "AI 智能体正在重塑工作流"
+
+    import_response = await client.post(
+        f"/api/v1/accounts/{account_id}/reference-sources/wechat-search/import",
+        json={
+            "title": payload["articles"][0]["title"],
+            "url": payload["articles"][0]["url"],
+            "summary": payload["articles"][0]["summary"],
+            "source_name": payload["articles"][0]["source_name"],
+            "intermediate_url": payload["articles"][0]["intermediate_url"],
+            "url_resolved": payload["articles"][0]["url_resolved"],
+            "query": "AI 智能体",
+        },
+    )
+    assert import_response.status_code == 201, import_response.text
+    imported = import_response.json()
+    assert imported["source_type"] == "article_url"
+    assert imported["metadata_json"]["import_origin"] == "wechat_article_search"
+    assert imported["metadata_json"]["wechat_article"]["source_name"] == "智能体观察"

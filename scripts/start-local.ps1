@@ -1,8 +1,63 @@
+<#
+.SYNOPSIS
+Stable local runtime restarter for HotClaw.
+
+.DESCRIPTION
+This script is intentionally a local restart entrypoint, not a full frontend
+build orchestrator. On this Windows machine, invoking Next.js rebuilds from
+inside the startup script can trigger `spawn EPERM`. The stable path is:
+
+1. Rebuild the frontend manually from `frontend/` when you actually changed UI:
+   `npm run lint`
+   `npm run build`
+2. Use `start-local.ps1` for day-to-day restart of backend + existing frontend build.
+
+.PARAMETER BackendPort
+Backend HTTP port. Default: 8140.
+
+.PARAMETER FrontendPort
+Frontend HTTP port. Default: 3460.
+
+.PARAMETER FrontendMode
+`Auto` and `Start` both expect an existing production frontend build.
+Use `Dev` only when you explicitly want Next.js development mode.
+
+.PARAMETER RebuildFrontend
+Compatibility switch kept to make rebuild intent explicit. On this machine the
+script will stop and tell you to rebuild manually from `frontend/`.
+
+.PARAMETER DisableScheduler
+Starts the backend without the local scheduler noise.
+
+.PARAMETER DemoMode
+Starts backend with demo/e2e mode enabled.
+
+.PARAMETER SkipBuild
+Legacy compatibility switch. The script already prefers reusing an existing
+production build; keep this only for old invocations.
+
+.PARAMETER SkipStop
+Do not stop stale local processes before restart.
+
+.EXAMPLE
+.\scripts\start-local.ps1
+
+.EXAMPLE
+cd frontend
+npm run lint
+npm run build
+cd ..
+.\scripts\start-local.ps1
+
+.EXAMPLE
+.\scripts\start-local.ps1 -FrontendMode Dev -DisableScheduler
+#>
 param(
     [int]$BackendPort = 8140,
     [int]$FrontendPort = 3460,
     [ValidateSet('Auto', 'Start', 'Dev')]
     [string]$FrontendMode = 'Auto',
+    [switch]$RebuildFrontend,
     [switch]$DisableScheduler,
     [switch]$DemoMode,
     [switch]$SkipBuild,
@@ -69,17 +124,13 @@ function Invoke-ExternalCommand {
             Push-Location $WorkingDirectory
         }
 
-        $output = & $FilePath @Arguments 2>&1
+        & $FilePath @Arguments
         $exitCode = $LASTEXITCODE
     } finally {
         if ($WorkingDirectory) {
             Pop-Location
         }
         $ErrorActionPreference = $previousErrorActionPreference
-    }
-
-    if ($null -ne $output) {
-        Write-CommandOutput -Output $output
     }
 
     if ($exitCode -ne 0) {
@@ -119,13 +170,7 @@ function Start-DetachedCmd {
     }
 
     $launcher = ('start "" /min cmd.exe /c "cd /d {0} && {1}{2}"' -f $WorkingDirectory, $environmentPrefix, $InnerCommand)
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = 'cmd.exe'
-    $psi.Arguments = "/d /c $launcher"
-    $psi.WorkingDirectory = $repoRoot
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $process = [System.Diagnostics.Process]::Start($psi)
+    $process = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d', '/c', $launcher -WorkingDirectory $repoRoot -WindowStyle Minimized -PassThru
     if (-not $process) {
         throw 'Failed to launch detached process'
     }
@@ -234,33 +279,18 @@ try {
 
 $frontendLaunchMode = 'start'
 $frontendBuildIdPath = Join-Path $frontendDir '.next\BUILD_ID'
+$frontendBuildExists = Test-Path $frontendBuildIdPath
 Push-Location $frontendDir
 try {
     if ($FrontendMode -eq 'Dev') {
         Write-Step 'Frontend mode forced to dev'
         $frontendLaunchMode = 'dev'
-    } elseif (-not $SkipBuild) {
-        Write-Step 'Building frontend'
-        try {
-            Invoke-ExternalCommand -FilePath $npmPath -Arguments @('run', 'build') -Label 'npm run build' -WorkingDirectory $frontendDir
-        } catch {
-            if ($FrontendMode -eq 'Start') {
-                throw
-            }
-
-            if (Test-Path $frontendBuildIdPath) {
-                Write-Host 'Frontend build exited non-zero, but BUILD_ID exists; attempting production start.'
-                Write-Host $_
-                $frontendLaunchMode = 'start'
-            } else {
-                Write-Host 'Frontend production build failed; falling back to dev mode.'
-                Write-Host $_
-                $frontendLaunchMode = 'dev'
-            }
-        }
-    } elseif ($FrontendMode -eq 'Auto' -and !(Test-Path $frontendBuildIdPath)) {
-        Write-Step 'No existing production build found; falling back to dev mode'
-        $frontendLaunchMode = 'dev'
+    } elseif ($RebuildFrontend) {
+        throw 'Automated frontend rebuild is disabled on this machine because invoking Next build from inside the PowerShell startup script can trigger spawn EPERM. From the frontend directory, run `npm run lint` and `npm run build`, then rerun start-local.ps1.'
+    } elseif ($frontendBuildExists) {
+        Write-Step 'Using existing production frontend build'
+    } else {
+        throw 'No existing production frontend build found. From the frontend directory, run `npm run lint` and `npm run build`, then rerun start-local.ps1. If you explicitly want dev mode, use -FrontendMode Dev.'
     }
 } finally {
     Pop-Location
@@ -270,8 +300,15 @@ $backendOut = Join-Path $logDir "backend-$BackendPort.out.log"
 $backendErr = Join-Path $logDir "backend-$BackendPort.err.log"
 $backendCommand = ('"{0}" -m uvicorn app.main:app --host 127.0.0.1 --port {1} 1>"{2}" 2>"{3}"' -f $backendPython, $BackendPort, $backendOut, $backendErr)
 $schedulerEnabled = -not $DisableScheduler
+$runtimeEnv = @{
+    HOTCLAW_AUTO_CREATE_TABLES = '0'
+    HOTCLAW_ENABLE_SYSTEM_CONFIG_INIT = '1'
+    HOTCLAW_ENABLE_SCHEDULER = $(if ($schedulerEnabled) { '1' } else { '0' })
+    HOTCLAW_E2E_TEST_MODE = $(if ($DemoMode) { '1' } else { '0' })
+    ALL_PROXY = ''
+}
 Write-Step 'Starting backend'
-Start-DetachedCmd -WorkingDirectory $backendDir -InnerCommand $backendCommand -Environment @{ HOTCLAW_AUTO_CREATE_TABLES = '0'; HOTCLAW_ENABLE_SYSTEM_CONFIG_INIT = '1'; HOTCLAW_ENABLE_SCHEDULER = $(if ($schedulerEnabled) { '1' } else { '0' }); HOTCLAW_E2E_TEST_MODE = $(if ($DemoMode) { '1' } else { '0' }) }
+Start-DetachedCmd -WorkingDirectory $backendDir -InnerCommand $backendCommand -Environment $runtimeEnv
 Wait-ComponentReady -Name 'backend' -Url "$apiOrigin/api/v1/health" -StdoutLog $backendOut -StderrLog $backendErr
 $backendPid = Resolve-ListenerPid -Port $BackendPort
 Write-PidFile -Path (Join-Path $pidDir 'backend.pid.json') -Payload @{ name = 'backend'; pid = $backendPid; port = $BackendPort; started_at = (Get-Date).ToString('s'); log_out = $backendOut; log_err = $backendErr; scheduler_enabled = $schedulerEnabled; demo_mode = [bool]$DemoMode }
@@ -284,7 +321,11 @@ $frontendCommand = if ($frontendLaunchMode -eq 'dev') {
     ('"{0}" run start -- --hostname 127.0.0.1 --port {1} 1>"{2}" 2>"{3}"' -f $npmPath, $FrontendPort, $frontendOut, $frontendErr)
 }
 Write-Step ("Starting frontend ({0})" -f $frontendLaunchMode)
-Start-DetachedCmd -WorkingDirectory $frontendDir -InnerCommand $frontendCommand -Environment @{ HOTCLAW_API_ORIGIN = $apiOrigin; NEXT_PUBLIC_HOTCLAW_API_ORIGIN = $apiOrigin }
+Start-DetachedCmd -WorkingDirectory $frontendDir -InnerCommand $frontendCommand -Environment @{
+    HOTCLAW_API_ORIGIN = $apiOrigin
+    NEXT_PUBLIC_HOTCLAW_API_ORIGIN = $apiOrigin
+    ALL_PROXY = ''
+}
 Wait-ComponentReady -Name 'frontend' -Url "http://127.0.0.1:$FrontendPort/accounts" -StdoutLog $frontendOut -StderrLog $frontendErr -Attempts 45 -DelaySeconds 2 -Validator { param($resp) $resp.Content -match [regex]::Escape($apiOrigin) }
 $frontendPid = Resolve-ListenerPid -Port $FrontendPort
 Write-PidFile -Path (Join-Path $pidDir 'frontend.pid.json') -Payload @{ name = 'frontend'; pid = $frontendPid; port = $FrontendPort; started_at = (Get-Date).ToString('s'); log_out = $frontendOut; log_err = $frontendErr; api_origin = $apiOrigin; mode = $frontendLaunchMode }

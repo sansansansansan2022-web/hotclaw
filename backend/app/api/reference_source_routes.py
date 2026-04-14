@@ -12,6 +12,9 @@ from app.schemas.reference_source import (
     ReferenceSourceResponse,
     ReferenceSourceUpdateRequest,
     SyncReferenceSourceResponse,
+    WechatArticleImportRequest,
+    WechatArticleSearchItemResponse,
+    WechatArticleSearchResponse,
 )
 from app.services.reference_source_service import reference_source_service
 
@@ -131,3 +134,58 @@ async def sync_reference_source(
             error=str(exc),
         )
         raise HTTPException(status_code=500, detail="failed to sync reference source")
+
+
+@router.get("/wechat-search", response_model=WechatArticleSearchResponse)
+async def search_wechat_articles(
+    account_id: str,
+    query: str,
+    num: int = 10,
+    resolve_real_url: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        rows = await reference_source_service.search_wechat_articles(
+            account_id,
+            query=query,
+            num=num,
+            resolve_real_url=resolve_real_url,
+            db=db,
+        )
+        return WechatArticleSearchResponse(
+            account_id=account_id,
+            query=query,
+            total=len(rows),
+            articles=[WechatArticleSearchItemResponse(**item) for item in rows],
+        )
+    except AccountNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("reference_source_wechat_search_error", account_id=account_id, error=str(exc))
+        raise HTTPException(status_code=500, detail="failed to search wechat articles")
+
+
+@router.post("/wechat-search/import", response_model=ReferenceSourceResponse, status_code=201)
+async def import_wechat_article_reference_source(
+    account_id: str,
+    req: WechatArticleImportRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        source = await reference_source_service.import_wechat_article(
+            account_id,
+            article=req.model_dump(),
+            db=db,
+        )
+        await db.commit()
+        await db.refresh(source)
+        return _to_response(source)
+    except AccountNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=exc.message)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.error("reference_source_wechat_import_error", account_id=account_id, error=str(exc))
+        raise HTTPException(status_code=500, detail="failed to import wechat article")

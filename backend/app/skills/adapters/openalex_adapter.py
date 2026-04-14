@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import httpx
@@ -9,8 +10,18 @@ import httpx
 from app.core.config import settings
 from app.core.exceptions import ConfigError, ExternalAPIError
 from app.core.logger import get_logger
+from app.skills.adapters.scholar_provider_config import provider_includes
 
 logger = get_logger(__name__)
+
+
+def _get_proxy_url() -> str | None:
+    """Get HTTP proxy URL from environment variables."""
+    http_proxy = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+    if http_proxy:
+        return http_proxy
+    https_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
+    return https_proxy
 
 
 class OpenAlexAdapter:
@@ -23,9 +34,9 @@ class OpenAlexAdapter:
     def validate_config(self) -> None:
         if not settings.enable_scholar_skill:
             raise ConfigError("Scholar skill is disabled. Set ENABLE_SCHOLAR_SKILL=1 to enable it.")
-        if settings.scholar_provider.strip().lower() not in {"openalex", "openalex+crossref"}:
+        if not provider_includes(settings.scholar_provider, "openalex"):
             raise ConfigError(
-                "Scholar skill requires SCHOLAR_PROVIDER=openalex or SCHOLAR_PROVIDER=openalex+crossref."
+                "OpenAlex adapter requires SCHOLAR_PROVIDER to include openalex."
             )
         if not settings.openalex_api_key.strip():
             raise ConfigError("Scholar skill requires OPENALEX_API_KEY for real OpenAlex access.")
@@ -65,7 +76,7 @@ class OpenAlexAdapter:
 
         url = f"{self.base_url}/works"
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, proxy=_get_proxy_url(), trust_env=False) as client:
                 response = await client.get(url, params=params, headers={"User-Agent": "HotClaw/1.0"})
         except httpx.TimeoutException as exc:
             logger.error("openalex_request_timeout")

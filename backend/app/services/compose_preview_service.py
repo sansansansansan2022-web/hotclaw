@@ -41,6 +41,56 @@ class ComposePreviewService:
             title_direction=title_direction,
             status="previewed",
         )
+        total_selected = len(session.selected_recommendation_ids_json or []) + len(
+            session.selected_reference_source_ids_json or []
+        )
+        if total_selected <= 0:
+            raise ValueError("at least one selected source is required before building a preview")
+        if not session.source_confirmed:
+            raise ValueError("selected sources must be confirmed before building a preview")
+        session.preview_version = int(session.preview_version or 0) + 1
+        session.outline_confirmed = False
+        session.approved_outline_seed_json = None
+        db.add(session)
+        await db.flush()
+        await db.refresh(session)
+        return await self._build_bundle_core(
+            account_id=account_id,
+            session=session,
+            db=db,
+            preview_payload=preview_payload,
+        )
+
+    async def build_submit_bundle(
+        self,
+        *,
+        account_id: str,
+        selection_session_id: str,
+        db: AsyncSession,
+    ) -> dict[str, Any]:
+        session = await compose_selection_service.get_session(account_id, selection_session_id, db)
+        outline_override = (
+            dict(session.approved_outline_seed_json)
+            if isinstance(session.approved_outline_seed_json, dict)
+            else None
+        )
+        return await self._build_bundle_core(
+            account_id=account_id,
+            session=session,
+            db=db,
+            preview_payload=None,
+            outline_override=outline_override,
+        )
+
+    async def _build_bundle_core(
+        self,
+        *,
+        account_id: str,
+        session: ComposeSelectionSessionModel,
+        db: AsyncSession,
+        preview_payload: dict[str, Any] | None = None,
+        outline_override: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         snapshot = await account_analysis_service.get_or_refresh_snapshot(account_id, db)
         account_context = await account_service.get_account_context(account_id, db) or {}
         selected_recommendations = await compose_selection_service.list_selected_recommendations(account_id, session, db)
@@ -79,7 +129,7 @@ class ComposePreviewService:
             selected_topic=topic_directions[0]["title"] if topic_directions else query_plan.get("selected_topic"),
             selected_title=title_directions[0]["title"] if title_directions else None,
         )
-        outline_preview = self._build_outline_preview(
+        outline_preview = outline_override or self._build_outline_preview(
             snapshot=snapshot,
             session=session,
             query_plan=query_plan,
@@ -124,6 +174,8 @@ class ComposePreviewService:
             selection_session_id=session.id,
             selected_recommendation_count=len(selected_recommendations),
             selected_reference_source_count=len(selected_reference_sources),
+            preview_version=session.preview_version,
+            outline_confirmed=session.outline_confirmed,
         )
         return {
             "selection_session": session,

@@ -4,8 +4,8 @@
   "private": true,
   "description": "Multi-Agent Content Production Platform for WeChat Official Accounts",
   "scripts": {
-    "dev": "next dev --turbopack",
-    "build": "next build",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "tsc --noEmit"
   },

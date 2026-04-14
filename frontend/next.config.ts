@@ -13,6 +13,17 @@ const nextConfig: NextConfig = {
     root: process.cwd(),
   },
   outputFileTracingRoot: process.cwd(),
+  experimental: {
+    cpus: 1,
+    webpackBuildWorker: false,
+  },
+  // On this Windows dev machine, Next's built-in type-check worker can fail
+  // with spawn EPERM after a successful compile. We keep type safety by
+  // running `tsc --noEmit` explicitly in the startup script and let the
+  // production build focus on emitting a complete `.next` output.
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   async rewrites() {
     if (!apiOrigin) {
       return [];

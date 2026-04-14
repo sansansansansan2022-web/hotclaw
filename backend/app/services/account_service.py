@@ -107,6 +107,175 @@ class AccountService:
             raise AccountNotFoundError(account_id)
         return account
 
+    def _serialize_scalar(self, value: Any) -> Any:
+        return value.isoformat() if hasattr(value, "isoformat") else value
+
+    def _json_safe(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(key): self._json_safe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [self._json_safe(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._json_safe(item) for item in value]
+        return self._serialize_scalar(value)
+
+    def _serialize_automation_plan_summary(
+        self, summary: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        if not isinstance(summary, dict):
+            return None
+        return {key: self._serialize_scalar(value) for key, value in summary.items()}
+
+    def _build_legacy_scheduling_mirror(
+        self,
+        account: AccountModel,
+        *,
+        automation_plan_summary: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Compatibility-only account scheduling fields mirrored from AutomationPlan.
+
+        New runtime semantics should read from automation_plan_summary, not from these
+        fields directly. These fields stay populated so existing APIs, tests, and UI
+        flows keep working during the boundary cleanup window.
+        """
+
+        summary = automation_plan_summary or {}
+        return {
+            "operation_mode": summary.get("plan_type", account.operation_mode),
+            "posting_frequency": account.posting_frequency,
+            "posting_time": account.posting_time,
+            "auto_run_enabled": account.auto_run_enabled,
+            "auto_publish_enabled": summary.get(
+                "auto_publish_enabled", account.auto_publish_enabled
+            ),
+            "max_posts_per_day": summary.get(
+                "max_posts_per_day", account.max_posts_per_day
+            ),
+            "min_interval_minutes": summary.get(
+                "min_interval_minutes", account.min_interval_minutes
+            ),
+        }
+
+    def build_account_summary_payload(
+        self,
+        account: AccountModel,
+        *,
+        automation_plan_summary: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        legacy_mirror = self._build_legacy_scheduling_mirror(
+            account,
+            automation_plan_summary=automation_plan_summary,
+        )
+        return {
+            "account_id": account.id,
+            "name": account.name,
+            "category": account.category,
+            "positioning": account.positioning,
+            "operation_mode": legacy_mirror["operation_mode"],
+            "posting_frequency": legacy_mirror["posting_frequency"],
+            "auto_run_enabled": legacy_mirror["auto_run_enabled"],
+            "is_active": account.is_active,
+            "last_run_at": account.last_run_at,
+            "next_run_at": account.next_run_at,
+            "last_run_status": account.last_run_status,
+            "last_error_message": account.last_error_message,
+            "created_at": account.created_at,
+        }
+
+    def build_account_run_payload(
+        self,
+        account: AccountModel,
+        task: TaskModel,
+        *,
+        selection_session_id: str | None = None,
+        automation_plan_summary: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        legacy_mirror = self._build_legacy_scheduling_mirror(
+            account,
+            automation_plan_summary=automation_plan_summary,
+        )
+        ops_context = task.input_data.get("ops_context", {}) if isinstance(task.input_data, dict) else {}
+        run_strategy = (
+            ops_context.get("run_strategy", {})
+            if isinstance(ops_context, dict)
+            else {}
+        )
+        effective_mode = (
+            run_strategy.get("effective_mode")
+            if isinstance(run_strategy, dict)
+            else None
+        )
+        return {
+            "account_id": account.id,
+            "task_id": task.id,
+            "status": task.status,
+            "operation_mode": legacy_mirror["operation_mode"],
+            "effective_mode": effective_mode,
+            "selection_session_id": selection_session_id,
+        }
+
+    def build_account_detail_payload(
+        self,
+        account: AccountModel,
+        *,
+        automation_plan_summary: dict[str, Any] | None,
+        reference_source_count: int,
+        reference_source_enabled_count: int,
+        reference_source_last_sync_status: str | None,
+        latest_ops_context: dict[str, Any] | None,
+        latest_effective_mode: str | None,
+        latest_allow_auto_publish: bool | None,
+        latest_ops_degraded: bool,
+        recent_tasks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        legacy_mirror = self._build_legacy_scheduling_mirror(
+            account,
+            automation_plan_summary=automation_plan_summary,
+        )
+        serializable_summary = self._serialize_automation_plan_summary(
+            automation_plan_summary
+        )
+        return {
+            "account_id": account.id,
+            "name": account.name,
+            "category": account.category,
+            "positioning": account.positioning,
+            "audience": account.audience,
+            "tone_style": account.tone_style,
+            "posting_frequency": legacy_mirror["posting_frequency"],
+            "posting_time": legacy_mirror["posting_time"],
+            "content_strategy": account.content_strategy,
+            "reference_accounts": account.reference_accounts,
+            "operation_mode": legacy_mirror["operation_mode"],
+            "auto_run_enabled": legacy_mirror["auto_run_enabled"],
+            "auto_publish_enabled": legacy_mirror["auto_publish_enabled"],
+            "is_active": account.is_active,
+            "publish_paused": getattr(account, "publish_paused", False),
+            "max_posts_per_day": legacy_mirror["max_posts_per_day"],
+            "min_interval_minutes": legacy_mirror["min_interval_minutes"],
+            "last_run_at": self._serialize_scalar(account.last_run_at),
+            "next_run_at": self._serialize_scalar(account.next_run_at),
+            "last_run_status": account.last_run_status,
+            "last_error_message": account.last_error_message,
+            "last_publish_status": getattr(account, "last_publish_status", None),
+            "last_publish_error_message": getattr(
+                account, "last_publish_error_message", None
+            ),
+            "last_published_at": self._serialize_scalar(account.last_published_at),
+            "reference_source_count": reference_source_count,
+            "reference_source_enabled_count": reference_source_enabled_count,
+            "reference_source_last_sync_status": reference_source_last_sync_status,
+            "automation_plan_summary": serializable_summary,
+            "latest_ops_context": latest_ops_context,
+            "latest_effective_mode": latest_effective_mode,
+            "latest_allow_auto_publish": latest_allow_auto_publish,
+            "latest_ops_degraded": latest_ops_degraded,
+            "created_at": self._serialize_scalar(account.created_at),
+            "updated_at": self._serialize_scalar(account.updated_at),
+            "recent_tasks": recent_tasks,
+        }
+
     async def get_account_detail(
         self, account_id: str, db: AsyncSession, recent_limit: int = 5
     ) -> dict[str, Any]:
@@ -185,51 +354,27 @@ class AccountService:
             reference_source_count=reference_source_count,
         )
 
-        return {
-            "account_id": account.id,
-            "name": account.name,
-            "category": account.category,
-            "positioning": account.positioning,
-            "audience": account.audience,
-            "tone_style": account.tone_style,
-            "posting_frequency": account.posting_frequency,
-            "posting_time": account.posting_time,
-            "content_strategy": account.content_strategy,
-            "reference_accounts": account.reference_accounts,
-            "operation_mode": account.operation_mode,
-            "auto_run_enabled": account.auto_run_enabled,
-            "auto_publish_enabled": account.auto_publish_enabled,
-            "is_active": account.is_active,
-            "publish_paused": getattr(account, "publish_paused", False),
-            "max_posts_per_day": getattr(account, "max_posts_per_day", None),
-            "min_interval_minutes": getattr(account, "min_interval_minutes", None),
-            "last_run_at": account.last_run_at.isoformat() if account.last_run_at else None,
-            "next_run_at": account.next_run_at.isoformat() if account.next_run_at else None,
-            "last_run_status": account.last_run_status,
-            "last_error_message": account.last_error_message,
-            "last_publish_status": getattr(account, "last_publish_status", None),
-            "last_publish_error_message": getattr(account, "last_publish_error_message", None),
-            "last_published_at": account.last_published_at.isoformat() if account.last_published_at else None,
-            "reference_source_count": reference_source_count,
-            "reference_source_enabled_count": reference_source_enabled_count,
-            "reference_source_last_sync_status": reference_source_last_sync_status,
-            "automation_plan_summary": automation_plan_summary,
-            "latest_ops_context": latest_ops_context,
-            "latest_effective_mode": latest_effective_mode,
-            "latest_allow_auto_publish": latest_allow_auto_publish,
-            "latest_ops_degraded": latest_ops_degraded,
-            "created_at": account.created_at.isoformat() if account.created_at else None,
-            "updated_at": account.updated_at.isoformat() if account.updated_at else None,
-            "recent_tasks": [
-                {
-                    "task_id": t.id,
-                    "status": t.status,
-                    "created_at": t.created_at.isoformat() if t.created_at else None,
-                    "elapsed_seconds": t.elapsed_seconds,
-                }
-                for t in recent_task_rows
-            ],
-        }
+        recent_tasks = [
+            {
+                "task_id": t.id,
+                "status": t.status,
+                "created_at": self._serialize_scalar(t.created_at),
+                "elapsed_seconds": t.elapsed_seconds,
+            }
+            for t in recent_task_rows
+        ]
+        return self.build_account_detail_payload(
+            account,
+            automation_plan_summary=automation_plan_summary,
+            reference_source_count=reference_source_count,
+            reference_source_enabled_count=reference_source_enabled_count,
+            reference_source_last_sync_status=reference_source_last_sync_status,
+            latest_ops_context=latest_ops_context,
+            latest_effective_mode=latest_effective_mode,
+            latest_allow_auto_publish=latest_allow_auto_publish,
+            latest_ops_degraded=latest_ops_degraded,
+            recent_tasks=recent_tasks,
+        )
 
     async def update_account(
         self, account_id: str, data: dict, db: AsyncSession
@@ -396,14 +541,14 @@ class AccountService:
             if isinstance(explicit_input, dict):
                 for key, value in explicit_input.items():
                     if value is not None:
-                        task_input[key] = value
+                        task_input[key] = self._json_safe(value)
 
             task = TaskModel(
                 id=generate_task_id(),
                 account_id=account_id,
                 workflow_id="default_pipeline",
                 status="pending",
-                input_data=task_input,
+                input_data=self._json_safe(task_input),
             )
             db.add(task)
             await db.flush()
@@ -473,12 +618,9 @@ class AccountService:
     async def get_due_accounts(self, db: AsyncSession) -> list[AccountModel]:
         """
         Find all accounts eligible for automatic scheduling.
-        Criteria:
-        - is_active == True
-        - auto_run_enabled == True
-        - operation_mode in ("semi_auto", "full_auto")
-        - next_run_at is not None and <= now
-        - NO existing pending/running task for this account
+        Runtime eligibility is determined from automation_plan_service
+        get_effective_summary() + should_auto_run(), not by re-deriving scheduling
+        semantics from Account legacy mirror fields here.
 
         Returns accounts ordered by next_run_at.
         """
@@ -582,10 +724,11 @@ class AccountService:
             .order_by(desc(ReferenceSourceModel.updated_at), desc(ReferenceSourceModel.id))
             .limit(5)
         )
-        serializable_summary = {
-            key: value.isoformat() if hasattr(value, "isoformat") else value
-            for key, value in summary.items()
-        }
+        serializable_summary = self._serialize_automation_plan_summary(summary)
+        legacy_mirror = self._build_legacy_scheduling_mirror(
+            account,
+            automation_plan_summary=summary,
+        )
         reference_sources = []
         for row in source_rows.all():
             metadata = row.metadata_json if isinstance(row.metadata_json, dict) else {}
@@ -628,7 +771,7 @@ class AccountService:
                 "structure_takeaways": reference_digest.get("structure_takeaways", []),
                 "usage_rules": reference_digest.get("usage_rules", []),
             },
-            "operation_mode": summary.get("plan_type", account.operation_mode),
+            "operation_mode": legacy_mirror["operation_mode"],
             "automation_plan_summary": serializable_summary,
         }
 

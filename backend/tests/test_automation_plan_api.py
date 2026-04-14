@@ -104,3 +104,43 @@ async def test_patch_automation_plan_updates_legacy_account_fields(client):
     assert detail["max_posts_per_day"] == 2
     assert detail["min_interval_minutes"] == 180
     assert detail["automation_plan_summary"]["plan_type"] == "full_auto"
+
+
+async def test_patch_account_legacy_fields_keeps_plan_summary_in_sync(client):
+    account_id = await _create_account(
+        client,
+        {
+            "name": "Automation Legacy Patch Account",
+            "positioning": "Patch legacy account scheduling fields and keep plan summary aligned.",
+        },
+    )
+
+    patch_response = await client.patch(
+        f"/api/v1/accounts/{account_id}",
+        json={
+            "operation_mode": "semi_auto",
+            "auto_run_enabled": True,
+            "auto_publish_enabled": False,
+            "posting_frequency": "weekly",
+            "posting_time": "10:30",
+            "max_posts_per_day": 3,
+            "min_interval_minutes": 90,
+        },
+    )
+    assert patch_response.status_code == 200, patch_response.text
+    summary = patch_response.json()
+    assert summary["operation_mode"] == "semi_auto"
+    assert summary["posting_frequency"] == "weekly"
+    assert summary["auto_run_enabled"] is True
+
+    detail_response = await client.get(f"/api/v1/accounts/{account_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["operation_mode"] == "semi_auto"
+    assert detail["posting_frequency"] == "weekly"
+    assert detail["posting_time"] == "10:30"
+    assert detail["max_posts_per_day"] == 3
+    assert detail["min_interval_minutes"] == 90
+    assert detail["automation_plan_summary"]["plan_type"] == "semi_auto"
+    assert detail["automation_plan_summary"]["schedule_type"] == "weekly"
+    assert detail["automation_plan_summary"]["auto_publish_enabled"] is False

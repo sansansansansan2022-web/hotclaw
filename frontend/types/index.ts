@@ -88,6 +88,47 @@ export interface TaskStatusResponse {
   elapsed_seconds?: number | null;
 }
 
+export interface TaskArtifact {
+  artifact_key: string;
+  stage: string;
+  title: string;
+  status: "available" | "pending" | "failed" | "missing" | string;
+  display_payload: Record<string, unknown> | null;
+  raw_output: Record<string, unknown> | null;
+  source_node_ids: string[];
+  updated_at: string | null;
+}
+
+export interface TaskArtifactListResponse {
+  task_id: string;
+  account_id: string | null;
+  status: TaskStatus | string;
+  artifacts: TaskArtifact[];
+}
+
+export interface TaskEffectiveInputResponse {
+  task_id: string;
+  account_id: string | null;
+  workflow_id: string;
+  status: TaskStatus | string;
+  created_at: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  positioning: string | null;
+  ops_context: OpsContext | Record<string, unknown> | null;
+  explicit_input: Record<string, unknown>;
+  selection_session_id: string | null;
+  selected_recommendations: Record<string, unknown>[];
+  selected_reference_sources: Record<string, unknown>[];
+  compose_preview: Record<string, unknown> | null;
+  query_plan: QueryPlanInsight | Record<string, unknown> | null;
+  reference_digest: ReferenceDigestInsight | Record<string, unknown> | null;
+  outline_seed: OutlinePlan | Record<string, unknown> | null;
+  creation_note: string | null;
+  external_evidence: Record<string, unknown> | null;
+  input_data: Record<string, unknown>;
+}
+
 export interface TaskResultData {
   input?: { positioning: string };
   profile?: AccountProfile;
@@ -546,6 +587,8 @@ export interface AccountCreateRequest {
   positioning: string;
   audience?: string;
   tone_style?: string;
+  // Legacy scheduling inputs kept for compatibility while AutomationPlan
+  // remains the runtime source of truth.
   posting_frequency?: PostingFrequency;
   posting_time?: string;
   content_strategy?: string;
@@ -567,6 +610,7 @@ export interface AccountSummary {
   name: string;
   category: string | null;
   positioning: string;
+  // Compatibility mirror fields only. Prefer automation_plan_summary on detail.
   operation_mode: OperationMode;
   posting_frequency: PostingFrequency | null;
   auto_run_enabled: boolean;
@@ -597,6 +641,7 @@ export interface AccountDetail extends AccountSummary {
   reference_source_count: number;
   reference_source_enabled_count: number;
   reference_source_last_sync_status: string | null;
+  // Frontend primary source for effective automation semantics.
   automation_plan_summary?: AutomationPlanSummary | null;
   latest_ops_context?: OpsContext | null;
   latest_effective_mode?: OperationMode | null;
@@ -688,12 +733,260 @@ export interface SyncReferenceSourceResponse {
   message: string;
 }
 
+export interface RecommendationSource {
+  source_type: string;
+  source_name: string | null;
+  source_url: string | null;
+  published_at: string | null;
+}
+
+export interface RecommendationScores {
+  relevance: number | null;
+  authority: number | null;
+  freshness: number | null;
+  overall: number | null;
+}
+
+export interface RecommendationRationale {
+  reason: string | null;
+  evidence_points: string[];
+}
+
+export interface RecommendedContentItem {
+  id: string;
+  account_id: string;
+  title: string;
+  summary: string | null;
+  source: RecommendationSource;
+  scores: RecommendationScores;
+  rationale: RecommendationRationale;
+  topic_tags: string[];
+  risk_flags: string[];
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RecommendationCoverage {
+  requested_min_count: number;
+  high_relevance_count: number;
+  extended_count: number;
+  returned_count: number;
+  shortage_count: number;
+  meets_requested_min_count: boolean;
+}
+
+export interface RecommendationShortageNotice {
+  status: "ok" | "insufficient_high_relevance" | "insufficient_total";
+  reason_code: string | null;
+  message: string | null;
+  recommended_action: string | null;
+}
+
+export interface RecommendationSourceDiagnostic {
+  source_key: string;
+  label: string;
+  source_type: string;
+  status: "success" | "empty" | "failed" | "disabled" | "not_applicable" | "cached_only";
+  query: string | null;
+  candidate_count: number;
+  high_relevance_count: number;
+  extended_count: number;
+  filtered_out_count: number;
+  error_code: string | null;
+  error_message: string | null;
+  detail: string | null;
+}
+
+export interface RecommendationFilterDiagnostics {
+  raw_candidate_count: number;
+  high_relevance_count: number;
+  extended_count: number;
+  filtered_out_count: number;
+  filtered_low_relevance_count: number;
+  filtered_low_authority_count: number;
+  sources_with_candidates: number;
+  sources_failed_or_disabled: number;
+}
+
+export interface RecommendationListFilters {
+  source_type: string | null;
+  sort_by: "relevance" | "freshness";
+  status: string | null;
+}
+
+export interface RecommendationListSummary {
+  source_counts: Record<string, number>;
+  status_counts: Record<string, number>;
+  high_relevance_count: number;
+  extended_count: number;
+}
+
+export interface RecommendationBucketedResponse {
+  account_id: string;
+  filters: RecommendationListFilters;
+  summary: RecommendationListSummary;
+  min_count: 5 | 8 | 10;
+  high_relevance_items: RecommendedContentItem[];
+  extended_items: RecommendedContentItem[];
+  total: number;
+  coverage: RecommendationCoverage;
+  shortage_notice: RecommendationShortageNotice;
+  source_diagnostics: RecommendationSourceDiagnostic[];
+  filter_diagnostics: RecommendationFilterDiagnostics;
+  refreshed_at: string | null;
+}
+
+export interface ComposeSelectionSession {
+  id: string;
+  account_id: string;
+  selected_recommendation_ids: string[];
+  selected_reference_source_ids: string[];
+  creation_note: string | null;
+  preferred_lane: string | null;
+  title_direction: string | null;
+  source_confirmed: boolean;
+  outline_confirmed: boolean;
+  preview_version: number;
+  approved_outline_seed: Record<string, unknown> | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SelectedSource {
+  id: string;
+  title: string;
+  summary: string | null;
+  source_type: string;
+  source_name: string | null;
+  source_url: string | null;
+  reason: string | null;
+  topic_tags: string[];
+}
+
+export interface SelectedReferenceSource {
+  id: number;
+  name: string;
+  source_type: string;
+  sync_status: string;
+  notes: string | null;
+  preview: string | null;
+}
+
+export interface ComposeSelectionSessionBundle {
+  selection_session: ComposeSelectionSession;
+  selected_recommendations: SelectedSource[];
+  selected_reference_sources: SelectedReferenceSource[];
+}
+
+export interface RecommendationSelectResponse {
+  selection_session: ComposeSelectionSession | null;
+  selected_recommendations: SelectedSource[];
+  selected_reference_sources: SelectedReferenceSource[];
+}
+
+export interface ComposeProfileSummary {
+  positioning_summary: string;
+  audience_summary: string | null;
+  tone_summary: string | null;
+  preferred_lane: string | null;
+  style_keywords: string[];
+  creation_note: string | null;
+}
+
+export interface ComposeSourceBundle {
+  selected_source_count: number;
+  selected_reference_source_count: number;
+  source_types: string[];
+}
+
+export interface ComposeLane {
+  id: string;
+  label: string;
+  input_hint: string | null;
+  reason: string;
+}
+
+export interface ComposeQueryPlan {
+  lane: ComposeLane;
+  selected_topic: string | null;
+  selected_title: string | null;
+  primary_queries: string[];
+  secondary_queries: string[];
+  source_preferences: string[];
+  banned_angles: string[];
+  search_terms: string[];
+}
+
+export interface TopicDirection {
+  title: string;
+  angle: string;
+  topic_kind: string;
+  reason: string;
+  source_ids: string[];
+}
+
+export interface TitleDirection {
+  title: string;
+  style: string;
+  rationale: string;
+}
+
+export interface OutlineSectionPreview {
+  section_id: string;
+  heading: string;
+  purpose: string;
+  key_points: string[];
+  evidence_refs: string[];
+}
+
+export interface OutlinePreview {
+  article_goal: string;
+  why_this_topic: string;
+  strategic_angle: string;
+  reference_basis: string;
+  target_reader: string;
+  content_lane: string;
+  target_reader_takeaway: string;
+  opening_hook: string;
+  emotional_arc: string;
+  sections: OutlineSectionPreview[];
+  ending_cta: string;
+  estimated_word_count: number;
+  summary: string;
+}
+
+export interface CitationGuardrails {
+  must_ground_titles_in_evidence: boolean;
+  must_ground_repo_names_in_evidence: boolean;
+}
+
+export interface ComposePreviewResponse {
+  selection_session: ComposeSelectionSession;
+  account_profile_summary: ComposeProfileSummary;
+  source_bundle: ComposeSourceBundle;
+  selected_sources: SelectedSource[];
+  selected_reference_sources: SelectedReferenceSource[];
+  query_plan: ComposeQueryPlan;
+  topic_directions: TopicDirection[];
+  title_directions: TitleDirection[];
+  outline_preview: OutlinePreview;
+  citation_guardrails: CitationGuardrails;
+}
+
+export type ReferenceSourceSelectionCard = ReferenceSource & {
+  selected?: boolean;
+  preview?: string | null;
+};
+
 export interface AccountRunData {
   account_id: string;
   task_id: string;
   status: TaskStatus;
   operation_mode: OperationMode;
   effective_mode?: OperationMode | null;
+  selection_session_id?: string | null;
 }
 
 export interface AccountListResponse {

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import AccountNotFoundError
 from app.core.logger import get_logger
 from app.models.tables import AccountModel, ReferenceSourceModel
+from app.services.wechat_article_search_service import wechat_article_search_service
 
 logger = get_logger(__name__)
 
@@ -76,6 +77,80 @@ class ReferenceSourceService:
             source_id=source.id,
             source_type=source.source_type,
             sync_status=source.sync_status,
+        )
+        return source
+
+    async def search_wechat_articles(
+        self,
+        account_id: str,
+        *,
+        query: str,
+        num: int,
+        resolve_real_url: bool,
+        db: AsyncSession,
+    ) -> list[dict]:
+        await self._get_account(account_id, db)
+        rows = await wechat_article_search_service.search_articles(
+            query=query,
+            max_results=num,
+            resolve_real_urls=resolve_real_url,
+        )
+        logger.info("reference_source_wechat_search_completed", account_id=account_id, query=query, result_count=len(rows))
+        return rows
+
+    async def import_wechat_article(
+        self,
+        account_id: str,
+        *,
+        article: dict,
+        db: AsyncSession,
+    ) -> ReferenceSourceModel:
+        await self._get_account(account_id, db)
+        title = str(article.get("title") or "").strip()
+        source_url = str(article.get("url") or "").strip()
+        if not title:
+            raise ValueError("title is required for WeChat article import")
+        if not source_url:
+            raise ValueError("url is required for WeChat article import")
+
+        source = await self.create_source(
+            account_id,
+            {
+                "source_type": "article_url",
+                "name": title[:120],
+                "source_value": source_url,
+                "notes": article.get("notes"),
+                "is_enabled": True,
+            },
+            db,
+        )
+        existing_metadata = source.metadata_json or {}
+        metadata = {
+            **existing_metadata,
+            "import_origin": "wechat_article_search",
+            "wechat_article": {
+                "title": title,
+                "summary": str(article.get("summary") or "").strip() or None,
+                "source_name": str(article.get("source_name") or "").strip() or None,
+                "published_at": article.get("published_at").isoformat()
+                if isinstance(article.get("published_at"), datetime)
+                else None,
+                "intermediate_url": str(article.get("intermediate_url") or "").strip() or None,
+                "url_resolved": bool(article.get("url_resolved")),
+                "query": str(article.get("query") or "").strip() or None,
+            },
+            "preview": str(article.get("summary") or "").strip()[:280] or existing_metadata.get("preview"),
+            "resolved_title": title,
+            "content_length": len(str(article.get("summary") or "").strip()),
+        }
+        source.metadata_json = metadata
+        source.article_count = max(int(source.article_count or 0), 1)
+        await db.flush()
+        logger.info(
+            "reference_source_wechat_article_imported",
+            account_id=account_id,
+            source_id=source.id,
+            source_url=source_url,
         )
         return source
 

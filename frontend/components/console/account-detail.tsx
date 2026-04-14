@@ -25,38 +25,42 @@ function referenceSyncTone(status: string | null): "success" | "warning" | "dang
 }
 
 function getAutomationPlan(detail: AccountDetail) {
-  return (
-    detail.automation_plan_summary ?? {
-      id: null,
-      account_id: detail.account_id,
-      config_source: "legacy_fallback" as const,
-      plan_type: detail.operation_mode,
-      is_enabled: detail.auto_run_enabled,
-      run_strategy:
-        detail.operation_mode === "manual"
-          ? "manual_only"
-          : detail.posting_frequency
-            ? "hybrid"
-            : "manual_only",
-      schedule_type: detail.posting_frequency === "daily" ? "daily" : detail.posting_frequency ? "weekly" : "none",
-      schedule_config: detail.posting_time ? { time: detail.posting_time } : null,
-      schedule_summary: detail.posting_frequency
-        ? `${detail.posting_frequency}${detail.posting_time ? ` @ ${detail.posting_time}` : ""}`
-        : "Manual only",
-      auto_publish_enabled: detail.auto_publish_enabled,
-      publish_review_required: !detail.auto_publish_enabled,
-      max_posts_per_day: detail.max_posts_per_day,
-      min_interval_minutes: detail.min_interval_minutes,
-      timezone: "Asia/Shanghai",
-      next_run_at: detail.next_run_at,
-      last_run_at: detail.last_run_at,
-      notes: null,
-      latest_status: detail.last_run_status,
-      is_active_plan: true,
-      created_at: null,
-      updated_at: null,
-    }
-  );
+  if (detail.automation_plan_summary) {
+    return detail.automation_plan_summary;
+  }
+
+  // Deprecated compatibility fallback only. Remove after account detail and
+  // workspace surfaces stop depending on Account legacy scheduling mirrors.
+  return {
+    id: null,
+    account_id: detail.account_id,
+    config_source: "legacy_fallback" as const,
+    plan_type: detail.operation_mode,
+    is_enabled: detail.auto_run_enabled,
+    run_strategy:
+      detail.operation_mode === "manual"
+        ? "manual_only"
+        : detail.posting_frequency
+          ? "hybrid"
+          : "manual_only",
+    schedule_type: detail.posting_frequency === "daily" ? "daily" : detail.posting_frequency ? "weekly" : "none",
+    schedule_config: detail.posting_time ? { time: detail.posting_time } : null,
+    schedule_summary: detail.posting_frequency
+      ? `${detail.posting_frequency}${detail.posting_time ? ` @ ${detail.posting_time}` : ""}`
+      : "Manual only",
+    auto_publish_enabled: detail.auto_publish_enabled,
+    publish_review_required: !detail.auto_publish_enabled,
+    max_posts_per_day: detail.max_posts_per_day,
+    min_interval_minutes: detail.min_interval_minutes,
+    timezone: "Asia/Shanghai",
+    next_run_at: detail.next_run_at,
+    last_run_at: detail.last_run_at,
+    notes: null,
+    latest_status: detail.last_run_status,
+    is_active_plan: true,
+    created_at: null,
+    updated_at: null,
+  };
 }
 
 function getWeChatConnectionSummary(config: WeChatConfigDetail | null) {
@@ -192,16 +196,18 @@ export function AccountDetailPage({ accountId }: { accountId: string }) {
         description="Inspect the backend-backed account profile, runtime posture, recent tasks, and the account-scoped asset entry points."
         actions={
           <>
-            <Link href={`/accounts/${accountId}/workspace`}>
+            <Link href={`/accounts/${accountId}/create`}>
               <Button>
-                <Icon name="workspace" className="h-4 w-4" />
-                Open Workspace
+                <Icon name="plus" className="h-4 w-4" />
+                {locale === "zh-CN" ? "新建任务" : "New Task"}
               </Button>
             </Link>
-            <Button data-testid="account-detail-run-button" variant="secondary" onClick={() => void runNow()}>
-              <Icon name="play" className="h-4 w-4" />
-              Run Now
-            </Button>
+            <Link href={`/accounts/${accountId}/workspace`}>
+              <Button variant="secondary">
+                <Icon name="workspace" className="h-4 w-4" />
+                {locale === "zh-CN" ? "打开工作台" : "Open Workspace"}
+              </Button>
+            </Link>
             <Link href={`/accounts/${accountId}/edit`}>
               <Button variant="secondary">
                 <Icon name="edit" className="h-4 w-4" />
@@ -540,6 +546,27 @@ export function AccountDetailPage({ accountId }: { accountId: string }) {
                 <p className="text-sm font-semibold text-slate-900">WeChat Config</p>
                 <p className="mt-1 text-sm text-slate-500">Configure credentials, test connectivity and maintain default publish information.</p>
               </Link>
+            </div>
+          </Card>
+
+          <Card
+            title={locale === "zh-CN" ? "兼容旧实例动作" : "Legacy Runtime Action"}
+            description={
+              locale === "zh-CN"
+                ? "账号直跑先封存在这里，给旧流程、旧联调和应急场景使用。主路径已经切到“新建任务”。"
+                : "Direct account run is archived here for older flows, older integrations, and emergency use. The main path now starts from New Task."
+            }
+          >
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <p className="text-sm leading-6 text-slate-600">
+                {locale === "zh-CN"
+                  ? "如果只是正常运营这个账号，不应该再从这里直接跑系统。"
+                  : "For normal account operations, you should not start the system from here anymore."}
+              </p>
+              <Button data-testid="account-detail-run-button" variant="secondary" onClick={() => void runNow()}>
+                <Icon name="play" className="h-4 w-4" />
+                {locale === "zh-CN" ? "兼容直跑（旧实例）" : "Legacy Quick Run"}
+              </Button>
             </div>
           </Card>
         </>

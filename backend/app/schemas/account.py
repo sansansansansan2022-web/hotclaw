@@ -1,6 +1,7 @@
 """Account-related request and response schemas."""
 
 from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from app.schemas.automation_plan import AutomationPlanCreateRequest, AutomationPlanSummary
@@ -9,6 +10,7 @@ from app.schemas.automation_plan import AutomationPlanCreateRequest, AutomationP
 # =============================================================================
 # Enums
 # =============================================================================
+
 
 class OperationMode(str):
     MANUAL = "manual"
@@ -29,40 +31,62 @@ class PostingFrequency(str):
 
 
 class AccountCreateRequest(BaseModel):
-    """Request body for creating a new account."""
-    name: str = Field(..., min_length=1, max_length=100, description="账号名称")
-    category: str | None = Field(default=None, max_length=50, description="账号类别")
-    positioning: str = Field(..., min_length=5, max_length=500, description="账号定位描述")
-    audience: str | None = Field(default=None, max_length=200, description="目标读者")
-    tone_style: str | None = Field(default=None, max_length=100, description="风格调性")
-    posting_frequency: str | None = Field(default=None, description="发布频率")
-    posting_time: str | None = Field(default=None, max_length=10, description="发布时间，如 08:00")
-    content_strategy: str | None = Field(default=None, description="内容策略")
-    reference_accounts: str | None = Field(default=None, description="参考公众号")
-    operation_mode: str = Field(default="manual", description="运行模式: manual / semi_auto / full_auto")
-    auto_run_enabled: bool = Field(default=False, description="是否允许定时运行")
-    auto_publish_enabled: bool = Field(default=False, description="是否允许自动发布")
-    is_active: bool = Field(default=True, description="是否启用")
-    # Publish protection fields
-    publish_paused: bool = Field(default=False, description="是否暂停发布")
-    max_posts_per_day: int | None = Field(default=None, ge=1, le=100, description="每日最大发布数")
-    min_interval_minutes: int | None = Field(default=None, ge=1, le=1440, description="最小发布间隔（分钟）")
+    """Request body for creating a new account workspace."""
 
-
+    name: str = Field(..., min_length=1, max_length=100, description="Account display name")
+    category: str | None = Field(default=None, max_length=50, description="Account category")
+    positioning: str = Field(..., min_length=5, max_length=500, description="Positioning summary")
+    audience: str | None = Field(default=None, max_length=200, description="Audience summary")
+    tone_style: str | None = Field(default=None, max_length=100, description="Tone and style")
+    content_strategy: str | None = Field(default=None, description="Content strategy notes")
+    reference_accounts: str | None = Field(default=None, description="Reference account notes")
+    # Legacy scheduling inputs kept for compatibility while AutomationPlan remains
+    # the runtime source of truth.
+    posting_frequency: str | None = Field(default=None, description="Legacy cadence mirror")
+    posting_time: str | None = Field(default=None, max_length=10, description="Legacy posting time mirror")
+    operation_mode: str = Field(
+        default="manual",
+        description="Compatibility mirror: manual / semi_auto / full_auto",
+    )
+    auto_run_enabled: bool = Field(
+        default=False,
+        description="Compatibility mirror for scheduled enablement",
+    )
+    auto_publish_enabled: bool = Field(
+        default=False,
+        description="Compatibility mirror for publish strategy",
+    )
+    is_active: bool = Field(default=True, description="Whether the workspace is active")
+    publish_paused: bool = Field(default=False, description="Whether publishing is paused")
+    max_posts_per_day: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Compatibility mirror for daily publish cap",
+    )
+    min_interval_minutes: int | None = Field(
+        default=None,
+        ge=1,
+        le=1440,
+        description="Compatibility mirror for publish interval",
+    )
     automation_plan: AutomationPlanCreateRequest | None = None
 
 
 class AccountUpdateRequest(BaseModel):
-    """Request body for updating an account."""
+    """Request body for updating an account workspace."""
+
     name: str | None = Field(default=None, min_length=1, max_length=100)
     category: str | None = Field(default=None, max_length=50)
     positioning: str | None = Field(default=None, min_length=5, max_length=500)
     audience: str | None = Field(default=None, max_length=200)
     tone_style: str | None = Field(default=None, max_length=100)
-    posting_frequency: str | None = Field(default=None)
-    posting_time: str | None = Field(default=None, max_length=10)
     content_strategy: str | None = None
     reference_accounts: str | None = None
+    # Legacy scheduling inputs kept for compatibility while AutomationPlan remains
+    # the runtime source of truth.
+    posting_frequency: str | None = Field(default=None)
+    posting_time: str | None = Field(default=None, max_length=10)
     operation_mode: str | None = None
     auto_run_enabled: bool | None = None
     auto_publish_enabled: bool | None = None
@@ -87,6 +111,7 @@ class AccountRunRequest(BaseModel):
 
 class AccountInfo(BaseModel):
     """Lightweight account info embedded in task responses."""
+
     account_id: str
     name: str
     positioning: str
@@ -94,11 +119,14 @@ class AccountInfo(BaseModel):
 
 
 class AccountSummary(BaseModel):
-    """Account list item (lighter than detail)."""
+    """Account list item with compatibility-mirrored scheduling fields."""
+
     account_id: str
     name: str
     category: str | None
     positioning: str
+    # Compatibility mirror fields only. Effective automation semantics should be
+    # read from automation_plan_summary on detail responses.
     operation_mode: str
     posting_frequency: str | None
     auto_run_enabled: bool
@@ -112,6 +140,7 @@ class AccountSummary(BaseModel):
 
 class AccountTaskSummary(BaseModel):
     """Brief task info shown within account detail."""
+
     task_id: str
     status: str
     created_at: datetime
@@ -119,13 +148,16 @@ class AccountTaskSummary(BaseModel):
 
 
 class AccountDetail(BaseModel):
-    """Full account detail with recent tasks."""
+    """Full account detail with recent tasks and plan-first automation summary."""
+
     account_id: str
     name: str
     category: str | None
     positioning: str
     audience: str | None
     tone_style: str | None
+    # Compatibility mirror fields only. Frontend should prefer
+    # automation_plan_summary for effective automation semantics.
     posting_frequency: str | None
     posting_time: str | None
     content_strategy: str | None
@@ -159,6 +191,7 @@ class AccountDetail(BaseModel):
 
 class AccountCreateData(BaseModel):
     """Response after creating an account."""
+
     account_id: str
     name: str
     is_active: bool
@@ -167,6 +200,7 @@ class AccountCreateData(BaseModel):
 
 class AccountRunData(BaseModel):
     """Response after triggering an account run."""
+
     account_id: str
     task_id: str
     status: str
@@ -177,5 +211,6 @@ class AccountRunData(BaseModel):
 
 class AccountListResponse(BaseModel):
     """Paginated account list."""
+
     accounts: list[AccountSummary]
     pagination: dict

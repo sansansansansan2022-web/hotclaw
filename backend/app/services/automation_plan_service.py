@@ -22,7 +22,7 @@ DEFAULT_TIMEZONE = "Asia/Shanghai"
 
 
 class AutomationPlanService:
-    """Create, update, summarize, and mirror automation plans."""
+    """Create, update, summarize, and compatibility-mirror automation plans."""
 
     async def get_account(self, account_id: str, db: AsyncSession) -> AccountModel | None:
         result = await db.execute(select(AccountModel).where(AccountModel.id == account_id))
@@ -41,6 +41,7 @@ class AutomationPlanService:
         return result.scalar_one_or_none()
 
     async def get_effective_summary(self, account: AccountModel, db: AsyncSession) -> dict[str, Any]:
+        """Return the single effective automation summary used by runtime decisions."""
         plan = await self.get_active_plan(account.id, db)
         if plan:
             self._apply_plan_to_account(account, plan)
@@ -289,6 +290,7 @@ class AutomationPlanService:
         }
 
     def _summary_from_account(self, account: AccountModel) -> dict[str, Any]:
+        """Single backend legacy fallback when no active automation plan exists."""
         payload = self._payload_from_account(account)
         return {
             "id": None,
@@ -317,6 +319,7 @@ class AutomationPlanService:
         }
 
     def _apply_plan_to_account(self, account: AccountModel, plan: AutomationPlanModel) -> None:
+        """Mirror plan fields back onto Account for compatibility-only legacy readers."""
         account.operation_mode = plan.plan_type
         account.auto_run_enabled = (
             plan.is_enabled
