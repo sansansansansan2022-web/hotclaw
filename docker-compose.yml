@@ -1,0 +1,83 @@
+name: hotclaw
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - ./backend/.env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_DEBUG: ${APP_DEBUG:-false}
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8140
+      DATABASE_URL: ${HOTCLAW_DOCKER_DATABASE_URL:-sqlite+aiosqlite:////app/data/hotclaw.db}
+      REDIS_URL: ${HOTCLAW_DOCKER_REDIS_URL:-redis://redis:6379/0}
+      HOTCLAW_AUTO_CREATE_TABLES: ${HOTCLAW_AUTO_CREATE_TABLES:-0}
+      HOTCLAW_ENABLE_SYSTEM_CONFIG_INIT: ${HOTCLAW_ENABLE_SYSTEM_CONFIG_INIT:-1}
+      HOTCLAW_ENABLE_SCHEDULER: ${HOTCLAW_ENABLE_SCHEDULER:-0}
+    ports:
+      - "${HOTCLAW_BACKEND_PORT:-8140}:8140"
+    volumes:
+      - hotclaw-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8140/api/v1/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        HOTCLAW_API_ORIGIN: http://backend:8140
+    environment:
+      NODE_ENV: production
+      PORT: 3460
+      HOSTNAME: 0.0.0.0
+      HOTCLAW_API_ORIGIN: http://backend:8140
+      NEXT_TELEMETRY_DISABLED: 1
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${HOTCLAW_FRONTEND_PORT:-3460}:3460"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3460').then((res)=>process.exit(res.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  hotclaw-data:
+  redis-data:
