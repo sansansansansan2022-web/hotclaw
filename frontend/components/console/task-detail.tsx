@@ -739,7 +739,7 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
           </div>
 
           <Card
-"zh-CN" ? "节点轨迹" : "Node Trace"
+            title={locale === "zh-CN" ? "节点轨迹" : "Node Trace"}
             description={locale === "zh-CN" ? "保留结构化内容链的节点调试表，方便排查提纲、分段、组装与回退行为。" : "Keep the structured content pipeline trace visible, including outline, sections, assembly and fallback behavior."}
           >
             {nodes.length ? (
@@ -758,12 +758,19 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
                     <td className="px-5 py-4 text-sm text-slate-600">{formatDuration(node.elapsed_seconds)}</td>
                     <td className="px-5 py-4 text-sm text-slate-600">{node.model_used || (locale === "zh-CN" ? "未记录" : "Not recorded")}</td>
                     <td className="px-5 py-4 text-sm text-slate-600">{node.degraded ? (locale === "zh-CN" ? "是" : "Yes") : locale === "zh-CN" ? "否" : "No"}</td>
-                    <td className="px-5 py-4 text-sm text-slate-500">{truncate(node.error_message, 90) || (locale === "zh-CN" ? "无错误" : "No error")}</td>
+                    <td className="px-5 py-4 text-sm text-slate-500">
+                      <p>{truncate(node.error_message, 90) || (locale === "zh-CN" ? "无错误" : "No error")}</p>
+                      {node.runtime ? (
+                        <p className="mt-1 text-xs text-slate-400">
+                          {`runtime: ${String(node.runtime.error_class || "ok")} | retries: ${node.retry_count ?? 0}`}
+                        </p>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </Table>
             ) : (
-"zh-CN" ? "暂无节点轨迹" : "No node trace available"
+              locale === "zh-CN" ? "暂无节点轨迹" : "No node trace available"
             )}
           </Card>
         </>
