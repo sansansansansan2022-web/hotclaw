@@ -314,7 +314,7 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
           </div>
 
           <Card
-"zh-CN" ? "阶段产物" : "Stage Artifacts"
+            title={locale === "zh-CN" ? "阶段产物" : "Stage Artifacts"}
             description={
               locale === "zh-CN"
                 ? "浠ュ眬閮ㄧ敤鎴疯瑙掓煡鐪嬭繖娆′换鍔＄湡姝ｅ唴鍚冧簡浠€涔堛€佷骇鍑轰簡浠€涔堬紝鑺傜偣杞ㄨ抗鏀惧埌浜岀骇瑙嗗浘銆?"
@@ -332,7 +332,7 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
                     <Badge tone={artifactTone(artifact.status)}>{artifact.status}</Badge>
                   </div>
                   <p className="mt-3 text-xs text-slate-500">
-"zh-CN" ? "暂无时间" : "No timestamp"
+                    {formatDateTime(artifact.updated_at) || (locale === "zh-CN" ? "暂无时间" : "No timestamp")}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {artifact.source_node_ids.map((nodeId) => (
