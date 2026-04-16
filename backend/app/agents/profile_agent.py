@@ -133,20 +133,14 @@ Rules:
 
         try:
             # 调用 LLM 进行解析
-            model = settings.llm_model_name
-            if not model.startswith("dashscope/"):
-                model = f"dashscope/{model}"
-
-            response = await litellm.acompletion(
-                model=model,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_api_base_url,
+            response = await self.run_litellm_completion(
+                context=context,
+                completion_callable=litellm.acompletion,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 timeout=settings.llm_timeout,
-                custom_llm_provider="dashscope",
             )
             content = response.choices[0].message.content
             # 解析 LLM 返回的 JSON
@@ -162,12 +156,15 @@ Rules:
                 data.get("open_source_mode"),
                 data["source_preferences"],
             )
-            return self._success(data)
+            return self._attach_runtime_trace(self._success(data), context)
 
         except json.JSONDecodeError as exc:
-            return self._failure(code="JSON_PARSE_ERROR", message=f"Failed to parse profile JSON: {exc}")
+            return self._attach_runtime_trace(
+                self._failure(code="JSON_PARSE_ERROR", message=f"Failed to parse profile JSON: {exc}"),
+                context,
+            )
         except Exception as exc:
-            return self._failure(code="LLM_ERROR", message=str(exc))
+            return self._attach_runtime_trace(self._failure(code="LLM_ERROR", message=str(exc)), context)
 
     def _parse_json(self, content: str) -> dict:
         """解析 LLM 返回的 JSON 内容。

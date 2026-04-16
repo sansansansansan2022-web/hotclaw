@@ -160,6 +160,11 @@ class AccountHarnessService:
                 "allow_run": True,
                 "effective_mode": str(snapshot.get("automation_plan", {}).get("plan_type") or "manual"),
                 "allow_auto_publish": False,
+                "allow_reviewers": True,
+                "reviewer_mode": "dual",
+                "allow_rewrite": True,
+                "allow_post_process": True,
+                "high_cost_model_nodes": [],
                 "preferred_reference_source_ids": [
                     str(item["id"])
                     for item in snapshot.get("reference_sources", [])[:3]
@@ -210,6 +215,15 @@ class AccountHarnessService:
         effective_mode = str(run_strategy_raw.get("effective_mode") or requested_mode)
         allow_run = bool(run_strategy_raw.get("allow_run", True))
         allow_auto_publish = bool(run_strategy_raw.get("allow_auto_publish", False))
+        allow_reviewers = bool(run_strategy_raw.get("allow_reviewers", True))
+        reviewer_mode = str(run_strategy_raw.get("reviewer_mode") or "dual").strip().lower() or "dual"
+        allow_rewrite = bool(run_strategy_raw.get("allow_rewrite", True))
+        allow_post_process = bool(run_strategy_raw.get("allow_post_process", True))
+        high_cost_model_nodes = [
+            str(item).strip()
+            for item in run_strategy_raw.get("high_cost_model_nodes", [])
+            if str(item).strip()
+        ]
         preferred_content_lane = (
             str(run_strategy_raw.get("preferred_content_lane")).strip()
             if run_strategy_raw.get("preferred_content_lane")
@@ -242,6 +256,20 @@ class AccountHarnessService:
 
         if effective_mode != "full_auto":
             allow_auto_publish = False
+
+        if operation_stage == "risk_recovery":
+            reviewer_mode = "single"
+            allow_post_process = False
+            if not high_cost_model_nodes:
+                high_cost_model_nodes = []
+        elif not high_cost_model_nodes and effective_mode in {"semi_auto", "full_auto"} and operation_stage == "steady_state":
+            high_cost_model_nodes = ["outline_planner", "rewrite_agent"]
+
+        if reviewer_mode not in {"single", "dual"}:
+            reviewer_mode = "dual"
+        if not allow_reviewers:
+            reviewer_mode = "single"
+            allow_rewrite = False
 
         if trigger["source"] == "scheduler":
             if signals["pending_review_count"] >= self.PENDING_REVIEW_BLOCK_THRESHOLD:
@@ -278,6 +306,11 @@ class AccountHarnessService:
                 "requested_mode": requested_mode,
                 "effective_mode": effective_mode,
                 "allow_auto_publish": allow_auto_publish,
+                "allow_reviewers": allow_reviewers,
+                "reviewer_mode": reviewer_mode,
+                "allow_rewrite": allow_rewrite,
+                "allow_post_process": allow_post_process,
+                "high_cost_model_nodes": high_cost_model_nodes,
                 "preferred_reference_source_ids": preferred_reference_source_ids,
                 "avoid_recent_topics": avoid_recent_topics,
                 "preferred_content_lane": preferred_content_lane,

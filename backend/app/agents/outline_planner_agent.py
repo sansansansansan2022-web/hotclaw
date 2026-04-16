@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -91,6 +92,15 @@ Non-negotiable requirements:
 - Avoid empty background exposition, mechanical three-step frameworks, and template-style transitions.
 """
 
+    _RETRYABLE_ERROR_MARKERS = (
+        "connection error",
+        "api connection",
+        "eai_again",
+        "temporarily unavailable",
+        "internalservererror",
+        "service unavailable",
+    )
+
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
         outline_seed = input_data.get("outline_seed")
         if isinstance(outline_seed, dict) and outline_seed.get("sections"):
@@ -98,38 +108,53 @@ Non-negotiable requirements:
 
         system_prompt = self.get_system_prompt(context)
         user_prompt = self._build_user_prompt(input_data)
+        node_timeout = context.get("node_timeout_seconds")
+        try:
+            llm_timeout = max(float(settings.llm_timeout), float(node_timeout or settings.llm_timeout) - 8.0)
+        except (TypeError, ValueError):
+            llm_timeout = float(settings.llm_timeout)
         selected_title = article_assembler_service.extract_selected_title(input_data.get("titles"))
         selected_topic = article_assembler_service.extract_selected_topic(
             input_data.get("topics"), input_data.get("titles")
         )
 
         try:
-            model = settings.llm_model_name
-            if not model.startswith("dashscope/"):
-                model = f"dashscope/{model}"
-
-            response = await litellm.acompletion(
-                model=model,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_api_base_url,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                timeout=settings.llm_timeout,
-                custom_llm_provider="dashscope",
-            )
+            response = await self._request_outline(system_prompt, user_prompt, llm_timeout, context)
             content = response.choices[0].message.content
             normalized = self._normalize_outline(self._parse_json(content), input_data)
             if not self._outline_matches_topic(normalized, selected_topic, selected_title):
                 fallback_result = await self.fallback(RuntimeError("outline topic drift detected"), input_data)
                 if fallback_result and fallback_result.is_success:
-                    return fallback_result
-            return self._success(normalized)
+                    return self._attach_runtime_trace(fallback_result, context, fallback_used=True)
+            return self._attach_runtime_trace(self._success(normalized), context)
         except json.JSONDecodeError as exc:
-            return self._failure("JSON_PARSE_ERROR", f"Failed to parse outline JSON: {exc}")
+            return self._attach_runtime_trace(
+                self._failure("JSON_PARSE_ERROR", f"Failed to parse outline JSON: {exc}"),
+                context,
+            )
         except Exception as exc:
-            return self._failure("LLM_ERROR", str(exc))
+            fallback_result = await self.fallback(exc, input_data)
+            if fallback_result and fallback_result.is_success:
+                return self._attach_runtime_trace(fallback_result, context, fallback_used=True)
+            return self._attach_runtime_trace(self._failure("LLM_ERROR", str(exc)), context)
+
+    async def _request_outline(self, system_prompt: str, user_prompt: str, llm_timeout: float, context: dict[str, Any]):
+        return await self.run_litellm_completion(
+            context=context,
+            completion_callable=litellm.acompletion,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            timeout=llm_timeout,
+            max_retries=1,
+            retry_backoff_seconds=0.6,
+            retryable_error_markers=self._RETRYABLE_ERROR_MARKERS,
+        )
+
+    def _is_retryable_llm_error(self, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return any(marker in message for marker in self._RETRYABLE_ERROR_MARKERS)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
         selected_title = article_assembler_service.extract_selected_title(input_data.get("titles"))

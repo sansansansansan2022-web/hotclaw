@@ -405,7 +405,9 @@ export interface NodeRun {
   elapsed_seconds: number | null;
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
+  retry_count?: number;
   model_used?: string | null;
+  runtime?: Record<string, unknown> | null;
   degraded: boolean;
   error_message: string | null;
 }
@@ -529,11 +531,17 @@ export interface RunStrategy {
   requested_mode?: OperationMode | null;
   effective_mode: OperationMode;
   allow_auto_publish: boolean;
+  allow_reviewers?: boolean;
+  reviewer_mode?: "single" | "dual" | string;
+  allow_rewrite?: boolean;
+  allow_post_process?: boolean;
+  high_cost_model_nodes?: string[];
   preferred_reference_source_ids: string[];
   avoid_recent_topics: string[];
   preferred_content_lane?: string | null;
   degraded_from?: OperationMode | null;
   degrade_reason?: string | null;
+  strategy_notes?: string[];
 }
 
 export interface OpsContext {

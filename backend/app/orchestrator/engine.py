@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
+import sys
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,13 +17,31 @@ from app.core.config import settings
 from app.core.exceptions import AgentExecutionError, AgentTimeoutError
 from app.core.logger import get_logger
 from app.core.tracer import get_trace_id
-from app.models.tables import AgentModel, TaskModel, TaskNodeRunModel
+from app.models.tables import AgentModel, LLMProviderModel, TaskModel, TaskNodeRunModel
 from app.orchestrator.broadcaster import broadcaster
 from app.orchestrator.workspace import Workspace
 from app.services.account_service import account_service
 from app.services.article_assembler_service import article_assembler_service
 
 logger = get_logger(__name__)
+
+
+def _safe_print(*args: object, sep: str = " ", end: str = "\n") -> None:
+    text = sep.join(str(arg) for arg in args) + end
+    try:
+        builtins.print(*args, sep=sep, end=end)
+    except UnicodeEncodeError:
+        stream = sys.stdout
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        buffer = getattr(stream, "buffer", None)
+        encoded = text.encode(encoding, errors="backslashreplace")
+        if buffer is not None:
+            buffer.write(encoded)
+        else:
+            stream.write(encoded.decode(encoding, errors="ignore"))
+
+
+print = _safe_print
 
 STRUCTURED_CONTENT_NODE_IDS = {
     "outline_planner",
@@ -38,10 +58,19 @@ REWRITE_NODE_IDS = {
     "rewrite_agent",
 }
 
+QUALITY_GATE_NODE_IDS = {
+    "draft_quality_gate",
+}
+
+POST_PROCESS_NODE_IDS = {
+    "post_process_agent",
+}
+
 LEGACY_CONTENT_FALLBACK_NODE = {
     "node_id": "content_writing_fallback",
     "agent_id": "content_writer_agent",
     "name": "Legacy Content Writer Fallback",
+    "timeout_seconds": 300,
     "input_mapping": {
         "profile": "profile",
         "topics": "topics",
@@ -70,6 +99,7 @@ DEFAULT_WORKFLOW_NODES = [
         "node_id": "hot_topic_analysis",
         "agent_id": "hot_topic_agent",
         "name": "Hot Topic Analysis",
+        "timeout_seconds": 300,
         "input_mapping": {
             "profile": "profile",
             "account_context": "account_context",
@@ -88,6 +118,7 @@ DEFAULT_WORKFLOW_NODES = [
         "node_id": "topic_planning",
         "agent_id": "topic_planner_agent",
         "name": "Topic Planning",
+        "timeout_seconds": 300,
         "input_mapping": {
             "profile": "profile",
             "hot_topics": "hot_topics",
@@ -127,6 +158,7 @@ DEFAULT_WORKFLOW_NODES = [
         "node_id": "outline_planner",
         "agent_id": "outline_planner_agent",
         "name": "Outline Planner",
+        "timeout_seconds": 300,
         "input_mapping": {
             "profile": "profile",
             "hot_topics": "hot_topics",
@@ -148,6 +180,7 @@ DEFAULT_WORKFLOW_NODES = [
         "node_id": "section_writer",
         "agent_id": "section_writer_agent",
         "name": "Section Writer",
+        "timeout_seconds": 300,
         "input_mapping": {
             "outline_plan": "outline_plan",
             "profile": "profile",
@@ -233,6 +266,7 @@ DEFAULT_WORKFLOW_NODES = [
         "node_id": "rewrite_agent",
         "agent_id": "rewrite_agent",
         "name": "Rewrite Agent",
+        "timeout_seconds": 600,
         "input_mapping": {
             "titles": "titles",
             "topics": "topics",
@@ -268,6 +302,49 @@ DEFAULT_WORKFLOW_NODES = [
         "output_key": "audit_result",
         "required": False,
     },
+    {
+        "node_id": "draft_quality_gate",
+        "agent_id": "draft_quality_gate_service",
+        "name": "Draft Quality Gate",
+        "executor": "service",
+        "service": "draft_quality_gate",
+        "input_mapping": {
+            "assembled_article": "assembled_article",
+            "content": "content",
+            "titles": "titles",
+            "topics": "topics",
+            "profile": "profile",
+            "account_context": "account_context",
+            "ops_context": "ops_context",
+            "selected_evidence": "selected_evidence",
+            "citation_guardrails": "citation_guardrails",
+            "audit_result": "audit_result",
+            "review_results": "review_results",
+            "rewrite_result": "rewrite_result",
+        },
+        "output_key": "draft_quality_gate",
+        "required": True,
+    },
+    {
+        "node_id": "post_process_agent",
+        "agent_id": "post_process_agent",
+        "name": "Post-process Agent",
+        "input_mapping": {
+            "content": "content",
+            "assembled_article": "assembled_article",
+            "rewrite_result": "rewrite_result",
+            "draft_quality_gate": "draft_quality_gate",
+            "outline_plan": "outline_plan",
+            "section_drafts": "section_drafts",
+            "titles": "titles",
+            "topics": "topics",
+            "account_context": "account_context",
+            "source_candidates": "source_candidates",
+            "reference_digest": "reference_digest",
+        },
+        "output_key": "post_process_result",
+        "required": False,
+    },
 ]
 
 
@@ -288,6 +365,7 @@ class OrchestratorEngine:
         workspace = Workspace(task_id=task.id, input_data=task.input_data or {})
         total_tokens = 0
         structured_pipeline_degraded = False
+        quality_gate_blocked = False
 
         account_context = await account_service.get_account_context(task.account_id, db)
         if account_context:
@@ -338,9 +416,25 @@ class OrchestratorEngine:
 
         for idx, node_def in enumerate(DEFAULT_WORKFLOW_NODES):
             node_id = node_def["node_id"]
+            agent_runtime = None
             if structured_pipeline_degraded and node_id in STRUCTURED_CONTENT_NODE_IDS:
                 await self._record_skipped_node(task.id, node_def, db, "legacy_content_fallback")
                 continue
+            if quality_gate_blocked and node_id in POST_PROCESS_NODE_IDS:
+                await self._record_skipped_node(task.id, node_def, db, "draft_quality_gate_blocked")
+                continue
+            run_strategy = self._extract_run_strategy(workspace.get("ops_context"))
+            strategy_skip_reason = self._strategy_skip_reason(node_id, run_strategy)
+            if strategy_skip_reason:
+                await self._record_skipped_node(task.id, node_def, db, strategy_skip_reason)
+                continue
+            if node_def.get("executor") != "service":
+                agent = agent_registry.get(node_def["agent_id"])
+                agent_runtime = await self._resolve_agent_runtime(
+                    node_def["agent_id"],
+                    agent.default_system_prompt,
+                    db,
+                )
 
             node_run = TaskNodeRunModel(
                 task_id=task.id,
@@ -348,7 +442,7 @@ class OrchestratorEngine:
                 agent_id=node_def["agent_id"],
                 status="running",
                 started_at=datetime.now(timezone.utc),
-                model_used=self._model_used_for_node(node_def),
+                model_used=(agent_runtime or {}).get("model") or self._model_used_for_node(node_def),
             )
             db.add(node_run)
             await db.flush()
@@ -357,6 +451,7 @@ class OrchestratorEngine:
             node_run.input_data = agent_input
             db.add(node_run)
             await db.flush()
+            await db.commit()
 
             await broadcaster.broadcast(
                 task.id,
@@ -377,9 +472,9 @@ class OrchestratorEngine:
                 node_id=node_id,
                 agent_id=node_def["agent_id"],
                 trace_id=trace_id,
-                provider=self._provider_hint_for_node(node_def),
-                model=self._model_used_for_node(node_def),
-                timeout=settings.agent_timeout if node_def.get("executor") != "service" else None,
+                provider=(agent_runtime or {}).get("provider") or self._provider_hint_for_node(node_def),
+                model=(agent_runtime or {}).get("model") or self._model_used_for_node(node_def),
+                timeout=self._node_timeout_seconds(node_def) if node_def.get("executor") != "service" else None,
             )
 
             try:
@@ -391,15 +486,86 @@ class OrchestratorEngine:
                     db,
                     task.id,
                     task.account_id,
+                    agent_runtime,
                 )
+                runtime_trace = self._extract_runtime_trace(result)
                 if result.is_success:
                     self._store_node_result(workspace, node_def, result.data or {})
+                    self._apply_runtime_trace_to_node_run(node_run, runtime_trace)
+                    if node_id in QUALITY_GATE_NODE_IDS:
+                        gate_result = workspace.get("draft_quality_gate")
+                        quality_gate_blocked = isinstance(gate_result, dict) and gate_result.get("passed") is False
                     node_run.status = "completed"
-                    node_run.output_data = result.data
+                    node_run.output_data = self._merge_runtime_output(result.data, runtime_trace)
+
+                    # 计算执行时长
+                    elapsed = self._elapsed_seconds(
+                        started_at=node_run.started_at,
+                        completed_at=node_run.completed_at,
+                    )
+
+                    # 终端详细日志输出
+                    print(f"\n{'='*60}")
+                    print(f"[OK] Node completed: {node_def['name']} ({node_id})")
+                    print(f"   智能体: {node_def['agent_id']}")
+                    print(f"   状态: COMPLETED")
+                    print(f"   耗时: {elapsed:.2f}s" if elapsed else "   耗时: N/A")
+                    print(f"   降级: {'是' if node_run.degraded else '否'}")
+
+                    # 输出关键结果摘要
+                    if result.data:
+                        if "title" in result.data:
+                            print(f"   标题: {result.data['title'][:50]}...")
+                        if "outline" in result.data:
+                            outline = result.data["outline"]
+                            if isinstance(outline, list):
+                                print(f"   大纲: {len(outline)} 个章节")
+                            elif isinstance(outline, str):
+                                print(f"   大纲: {outline[:50]}...")
+                        if "sections" in result.data:
+                            sections = result.data["sections"]
+                            if isinstance(sections, list):
+                                print(f"   正文: {len(sections)} 个段落")
+                        if "content" in result.data:
+                            content = result.data["content"]
+                            if isinstance(content, str):
+                                print(f"   内容长度: {len(content)} 字符")
+                    print(f"{'='*60}\n")
+
+                    logger.info(
+                        "node_execution_completed",
+                        task_id=task.id,
+                        node_id=node_id,
+                        agent_id=node_def["agent_id"],
+                        status="completed",
+                        elapsed_seconds=elapsed,
+                        degraded=node_run.degraded,
+                    )
                 else:
                     error_message = self._result_error_message(result)
+                    runtime_trace = self._extract_runtime_trace(
+                        result,
+                        error_class="execution_error",
+                        error_message=error_message,
+                    )
+
+                    # 计算执行时长
+                    elapsed = self._elapsed_seconds(
+                        started_at=node_run.started_at,
+                        completed_at=node_run.completed_at,
+                    )
+
+                    # 终端详细日志输出 - 失败
+                    print(f"\n{'='*60}")
+                    print(f"[FAIL] Node failed: {node_def['name']} ({node_id})")
+                    print(f"   智能体: {node_def['agent_id']}")
+                    print(f"   状态: FAILED")
+                    print(f"   耗时: {elapsed:.2f}s" if elapsed else "   耗时: N/A")
+                    print(f"   错误: {error_message[:100]}...")
+                    print(f"{'='*60}\n")
+
                     if node_id in STRUCTURED_CONTENT_NODE_IDS:
-                        await self._mark_node_failed(node_run, error_message, db)
+                        await self._mark_node_failed(node_run, error_message, db, runtime_trace=runtime_trace)
                         await broadcaster.broadcast(
                             task.id,
                             "node_error",
@@ -421,12 +587,17 @@ class OrchestratorEngine:
                         agent_input,
                     )
                     if fallback_result and fallback_result.is_success:
+                        fallback_trace = self._merge_runtime_trace(
+                            runtime_trace,
+                            self._extract_runtime_trace(fallback_result, fallback_used=True),
+                        )
                         self._store_node_result(workspace, node_def, fallback_result.data or {})
                         node_run.status = "completed"
-                        node_run.output_data = fallback_result.data
+                        self._apply_runtime_trace_to_node_run(node_run, fallback_trace)
+                        node_run.output_data = self._merge_runtime_output(fallback_result.data, fallback_trace)
                         node_run.degraded = True
                     elif node_def.get("required", True):
-                        await self._mark_node_failed(node_run, error_message, db)
+                        await self._mark_node_failed(node_run, error_message, db, runtime_trace=runtime_trace)
                         await broadcaster.broadcast(
                             task.id,
                             "node_error",
@@ -437,6 +608,8 @@ class OrchestratorEngine:
                         node_run.status = "failed"
                         node_run.error_message = error_message
                         node_run.degraded = True
+                        self._apply_runtime_trace_to_node_run(node_run, runtime_trace)
+                        node_run.output_data = self._merge_runtime_output(None, runtime_trace)
                         self._store_optional_node_failure(workspace, node_def, error_message)
                         await broadcaster.broadcast(
                             task.id,
@@ -445,8 +618,55 @@ class OrchestratorEngine:
                         )
             except asyncio.TimeoutError:
                 error_message = f"agent {node_def['agent_id']} timed out"
-                if node_id in STRUCTURED_CONTENT_NODE_IDS:
-                    await self._mark_node_failed(node_run, error_message, db)
+                timeout_trace = {
+                    "provider": (agent_runtime or {}).get("provider") or self._provider_hint_for_node(node_def),
+                    "model": (agent_runtime or {}).get("model") or self._model_used_for_node(node_def),
+                    "timeout_seconds": self._node_timeout_seconds(node_def),
+                    "retry_count": 0,
+                    "error_class": "timeout",
+                    "error_message": error_message,
+                }
+
+                # 计算执行时长
+                elapsed = self._elapsed_seconds(started_at=node_run.started_at)
+
+                # 终端详细日志输出 - 超时
+                print(f"\n{'='*60}")
+                print(f"[TIMEOUT] Node timed out: {node_def['name']} ({node_id})")
+                print(f"   智能体: {node_def['agent_id']}")
+                print(f"   状态: TIMEOUT")
+                print(f"   已运行: {elapsed:.2f}s" if elapsed else "   已运行: N/A")
+                print(f"   超时限制: {self._node_timeout_seconds(node_def)}s")
+                print(f"   错误: {error_message}")
+                print(f"{'='*60}\n")
+
+                fallback_result = await self._execute_agent_fallback(
+                    node_def["agent_id"],
+                    AgentTimeoutError(node_def["agent_id"]),
+                    agent_input,
+                )
+                if fallback_result and fallback_result.is_success:
+                    fallback_trace = self._merge_runtime_trace(
+                        timeout_trace,
+                        self._extract_runtime_trace(fallback_result, fallback_used=True),
+                    )
+                    self._store_node_result(workspace, node_def, fallback_result.data or {})
+                    node_run.status = "completed"
+                    self._apply_runtime_trace_to_node_run(node_run, fallback_trace)
+                    node_run.output_data = self._merge_runtime_output(fallback_result.data, fallback_trace)
+                    node_run.degraded = True
+                    if node_id in STRUCTURED_CONTENT_NODE_IDS:
+                        structured_pipeline_degraded = True
+                    logger.warning(
+                        "node_timeout_fallback_used",
+                        task_id=task.id,
+                        account_id=task.account_id,
+                        node_id=node_id,
+                        agent_id=node_def["agent_id"],
+                        timeout_seconds=self._node_timeout_seconds(node_def),
+                    )
+                elif node_id in STRUCTURED_CONTENT_NODE_IDS:
+                    await self._mark_node_failed(node_run, error_message, db, runtime_trace=timeout_trace)
                     await broadcaster.broadcast(
                         task.id,
                         "node_error",
@@ -461,30 +681,39 @@ class OrchestratorEngine:
                     )
                     structured_pipeline_degraded = True
                     continue
-
-                if node_def.get("required", True):
-                    await self._mark_node_failed(node_run, error_message, db)
+                elif node_def.get("required", True):
+                    await self._mark_node_failed(node_run, error_message, db, runtime_trace=timeout_trace)
                     await broadcaster.broadcast(
                         task.id,
                         "node_error",
                         {"node_id": node_id, "error": error_message},
                     )
                     raise AgentTimeoutError(node_def["agent_id"])
-                node_run.status = "failed"
-                node_run.error_message = error_message
-                node_run.degraded = True
-                self._store_optional_node_failure(workspace, node_def, error_message)
-                await broadcaster.broadcast(
-                    task.id,
-                    "node_error",
-                    {"node_id": node_id, "error": error_message},
-                )
+                else:
+                    node_run.status = "failed"
+                    node_run.error_message = error_message
+                    node_run.degraded = True
+                    self._apply_runtime_trace_to_node_run(node_run, timeout_trace)
+                    node_run.output_data = self._merge_runtime_output(None, timeout_trace)
+                    self._store_optional_node_failure(workspace, node_def, error_message)
+                    await broadcaster.broadcast(
+                        task.id,
+                        "node_error",
+                        {"node_id": node_id, "error": error_message},
+                    )
             except AgentExecutionError:
                 raise
             except Exception as exc:
                 error_message = str(exc)
+                unexpected_trace = {
+                    "provider": (agent_runtime or {}).get("provider") or self._provider_hint_for_node(node_def),
+                    "model": (agent_runtime or {}).get("model") or self._model_used_for_node(node_def),
+                    "retry_count": 0,
+                    "error_class": "unexpected_exception",
+                    "error_message": error_message,
+                }
                 if node_id in STRUCTURED_CONTENT_NODE_IDS:
-                    await self._mark_node_failed(node_run, error_message, db)
+                    await self._mark_node_failed(node_run, error_message, db, runtime_trace=unexpected_trace)
                     await broadcaster.broadcast(
                         task.id,
                         "node_error",
@@ -507,7 +736,7 @@ class OrchestratorEngine:
                     error=error_message,
                 )
                 if node_def.get("required", True):
-                    await self._mark_node_failed(node_run, error_message, db)
+                    await self._mark_node_failed(node_run, error_message, db, runtime_trace=unexpected_trace)
                     await broadcaster.broadcast(
                         task.id,
                         "node_error",
@@ -517,6 +746,8 @@ class OrchestratorEngine:
                 node_run.status = "failed"
                 node_run.error_message = error_message
                 node_run.degraded = True
+                self._apply_runtime_trace_to_node_run(node_run, unexpected_trace)
+                node_run.output_data = self._merge_runtime_output(None, unexpected_trace)
                 self._store_optional_node_failure(workspace, node_def, error_message)
                 await broadcaster.broadcast(
                     task.id,
@@ -535,7 +766,7 @@ class OrchestratorEngine:
                 status=node_run.status,
                 degraded=node_run.degraded,
                 elapsed_seconds=node_run.elapsed_seconds,
-                provider=self._provider_hint_for_node(node_def),
+                provider=self._provider_hint_from_model_used(node_run.model_used),
                 model=node_run.model_used,
             )
             if node_run.status == "completed":
@@ -562,10 +793,42 @@ class OrchestratorEngine:
         task.completed_at = datetime.now(timezone.utc)
         task.result_data = result_data
         task.total_tokens = total_tokens
-        if task.started_at:
-            task.elapsed_seconds = (task.completed_at - task.started_at).total_seconds()
+        task.elapsed_seconds = self._elapsed_seconds(
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+        )
         db.add(task)
         await db.flush()
+
+        # 任务完成 - 终端汇总输出
+        print(f"\n{'='*80}")
+        print(f"[DONE] Task completed: {task.id}")
+        print(f"   状态: COMPLETED")
+        print(f"   总耗时: {task.elapsed_seconds:.2f}s ({task.elapsed_seconds/60:.1f} 分钟)")
+        print(f"   总 Token: {total_tokens:,}")
+        print(f"   降级模式: {'是' if structured_pipeline_degraded else '否'}")
+
+        # 输出关键结果
+        if result_data:
+            if "title" in result_data:
+                print(f"   标题: {result_data['title']}")
+            if "content" in result_data:
+                content = result_data.get("content", "")
+                print(f"   内容长度: {len(content):,} 字符")
+            if "sections" in result_data:
+                sections = result_data.get("sections", [])
+                print(f"   段落数: {len(sections)}")
+        print(f"{'='*80}\n")
+
+        logger.info(
+            "workflow_execution_completed",
+            task_id=task.id,
+            account_id=task.account_id,
+            status="completed",
+            elapsed_seconds=task.elapsed_seconds,
+            total_tokens=total_tokens,
+            degraded=structured_pipeline_degraded,
+        )
 
         await broadcaster.broadcast(
             task.id,
@@ -587,27 +850,69 @@ class OrchestratorEngine:
         db: AsyncSession,
         task_id: str,
         account_id: str | None,
+        agent_runtime: dict[str, Any] | None = None,
     ) -> AgentResult:
         if node_def.get("executor") == "service":
-            return await self._execute_service_node(node_def, input_data)
+            return await self._execute_service_node(
+                node_def,
+                input_data,
+                task_id=task_id,
+                account_id=account_id,
+            )
 
         agent = agent_registry.get(node_def["agent_id"])
-        effective_prompt = await self._resolve_system_prompt(
+        runtime = agent_runtime or await self._resolve_agent_runtime(
             node_def["agent_id"],
             agent.default_system_prompt,
             db,
         )
         enriched_context = dict(context)
-        enriched_context["system_prompt"] = effective_prompt
+        enriched_context["system_prompt"] = runtime["system_prompt"]
+        enriched_context["agent_model_config"] = runtime.get("model_config")
         enriched_context["db"] = db
         enriched_context["task_id"] = task_id
         enriched_context["account_id"] = account_id
         enriched_context["trace_id"] = trace_id
-        return await self._execute_agent_with_timeout(agent, input_data, enriched_context, trace_id)
+        enriched_context["node_timeout_seconds"] = self._node_timeout_seconds(node_def)
+        run_strategy = self._extract_run_strategy(context.get("ops_context"))
+        enriched_context["runtime_policy"] = {
+            "max_retries": settings.llm_max_retries,
+            "retry_backoff_seconds": settings.llm_retry_backoff_seconds,
+            "prefer_high_cost_model": node_def["node_id"] in set(run_strategy.get("high_cost_model_nodes") or []),
+        }
+        result = await self._execute_agent_with_timeout(
+            agent,
+            input_data,
+            enriched_context,
+            trace_id,
+            timeout_seconds=self._node_timeout_seconds(node_def),
+        )
+        if result.runtime_trace is None and isinstance(enriched_context.get("_agent_runtime_trace"), dict):
+            result.runtime_trace = dict(enriched_context.get("_agent_runtime_trace") or {})
+        return result
 
     async def _execute_service_node(
-        self, node_def: dict[str, Any], input_data: dict[str, Any]
+        self,
+        node_def: dict[str, Any],
+        input_data: dict[str, Any],
+        *,
+        task_id: str | None = None,
+        account_id: str | None = None,
     ) -> AgentResult:
+        if node_def.get("service") == "draft_quality_gate":
+            from app.services.draft_quality_gate_service import draft_quality_gate_service
+
+            gate_result = await draft_quality_gate_service.evaluate_result(
+                input_data,
+                task_id=task_id,
+                account_id=account_id,
+            )
+            return AgentResult(
+                status="success",
+                agent_name=node_def["agent_id"],
+                data=gate_result,
+            )
+
         if node_def.get("service") != "article_assembler":
             return AgentResult(
                 status="failed",
@@ -629,11 +934,17 @@ class OrchestratorEngine:
         )
 
     async def _execute_agent_with_timeout(
-        self, agent: BaseAgent, input_data: dict, context: dict, trace_id: str
+        self,
+        agent: BaseAgent,
+        input_data: dict,
+        context: dict,
+        trace_id: str,
+        *,
+        timeout_seconds: int,
     ) -> AgentResult:
         return await asyncio.wait_for(
             agent.execute(input_data, context),
-            timeout=settings.agent_timeout,
+            timeout=timeout_seconds,
         )
 
     async def _execute_agent_fallback(
@@ -669,6 +980,7 @@ class OrchestratorEngine:
         )
         db.add(node_run)
         await db.flush()
+        await db.commit()
 
         agent_input = workspace.extract_for_agent(node_def["input_mapping"])
         node_run.input_data = agent_input
@@ -698,6 +1010,7 @@ class OrchestratorEngine:
                 task_id,
                 None,
             )
+            runtime_trace = self._extract_runtime_trace(result)
             if not result.is_success:
                 fallback_result = await self._execute_agent_fallback(
                     node_def["agent_id"],
@@ -710,6 +1023,10 @@ class OrchestratorEngine:
                         self._result_error_message(result),
                     )
                 result = fallback_result
+                runtime_trace = self._merge_runtime_trace(
+                    runtime_trace,
+                    self._extract_runtime_trace(fallback_result, fallback_used=True),
+                )
 
             legacy_content = article_assembler_service.extract_article_payload(
                 {
@@ -732,7 +1049,8 @@ class OrchestratorEngine:
             )
 
             node_run.status = "completed"
-            node_run.output_data = legacy_content
+            self._apply_runtime_trace_to_node_run(node_run, runtime_trace)
+            node_run.output_data = self._merge_runtime_output(legacy_content, runtime_trace)
             node_run.degraded = True
             await self._finalize_node(node_run, db)
             await broadcaster.broadcast(
@@ -748,7 +1066,17 @@ class OrchestratorEngine:
                 },
             )
         except Exception:
-            await self._mark_node_failed(node_run, reason, db)
+            await self._mark_node_failed(
+                node_run,
+                reason,
+                db,
+                runtime_trace={
+                    "error_class": "legacy_content_fallback_failed",
+                    "error_message": reason,
+                    "retry_count": 0,
+                    "fallback_used": True,
+                },
+            )
             await broadcaster.broadcast(
                 task_id,
                 "node_error",
@@ -829,6 +1157,53 @@ class OrchestratorEngine:
                 revised_article["word_count"] = article_assembler_service.count_words(revised_content)
                 workspace.set("content", revised_article)
             workspace.set("content_pipeline", pipeline)
+            return
+        if node_id in QUALITY_GATE_NODE_IDS:
+            gate_result = dict(data or {})
+            workspace.set(node_def["output_key"], gate_result)
+            pipeline = workspace.get("content_pipeline")
+            if not isinstance(pipeline, dict):
+                pipeline = {}
+            pipeline["quality_gate_checked"] = True
+            pipeline["quality_gate_passed"] = bool(gate_result.get("passed"))
+            pipeline["quality_gate_status"] = gate_result.get("status")
+            if gate_result.get("passed") is False:
+                pipeline["post_process_skipped"] = True
+                pipeline["degraded"] = True
+            workspace.set("content_pipeline", pipeline)
+            return
+        if node_id in POST_PROCESS_NODE_IDS:
+            post_process_result = self._normalize_post_process_result(data)
+            workspace.set(node_def["output_key"], post_process_result)
+            pipeline = workspace.get("content_pipeline")
+            if not isinstance(pipeline, dict):
+                pipeline = {}
+            pipeline["post_process_attempted"] = True
+            pipeline["post_process_used"] = bool(post_process_result.get("used_post_process"))
+            pipeline["ready_for_review"] = bool(
+                (post_process_result.get("wechat_publish_format") or {}).get("ready_for_review")
+            )
+            workspace.set("content_pipeline", pipeline)
+            if post_process_result.get("used_post_process") and post_process_result.get("final_content_markdown"):
+                current_content = article_assembler_service.extract_article_payload(
+                    {
+                        "assembled_article": workspace.get("assembled_article"),
+                        "content": workspace.get("content"),
+                        "rewrite_result": workspace.get("rewrite_result"),
+                        "titles": workspace.get("titles"),
+                        "topics": workspace.get("topics"),
+                        "outline_plan": workspace.get("outline_plan"),
+                        "section_drafts": workspace.get("section_drafts"),
+                    }
+                )
+                final_content = dict(current_content)
+                final_markdown = str(post_process_result.get("final_content_markdown") or "").strip()
+                final_content["content_markdown"] = final_markdown
+                final_html = post_process_result.get("final_content_html")
+                if final_html:
+                    final_content["content_html"] = final_html
+                final_content["word_count"] = article_assembler_service.count_words(final_markdown)
+                workspace.set("content", final_content)
             return
         workspace.set(node_def["output_key"], data)
 
@@ -935,6 +1310,48 @@ class OrchestratorEngine:
             "failure_reason": data.get("failure_reason"),
         }
 
+    def _normalize_post_process_result(self, data: dict[str, Any]) -> dict[str, Any]:
+        final_content = str(
+            data.get("final_content_markdown")
+            or data.get("content_markdown")
+            or data.get("content")
+            or ""
+        ).strip()
+        used_post_process = data.get("used_post_process")
+        if not isinstance(used_post_process, bool):
+            used_post_process = bool(final_content)
+        return {
+            "used_post_process": used_post_process,
+            "post_process_skipped": bool(data.get("post_process_skipped")),
+            "skip_reason": data.get("skip_reason"),
+            "layout_template": data.get("layout_template") if isinstance(data.get("layout_template"), dict) else None,
+            "template_options": [
+                item
+                for item in data.get("template_options", [])
+                if isinstance(item, dict)
+            ] if isinstance(data.get("template_options"), list) else [],
+            "layout_blocks": [
+                item
+                for item in data.get("layout_blocks", [])
+                if isinstance(item, dict)
+            ] if isinstance(data.get("layout_blocks"), list) else [],
+            "final_content_markdown": final_content,
+            "final_content_html": data.get("final_content_html") or data.get("content_html"),
+            "polishing_summary": str(data.get("polishing_summary") or data.get("summary") or "").strip(),
+            "layout_notes": [
+                str(item).strip()
+                for item in data.get("layout_notes", [])
+                if str(item).strip()
+            ] if isinstance(data.get("layout_notes"), list) else [],
+            "image_slots": [
+                item
+                for item in data.get("image_slots", [])
+                if isinstance(item, dict)
+            ] if isinstance(data.get("image_slots"), list) else [],
+            "cover_image_prompt": str(data.get("cover_image_prompt") or "").strip(),
+            "wechat_publish_format": data.get("wechat_publish_format") if isinstance(data.get("wechat_publish_format"), dict) else {},
+        }
+
     def _upsert_review_result(self, workspace: Workspace, review_result: dict[str, Any]) -> None:
         existing = workspace.get("review_results")
         review_results = existing if isinstance(existing, list) else []
@@ -946,6 +1363,93 @@ class OrchestratorEngine:
         ]
         filtered.append(review_result)
         workspace.set("review_results", filtered)
+
+    def _extract_run_strategy(self, ops_context: Any) -> dict[str, Any]:
+        if isinstance(ops_context, dict):
+            run_strategy = ops_context.get("run_strategy")
+            if isinstance(run_strategy, dict):
+                return run_strategy
+        return {}
+
+    def _strategy_skip_reason(self, node_id: str, run_strategy: dict[str, Any]) -> str | None:
+        if not run_strategy:
+            return None
+
+        allow_reviewers = run_strategy.get("allow_reviewers")
+        reviewer_mode = str(run_strategy.get("reviewer_mode") or "dual").strip().lower()
+        allow_rewrite = run_strategy.get("allow_rewrite")
+        allow_post_process = run_strategy.get("allow_post_process")
+
+        if node_id in REVIEWER_NODE_IDS and allow_reviewers is False:
+            return "run_strategy_disabled_reviewers"
+        if node_id == "structure_reviewer" and reviewer_mode == "single":
+            return "run_strategy_single_reviewer"
+        if node_id in REWRITE_NODE_IDS and allow_rewrite is False:
+            return "run_strategy_disabled_rewrite"
+        if node_id in POST_PROCESS_NODE_IDS and allow_post_process is False:
+            return "run_strategy_disabled_post_process"
+        return None
+
+    def _extract_runtime_trace(
+        self,
+        result: AgentResult | None = None,
+        *,
+        error_class: str | None = None,
+        error_message: str | None = None,
+        fallback_used: bool | None = None,
+    ) -> dict[str, Any] | None:
+        trace = dict(result.runtime_trace) if result and isinstance(result.runtime_trace, dict) else {}
+        if fallback_used is not None:
+            trace["fallback_used"] = fallback_used
+        if error_class and not trace.get("error_class"):
+            trace["error_class"] = error_class
+        if error_message and not trace.get("error_message"):
+            trace["error_message"] = error_message
+        return trace or None
+
+    def _merge_runtime_trace(
+        self,
+        primary: dict[str, Any] | None,
+        secondary: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not primary and not secondary:
+            return None
+        merged: dict[str, Any] = {}
+        if primary:
+            merged.update(primary)
+        if secondary:
+            merged.update(secondary)
+        return merged
+
+    def _apply_runtime_trace_to_node_run(
+        self,
+        node_run: TaskNodeRunModel,
+        runtime_trace: dict[str, Any] | None,
+    ) -> None:
+        if not runtime_trace:
+            return
+
+        prompt_tokens = runtime_trace.get("prompt_tokens")
+        completion_tokens = runtime_trace.get("completion_tokens")
+        model_used = runtime_trace.get("model")
+
+        if isinstance(prompt_tokens, int):
+            node_run.prompt_tokens = prompt_tokens
+        if isinstance(completion_tokens, int):
+            node_run.completion_tokens = completion_tokens
+        if isinstance(model_used, str) and model_used.strip():
+            node_run.model_used = model_used.strip()
+
+    def _merge_runtime_output(
+        self,
+        output_data: dict[str, Any] | None,
+        runtime_trace: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not runtime_trace:
+            return output_data
+        payload = dict(output_data) if isinstance(output_data, dict) else {}
+        payload["_runtime"] = runtime_trace
+        return payload
 
     async def _record_skipped_node(
         self,
@@ -964,36 +1468,121 @@ class OrchestratorEngine:
             started_at=datetime.now(timezone.utc),
             completed_at=datetime.now(timezone.utc),
             elapsed_seconds=0,
+            output_data={
+                "_runtime": {
+                    "error_class": "skipped",
+                    "error_message": reason,
+                    "skip_reason": reason,
+                    "retry_count": 0,
+                    "fallback_used": False,
+                }
+            },
         )
         db.add(node_run)
         await db.flush()
 
-    async def _resolve_system_prompt(
+    async def _resolve_agent_runtime(
         self, agent_id: str, default_prompt: str, db: AsyncSession
-    ) -> str:
-        stmt = select(AgentModel.prompt_template).where(AgentModel.agent_id == agent_id)
+    ) -> dict[str, Any]:
+        stmt = select(AgentModel.prompt_template, AgentModel.model_config_data).where(AgentModel.agent_id == agent_id)
         result = await db.execute(stmt)
-        db_prompt = result.scalar_one_or_none()
+        row = result.one_or_none()
+        db_prompt = row[0] if row else None
+        model_config_data = row[1] if row else None
+
         if db_prompt:
             logger.info("prompt_resolved", agent_id=agent_id, source="custom")
-            return db_prompt
-        logger.info("prompt_resolved", agent_id=agent_id, source="default")
-        return default_prompt
+        else:
+            logger.info("prompt_resolved", agent_id=agent_id, source="default")
+
+        model_config = await self._resolve_agent_model_config(model_config_data, db)
+        return {
+            "system_prompt": db_prompt or default_prompt,
+            "model_config": model_config,
+            "provider": model_config["provider_id"] if model_config else self._provider_hint(),
+            "model": model_config["model"] if model_config else self._model_hint(),
+        }
+
+    async def _resolve_agent_model_config(
+        self, model_config_data: dict[str, Any] | None, db: AsyncSession
+    ) -> dict[str, Any] | None:
+        if not isinstance(model_config_data, dict) or not model_config_data:
+            return None
+
+        provider_id = str(model_config_data.get("provider_id") or "").strip()
+        if not provider_id:
+            return None
+
+        provider_result = await db.execute(
+            select(LLMProviderModel).where(LLMProviderModel.provider_id == provider_id)
+        )
+        provider = provider_result.scalar_one_or_none()
+
+        raw_model = str(
+            model_config_data.get("model")
+            or model_config_data.get("default_model")
+            or (provider.default_model if provider and provider.default_model else "")
+        ).strip()
+        if not raw_model:
+            raw_model = settings.llm_model_name.strip()
+
+        return {
+            "provider_id": provider_id,
+            "model": BaseAgent._normalize_model_name(provider_id, raw_model),
+            "api_key": (provider.api_key if provider and provider.api_key else None) or settings.llm_api_key,
+            "base_url": (provider.base_url if provider and provider.base_url else None) or settings.llm_api_base_url,
+            "timeout": (provider.timeout if provider and provider.timeout else None) or settings.llm_timeout,
+        }
 
     async def _mark_node_failed(
-        self, node_run: TaskNodeRunModel, error_message: str, db: AsyncSession
+        self,
+        node_run: TaskNodeRunModel,
+        error_message: str,
+        db: AsyncSession,
+        *,
+        runtime_trace: dict[str, Any] | None = None,
     ) -> None:
         node_run.status = "failed"
         node_run.error_message = error_message
+        self._apply_runtime_trace_to_node_run(node_run, runtime_trace)
+        node_run.output_data = self._merge_runtime_output(node_run.output_data, runtime_trace)
         await self._finalize_node(node_run, db)
 
     async def _finalize_node(self, node_run: TaskNodeRunModel, db: AsyncSession) -> None:
         if node_run.completed_at is None:
             node_run.completed_at = datetime.now(timezone.utc)
-        if node_run.started_at and node_run.completed_at:
-            node_run.elapsed_seconds = (node_run.completed_at - node_run.started_at).total_seconds()
+        node_run.elapsed_seconds = self._elapsed_seconds(
+            started_at=node_run.started_at,
+            completed_at=node_run.completed_at,
+        )
         db.add(node_run)
         await db.flush()
+
+    def _ensure_utc(self, dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    def _node_timeout_seconds(self, node_def: dict[str, Any]) -> int:
+        configured = node_def.get("timeout_seconds")
+        if isinstance(configured, (int, float)) and configured > 0:
+            return int(configured)
+        return int(settings.agent_timeout)
+
+    def _elapsed_seconds(
+        self,
+        *,
+        started_at: datetime | None,
+        completed_at: datetime | None = None,
+    ) -> float | None:
+        started = self._ensure_utc(started_at)
+        if started is None:
+            return None
+
+        completed = self._ensure_utc(completed_at) or datetime.now(timezone.utc)
+        return max((completed - started).total_seconds(), 0.0)
 
     def _result_error_message(self, result: AgentResult) -> str:
         if not result.error:
@@ -1048,6 +1637,15 @@ class OrchestratorEngine:
     def _provider_hint_for_node(self, node_def: dict[str, Any]) -> str:
         if node_def.get("executor") == "service":
             return "service"
+        return self._provider_hint()
+
+    def _provider_hint_from_model_used(self, model_used: str | None) -> str:
+        if not model_used:
+            return self._provider_hint()
+        if model_used.startswith("service:"):
+            return "service"
+        if "/" in model_used:
+            return model_used.split("/", 1)[0]
         return self._provider_hint()
 
     def _model_used_for_node(self, node_def: dict[str, Any]) -> str:

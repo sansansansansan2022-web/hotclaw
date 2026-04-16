@@ -77,26 +77,25 @@ Requirements:
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
         system_prompt = self.get_system_prompt(context)
         user_prompt = self._build_user_prompt(input_data)
+        node_timeout = context.get("node_timeout_seconds")
+        try:
+            llm_timeout = max(float(settings.llm_timeout), float(node_timeout or settings.llm_timeout) - 8.0)
+        except (TypeError, ValueError):
+            llm_timeout = float(settings.llm_timeout)
         selected_title = article_assembler_service.extract_selected_title(input_data.get("titles"))
         selected_topic = article_assembler_service.extract_selected_topic(
             input_data.get("topics"), input_data.get("titles")
         )
 
         try:
-            model = settings.llm_model_name
-            if not model.startswith("dashscope/"):
-                model = f"dashscope/{model}"
-
-            response = await litellm.acompletion(
-                model=model,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_api_base_url,
+            response = await self.run_litellm_completion(
+                context=context,
+                completion_callable=litellm.acompletion,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                timeout=settings.llm_timeout,
-                custom_llm_provider="dashscope",
+                timeout=llm_timeout,
             )
             content = response.choices[0].message.content
             normalized = self._normalize_section_drafts(self._parse_json(content))
@@ -104,11 +103,14 @@ Requirements:
                 fallback_result = await self.fallback(RuntimeError("section topic drift detected"), input_data)
                 if fallback_result and fallback_result.is_success:
                     return fallback_result
-            return self._success(normalized)
+            return self._attach_runtime_trace(self._success(normalized), context)
         except json.JSONDecodeError as exc:
-            return self._failure("JSON_PARSE_ERROR", f"Failed to parse section JSON: {exc}")
+            return self._attach_runtime_trace(
+                self._failure("JSON_PARSE_ERROR", f"Failed to parse section JSON: {exc}"),
+                context,
+            )
         except Exception as exc:
-            return self._failure("LLM_ERROR", str(exc))
+            return self._attach_runtime_trace(self._failure("LLM_ERROR", str(exc)), context)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
         outline = input_data.get("outline_plan") or {}

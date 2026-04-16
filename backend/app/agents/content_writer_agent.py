@@ -151,6 +151,11 @@ Rules:
         evidence_summaries = input_data.get("evidence_summaries") or {}
         citation_guardrails = input_data.get("citation_guardrails") or {}
         system_prompt = context.get("system_prompt") or self.default_system_prompt
+        node_timeout = context.get("node_timeout_seconds")
+        try:
+            llm_timeout = max(float(settings.llm_timeout), float(node_timeout or settings.llm_timeout) - 8.0)
+        except (TypeError, ValueError):
+            llm_timeout = float(settings.llm_timeout)
 
         # 构建用户提示词
         user_prompt = self._build_user_prompt(
@@ -165,29 +170,26 @@ Rules:
 
         try:
             # 调用 LLM 生成文章
-            model = settings.llm_model_name
-            if not model.startswith("dashscope/"):
-                model = f"dashscope/{model}"
-
-            response = await litellm.acompletion(
-                model=model,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_api_base_url,
+            response = await self.run_litellm_completion(
+                context=context,
+                completion_callable=litellm.acompletion,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                timeout=settings.llm_timeout,
-                custom_llm_provider="dashscope",
+                timeout=llm_timeout,
             )
             content = response.choices[0].message.content
             data = self._parse_json(content)
-            return self._success(data)
+            return self._attach_runtime_trace(self._success(data), context)
 
         except json.JSONDecodeError as exc:
-            return self._failure(code="JSON_PARSE_ERROR", message=f"Failed to parse content JSON: {exc}")
+            return self._attach_runtime_trace(
+                self._failure(code="JSON_PARSE_ERROR", message=f"Failed to parse content JSON: {exc}"),
+                context,
+            )
         except Exception as exc:
-            return self._failure(code="LLM_ERROR", message=str(exc))
+            return self._attach_runtime_trace(self._failure(code="LLM_ERROR", message=str(exc)), context)
 
     def _build_user_prompt(
         self,

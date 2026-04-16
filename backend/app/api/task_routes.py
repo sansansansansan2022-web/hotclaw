@@ -259,6 +259,7 @@ async def get_task_nodes(task_id: str, db: AsyncSession = Depends(get_db)) -> Ap
 
     nodes_data = []
     for n in node_runs:
+        runtime = n.output_data.get("_runtime") if isinstance(n.output_data, dict) else None
         nodes_data.append({
             "node_id": n.node_id,
             "agent_id": n.agent_id,
@@ -268,10 +269,17 @@ async def get_task_nodes(task_id: str, db: AsyncSession = Depends(get_db)) -> Ap
             "output_data": n.output_data,
             "started_at": _isoformat_utc(n.started_at),
             "completed_at": _isoformat_utc(n.completed_at),
-            "elapsed_seconds": n.elapsed_seconds,
+            "elapsed_seconds": task_service.calculate_elapsed_seconds(
+                status=n.status,
+                started_at=n.started_at,
+                completed_at=n.completed_at,
+                elapsed_seconds=n.elapsed_seconds,
+            ),
             "prompt_tokens": n.prompt_tokens,
             "completion_tokens": n.completion_tokens,
+            "retry_count": int(runtime.get("retry_count") or 0) if isinstance(runtime, dict) else 0,
             "model_used": n.model_used,
+            "runtime": runtime,
             "degraded": n.degraded,
             "error_message": n.error_message,
         })

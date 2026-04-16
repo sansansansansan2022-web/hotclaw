@@ -135,27 +135,27 @@ Rules:
 
         try:
             # 调用 LLM 生成标题
-            model = settings.llm_model_name
-            if not model.startswith("dashscope/"):
-                model = f"dashscope/{model}"
-
-            response = await litellm.acompletion(
-                model=model,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_api_base_url,
+            response = await self.run_litellm_completion(
+                context=context,
+                completion_callable=litellm.acompletion,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 timeout=settings.llm_timeout,
-                custom_llm_provider="dashscope",
             )
             content = response.choices[0].message.content
-            return self._success(self._normalize_titles(self._parse_json(content), input_data))
+            return self._attach_runtime_trace(
+                self._success(self._normalize_titles(self._parse_json(content), input_data)),
+                context,
+            )
         except json.JSONDecodeError as exc:
-            return self._failure("JSON_PARSE_ERROR", f"Failed to parse title JSON: {exc}")
+            return self._attach_runtime_trace(
+                self._failure("JSON_PARSE_ERROR", f"Failed to parse title JSON: {exc}"),
+                context,
+            )
         except Exception as exc:
-            return self._failure("LLM_ERROR", str(exc))
+            return self._attach_runtime_trace(self._failure("LLM_ERROR", str(exc)), context)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
         """LLM 调用失败时的降级处理。

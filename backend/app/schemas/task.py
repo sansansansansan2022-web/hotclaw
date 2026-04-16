@@ -92,7 +92,9 @@ class NodeRunData(BaseModel):
     elapsed_seconds: float | None = None
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    retry_count: int = 0
     model_used: str | None = None
+    runtime: dict | None = None
     degraded: bool = False
     error_message: str | None = None
 

@@ -271,8 +271,20 @@ async def test_task_artifacts_and_effective_input_contract(client, db_session):
         for item in artifacts_payload["data"]["artifacts"]
     }
     assert "evidence_bundle" in artifacts
+    assert "query_plan" in artifacts
+    assert "reference_digest" in artifacts
+    assert "topic_package" in artifacts
+    assert "outline_plan" in artifacts
+    assert "review_bundle" in artifacts
+    assert "draft_gate_result" in artifacts
     assert "assembled_article" in artifacts
     assert artifacts["evidence_bundle"]["display_payload"]["query_plan"]["lane"]["label"] == "AI Tools"
+    assert artifacts["query_plan"]["display_payload"]["query_plan"]["lane"]["label"] == "AI Tools"
+    assert artifacts["reference_digest"]["display_payload"]["reference_digest"]["summary"] == "Use GitHub evidence plus account references."
+    assert artifacts["topic_package"]["display_payload"]["selected_topic"] == "Why terminal AI agents finally matter"
+    assert artifacts["outline_plan"]["display_payload"]["outline_plan"]["summary"] == "Explain why terminal agents now matter."
+    assert artifacts["review_bundle"]["display_payload"]["handoff_metrics"]["reviewer_count"] == 1
+    assert artifacts["draft_gate_result"]["display_payload"]["audit_result"]["passed"] is True
     assert artifacts["assembled_article"]["display_payload"]["content"]["content_markdown"] == "Final assembled article"
     assert artifacts["review_summary"]["status"] == "available"
 
@@ -291,3 +303,81 @@ async def test_task_artifacts_and_effective_input_contract(client, db_session):
     assert effective_input_payload["data"]["query_plan"]["lane"]["label"] == "AI Tools"
     assert len(effective_input_payload["data"]["selected_recommendations"]) == 1
     assert effective_input_payload["data"]["outline_seed"]["summary"] == "Explain why terminal agents now matter."
+
+
+async def test_task_artifacts_use_completed_node_outputs_before_final_result(client, db_session):
+    task = TaskModel(
+        id="task_partial_artifacts",
+        workflow_id="default_pipeline",
+        status="running",
+        input_data={"positioning": "AI tooling"},
+        result_data=None,
+    )
+    db_session.add_all(
+        [
+            task,
+            TaskNodeRunModel(
+                task_id=task.id,
+                node_id="topic_planning",
+                agent_id="topic_planner_agent",
+                status="completed",
+                output_data={
+                    "topics": [
+                        {
+                            "title": "Why agent workflows need tighter operator loops",
+                            "angle": "workflow",
+                        }
+                    ]
+                },
+            ),
+            TaskNodeRunModel(
+                task_id=task.id,
+                node_id="title_generation",
+                agent_id="title_generator_agent",
+                status="completed",
+                output_data={
+                    "selected_title": "The operator loop is the real AI agent moat",
+                    "titles": [
+                        {"text": "The operator loop is the real AI agent moat"}
+                    ],
+                },
+            ),
+            TaskNodeRunModel(
+                task_id=task.id,
+                node_id="outline_planner",
+                agent_id="outline_planner_agent",
+                status="completed",
+                output_data={
+                    "summary": "Explain the operator loop as the core product boundary.",
+                    "sections": [
+                        {"heading": "The loop", "key_points": ["Feedback matters."]}
+                    ],
+                },
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    response = await client.get(f"/api/v1/tasks/{task.id}/artifacts")
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    artifacts = {
+        item["artifact_key"]: item
+        for item in payload["data"]["artifacts"]
+    }
+
+    assert artifacts["topic_selection"]["status"] == "available"
+    assert (
+        artifacts["topic_selection"]["display_payload"]["selected_topic"]
+        == "Why agent workflows need tighter operator loops"
+    )
+    assert artifacts["title_candidates"]["status"] == "available"
+    assert (
+        artifacts["title_candidates"]["display_payload"]["selected_title"]
+        == "The operator loop is the real AI agent moat"
+    )
+    assert artifacts["outline_preview"]["status"] == "available"
+    assert (
+        artifacts["outline_preview"]["display_payload"]["outline_plan"]["summary"]
+        == "Explain the operator loop as the core product boundary."
+    )

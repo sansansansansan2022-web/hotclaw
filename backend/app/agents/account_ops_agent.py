@@ -49,6 +49,14 @@ class AccountOpsAgent(BaseAgent):
                     "allow_run": {"type": "boolean"},
                     "effective_mode": {"type": "string"},
                     "allow_auto_publish": {"type": "boolean"},
+                    "allow_reviewers": {"type": "boolean"},
+                    "reviewer_mode": {"type": "string"},
+                    "allow_rewrite": {"type": "boolean"},
+                    "allow_post_process": {"type": "boolean"},
+                    "high_cost_model_nodes": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
                     "preferred_reference_source_ids": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -88,6 +96,11 @@ Return strict JSON only with this shape:
     "allow_run": true,
     "effective_mode": "manual | semi_auto | full_auto",
     "allow_auto_publish": false,
+    "allow_reviewers": true,
+    "reviewer_mode": "single | dual",
+    "allow_rewrite": true,
+    "allow_post_process": true,
+    "high_cost_model_nodes": ["outline_planner"],
     "preferred_reference_source_ids": ["1", "2"],
     "avoid_recent_topics": ["..."],
     "preferred_content_lane": "..."
@@ -156,6 +169,15 @@ Rules:
                 "allow_run": bool(run_strategy.get("allow_run", True)),
                 "effective_mode": str(run_strategy.get("effective_mode") or "semi_auto"),
                 "allow_auto_publish": bool(run_strategy.get("allow_auto_publish", False)),
+                "allow_reviewers": bool(run_strategy.get("allow_reviewers", True)),
+                "reviewer_mode": str(run_strategy.get("reviewer_mode") or "dual"),
+                "allow_rewrite": bool(run_strategy.get("allow_rewrite", True)),
+                "allow_post_process": bool(run_strategy.get("allow_post_process", True)),
+                "high_cost_model_nodes": [
+                    str(item).strip()
+                    for item in run_strategy.get("high_cost_model_nodes", [])
+                    if str(item).strip()
+                ],
                 "preferred_reference_source_ids": [
                     str(item).strip()
                     for item in run_strategy.get("preferred_reference_source_ids", [])
@@ -194,6 +216,11 @@ Rules:
         effective_mode = plan_type
         allow_auto_publish = bool(plan.get("auto_publish_enabled", False))
         allow_run = True
+        allow_reviewers = True
+        reviewer_mode = "dual"
+        allow_rewrite = True
+        allow_post_process = True
+        high_cost_model_nodes: list[str] = []
 
         if enabled_reference_source_count < 2:
             issues.append("Reference sources are still sparse.")
@@ -226,6 +253,19 @@ Rules:
             allow_run = False
             notes.append("Scheduler-triggered run is paused until review backlog drops.")
 
+        if operation_stage == "risk_recovery":
+            reviewer_mode = "single"
+            allow_post_process = False
+            high_cost_model_nodes = []
+        elif effective_mode in {"semi_auto", "full_auto"} and operation_stage == "steady_state":
+            high_cost_model_nodes = ["outline_planner", "rewrite_agent"]
+
+        if not allow_reviewers:
+            reviewer_mode = "single"
+            allow_rewrite = False
+        if reviewer_mode == "single":
+            notes.append("Use a single reviewer to keep the run conservative.")
+
         preferred_reference_source_ids = [
             str(item.get("id"))
             for item in reference_sources[:3]
@@ -251,6 +291,11 @@ Rules:
                 "allow_run": allow_run,
                 "effective_mode": effective_mode,
                 "allow_auto_publish": allow_auto_publish and effective_mode == "full_auto",
+                "allow_reviewers": allow_reviewers,
+                "reviewer_mode": reviewer_mode,
+                "allow_rewrite": allow_rewrite,
+                "allow_post_process": allow_post_process,
+                "high_cost_model_nodes": high_cost_model_nodes,
                 "preferred_reference_source_ids": preferred_reference_source_ids,
                 "avoid_recent_topics": avoid_recent_topics,
                 "preferred_content_lane": str(signals.get("preferred_content_lane") or "").strip() or None,

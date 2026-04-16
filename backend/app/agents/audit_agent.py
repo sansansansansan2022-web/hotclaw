@@ -148,24 +148,22 @@ Rules:
 
         # 步骤1: 执行启发式证据核查
         # 检查文章中引用的仓库名和论文名是否在证据中
-        heuristic_issues = self._detect_grounding_issues(content_data, selected_evidence)
+        heuristic_issues = self._detect_grounding_issues(
+            content_data,
+            selected_evidence,
+            citation_guardrails=citation_guardrails,
+        )
 
         try:
             # 步骤2: 调用 LLM 进行深度审核
-            model = settings.llm_model_name
-            if not model.startswith("dashscope/"):
-                model = f"dashscope/{model}"
-
-            response = await litellm.acompletion(
-                model=model,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_api_base_url,
+            response = await self.run_litellm_completion(
+                context=context,
+                completion_callable=litellm.acompletion,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 timeout=settings.llm_timeout,
-                custom_llm_provider="dashscope",
             )
             content = response.choices[0].message.content
             data = self._parse_json(content)
@@ -186,14 +184,22 @@ Rules:
                 prefix = "Heuristic grounding checks found additional evidence issues. "
                 data["overall_comment"] = prefix + str(data.get("overall_comment") or "").strip()
 
-            return self._success(data)
+            return self._attach_runtime_trace(self._success(data), context)
 
         except json.JSONDecodeError as exc:
             # JSON 解析失败时使用启发式检查结果作为降级
-            return self._success(self._fallback_audit(heuristic_issues, f"Failed to parse audit JSON: {exc}"))
+            return self._attach_runtime_trace(
+                self._success(self._fallback_audit(heuristic_issues, f"Failed to parse audit JSON: {exc}")),
+                context,
+                fallback_used=True,
+            )
         except Exception as exc:
             # 其他异常时也使用启发式检查结果
-            return self._success(self._fallback_audit(heuristic_issues, str(exc)))
+            return self._attach_runtime_trace(
+                self._success(self._fallback_audit(heuristic_issues, str(exc))),
+                context,
+                fallback_used=True,
+            )
 
     def _build_user_prompt(
         self,
@@ -250,7 +256,13 @@ Rules:
         ]
         return "\n".join(prompt_parts)
 
-    def _detect_grounding_issues(self, content_data: dict, selected_evidence: list[dict]) -> list[dict]:
+    def _detect_grounding_issues(
+        self,
+        content_data: dict,
+        selected_evidence: list[dict],
+        *,
+        citation_guardrails: dict[str, bool] | None = None,
+    ) -> list[dict]:
         """启发式证据核查。
 
         使用正则表达式检测文章中引用的：
@@ -275,34 +287,37 @@ Rules:
         }
 
         # 提取证据中的 GitHub 仓库名集合
-        evidence_repo_names = {
-            self._normalize_name(item.get("source_id"))
-            for item in selected_evidence
-            if isinstance(item, dict)
-            and str(item.get("source_type") or "").startswith("github")
-            and self._normalize_name(item.get("source_id"))
-        }
+        evidence_repo_names: set[str] = set()
+        for item in selected_evidence:
+            if not isinstance(item, dict) or not str(item.get("source_type") or "").startswith("github"):
+                continue
+            for candidate in self._repo_name_candidates(item):
+                normalized = self._normalize_name(candidate)
+                if normalized:
+                    evidence_repo_names.add(normalized)
 
         issues: list[dict] = []
 
         # 检查 GitHub 仓库引用
         # 匹配格式：owner/repo 或 owner/repo-name
-        repo_mentions = {
-            self._normalize_name(match)
-            for match in re.findall(r"\b[\w.-]+/[\w.-]+\b", content_md)
-            if self._normalize_name(match)
-        }
-        for repo_name in sorted(repo_mentions):
-            # 如果引用的仓库不在证据中，记录问题
-            if repo_name not in evidence_repo_names:
-                issues.append(
-                    {
-                        "type": "unsupported_repo_reference",
-                        "description": f"Repository name '{repo_name}' does not appear in selected evidence.",
-                        "severity": "medium",
-                        "location": "content",
-                    }
-                )
+        guardrails = citation_guardrails if isinstance(citation_guardrails, dict) else {}
+        if guardrails.get("must_ground_repo_names_in_evidence", True):
+            repo_mentions = {
+                self._normalize_name(match)
+                for match in self._extract_repo_mentions(content_md)
+                if self._normalize_name(match)
+            }
+            for repo_name in sorted(repo_mentions):
+                # 如果引用的仓库不在证据中，记录问题
+                if repo_name not in evidence_repo_names:
+                    issues.append(
+                        {
+                            "type": "unsupported_repo_reference",
+                            "description": f"Repository name '{repo_name}' does not appear in selected evidence.",
+                            "severity": "medium",
+                            "location": "content",
+                        }
+                    )
 
         # 检查论文/书名引用
         # 匹配书名号《》或引号""包裹的文本
@@ -341,6 +356,41 @@ Rules:
                     }
                 )
         return issues
+
+    def _extract_repo_mentions(self, content_md: str) -> list[str]:
+        """Extract explicit ASCII GitHub-style owner/repo mentions.
+
+        Do not use ``\\w`` here: in Python it also matches CJK characters, which
+        turns phrases like ``api/sdk的能力`` into fake repository references.
+        """
+
+        repo_pattern = re.compile(
+            r"(?<![A-Za-z0-9_.-])"
+            r"([A-Za-z0-9][A-Za-z0-9_.-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,99})"
+            r"(?=$|[\s,.;:!?，。；：！？、）)\]}>\"'`])"
+        )
+        return [match.group(1) for match in repo_pattern.finditer(content_md or "")]
+
+    def _repo_name_candidates(self, item: dict[str, object]) -> list[str]:
+        candidates: list[str] = []
+        for key in ("source_id", "repo_name", "repository_name", "full_name", "name"):
+            value = item.get(key)
+            if isinstance(value, str) and "/" in value:
+                candidates.append(value)
+        for key in ("source_url", "url", "html_url"):
+            value = item.get(key)
+            if not isinstance(value, str):
+                continue
+            match = re.search(r"github\.com/([^/\s]+/[^/\s?#]+)", value, flags=re.IGNORECASE)
+            if match:
+                candidates.append(match.group(1))
+        payload = item.get("source_payload") or item.get("source_payload_json")
+        if isinstance(payload, dict):
+            for key in ("full_name", "repo_name", "repository_name"):
+                value = payload.get(key)
+                if isinstance(value, str) and "/" in value:
+                    candidates.append(value)
+        return candidates
 
     def _fallback_audit(self, heuristic_issues: list[dict], error_message: str) -> dict:
         """审核失败时的降级处理。
@@ -447,5 +497,19 @@ Rules:
         heuristic_issues = self._detect_grounding_issues(
             input_data.get("content") or {},
             input_data.get("selected_evidence") or [],
+            citation_guardrails=input_data.get("citation_guardrails") or {},
         )
-        return self._success(self._fallback_audit(heuristic_issues, str(error)))
+        result = self._success(self._fallback_audit(heuristic_issues, str(error)))
+        result.runtime_trace = {
+            "provider": None,
+            "model": None,
+            "latency_seconds": None,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+            "retry_count": 0,
+            "fallback_used": True,
+            "error_class": self._classify_llm_error(error),
+            "error_message": str(error),
+        }
+        return result
