@@ -15,9 +15,11 @@ Task Service - 任务服务模块
 """
 
 import asyncio
+import builtins
+import sys
 from datetime import datetime, timezone
 
-from sqlalchemy import select, desc, func as sa_func
+from sqlalchemy import select, desc, func as sa_func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -33,6 +35,24 @@ from app.services.article_assembler_service import article_assembler_service
 from app.services.e2e_test_mode_service import e2e_test_mode_service
 
 logger = get_logger(__name__)
+
+
+def _safe_print(*args: object, sep: str = " ", end: str = "\n") -> None:
+    text = sep.join(str(arg) for arg in args) + end
+    try:
+        builtins.print(*args, sep=sep, end=end)
+    except UnicodeEncodeError:
+        stream = sys.stdout
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        buffer = getattr(stream, "buffer", None)
+        encoded = text.encode(encoding, errors="backslashreplace")
+        if buffer is not None:
+            buffer.write(encoded)
+        else:
+            stream.write(encoded.decode(encoding, errors="ignore"))
+
+
+print = _safe_print
 
 
 class TaskService:
@@ -136,7 +156,12 @@ class TaskService:
                 )
                 task.status = "completed"
                 task.completed_at = datetime.now(timezone.utc)
-                task.elapsed_seconds = (task.completed_at - task.started_at).total_seconds() if task.started_at else None
+                task.elapsed_seconds = self.calculate_elapsed_seconds(
+                    status=task.status,
+                    started_at=task.started_at,
+                    completed_at=task.completed_at,
+                    elapsed_seconds=None,
+                )
                 task.total_tokens = 0
                 db.add(task)
                 await db.flush()
@@ -176,8 +201,12 @@ class TaskService:
                 task.status = "completed"
             if task.completed_at is None:
                 task.completed_at = datetime.now(timezone.utc)
-            if task.started_at and task.completed_at:
-                task.elapsed_seconds = (task.completed_at - task.started_at).total_seconds()
+            task.elapsed_seconds = self.calculate_elapsed_seconds(
+                status=task.status,
+                started_at=task.started_at,
+                completed_at=task.completed_at,
+                elapsed_seconds=None,
+            )
             task.error_message = None
             task.result_data = result_data
             db.add(task)
@@ -210,11 +239,18 @@ class TaskService:
         except asyncio.TimeoutError:
             # 任务执行超时处理
             timeout_message = f"task execution timed out after {task_timeout_seconds}s"
+            await db.rollback()
+            task = await self._get_task(task_id, db)
+            timed_out_nodes = await self._mark_running_nodes_failed(task_id, db, timeout_message)
             task.status = "failed"
             task.error_message = timeout_message
             task.completed_at = datetime.now(timezone.utc)
-            if task.started_at:
-                task.elapsed_seconds = (task.completed_at - task.started_at).total_seconds()
+            task.elapsed_seconds = self.calculate_elapsed_seconds(
+                status=task.status,
+                started_at=task.started_at,
+                completed_at=task.completed_at,
+                elapsed_seconds=None,
+            )
             task.result_data = self._attach_execution_meta(
                 task.result_data if isinstance(task.result_data, dict) else {},
                 trace_id=trace_id,
@@ -226,6 +262,18 @@ class TaskService:
             )
             db.add(task)
             await db.commit()
+
+            # 终端详细日志输出 - 任务超时
+            print(f"\n{'='*80}")
+            print(f"[TIMEOUT] Task timed out: {task_id}")
+            print(f"   状态: FAILED (TIMEOUT)")
+            print(f"   总耗时: {task.elapsed_seconds:.2f}s ({task.elapsed_seconds/60:.1f} 分钟)")
+            print(f"   超时限制: {task_timeout_seconds}s ({task_timeout_seconds/60:.1f} 分钟)")
+            print(f"   错误: {timeout_message}")
+            if timed_out_nodes:
+                print(f"   超时节点: {', '.join([n['node_id'] for n in timed_out_nodes])}")
+            print(f"{'='*80}\n")
+
             logger.error(
                 "task_timed_out",
                 task_id=task_id,
@@ -233,6 +281,12 @@ class TaskService:
                 trace_id=trace_id,
                 timeout_seconds=task_timeout_seconds,
             )
+            for node_event in timed_out_nodes:
+                await broadcaster.broadcast(
+                    task_id,
+                    "node_error",
+                    {"node_id": node_event["node_id"], "error": timeout_message},
+                )
 
             # 更新账号运行状态
             if task.account_id:
@@ -248,11 +302,18 @@ class TaskService:
 
         except Exception as e:
             # 其他异常处理
+            await db.rollback()
+            task = await self._get_task(task_id, db)
+            failed_nodes = await self._mark_running_nodes_failed(task_id, db, str(e))
             task.status = "failed"
             task.error_message = str(e)
             task.completed_at = datetime.now(timezone.utc)
-            if task.started_at:
-                task.elapsed_seconds = (task.completed_at - task.started_at).total_seconds()
+            task.elapsed_seconds = self.calculate_elapsed_seconds(
+                status=task.status,
+                started_at=task.started_at,
+                completed_at=task.completed_at,
+                elapsed_seconds=None,
+            )
             task.result_data = self._attach_execution_meta(
                 task.result_data if isinstance(task.result_data, dict) else {},
                 trace_id=trace_id,
@@ -271,6 +332,12 @@ class TaskService:
                 timeout_seconds=task_timeout_seconds,
                 error=str(e),
             )
+            for node_event in failed_nodes:
+                await broadcaster.broadcast(
+                    task_id,
+                    "node_error",
+                    {"node_id": node_event["node_id"], "error": str(e)},
+                )
 
             # 如果任务绑定了账号，更新账号的运行状态
             if task.account_id:
@@ -299,7 +366,9 @@ class TaskService:
         Raises:
             TaskNotFoundError: 任务不存在
         """
-        return await self._get_task(task_id, db)
+        task = await self._get_task(task_id, db)
+        await self._reconcile_task_runtime_state(task, db)
+        return task
 
     async def get_task_with_nodes(self, task_id: str, db: AsyncSession) -> TaskModel:
         """
@@ -321,6 +390,7 @@ class TaskService:
         task = result.scalar_one_or_none()
         if task is None:
             raise TaskNotFoundError(task_id)
+        await self._reconcile_task_runtime_state(task, db)
         return task
 
     async def list_tasks(
@@ -395,7 +465,8 @@ class TaskService:
             list[TaskNodeRunModel]: 按执行顺序排列的节点运行记录列表
         """
         # 先验证任务存在
-        await self._get_task(task_id, db)
+        task = await self._get_task(task_id, db)
+        await self._reconcile_task_runtime_state(task, db)
         stmt = (
             select(TaskNodeRunModel)
             .where(TaskNodeRunModel.task_id == task_id)
@@ -428,7 +499,6 @@ class TaskService:
             raise TaskAlreadyRunningError(task_id)
 
         # 删除旧的节点运行记录
-        from sqlalchemy import delete
         await db.execute(
             delete(TaskNodeRunModel).where(TaskNodeRunModel.task_id == task_id)
         )
@@ -446,6 +516,103 @@ class TaskService:
         logger.info("task_rerun_prepared", task_id=task_id)
 
         return task
+
+    async def stop_task(
+        self,
+        task_id: str,
+        db: AsyncSession,
+        *,
+        reason: str | None = None,
+    ) -> tuple[TaskModel, list[dict[str, str]], bool]:
+        """Stop an active task and close its currently running nodes."""
+        task = await self._get_task(task_id, db)
+        if task.status in {"completed", "failed", "cancelled"}:
+            return task, [], False
+
+        previous_status = task.status
+        message = reason or "task manually stopped"
+        closed_nodes = await self._mark_running_nodes_terminal(
+            task_id,
+            db,
+            message,
+            terminal_status="cancelled",
+        )
+        task.status = "cancelled"
+        task.error_message = message
+        task.completed_at = datetime.now(timezone.utc)
+        task.elapsed_seconds = self.calculate_elapsed_seconds(
+            status=task.status,
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+            elapsed_seconds=None,
+        )
+        db.add(task)
+        await db.flush()
+
+        if task.account_id:
+            await self._update_account_run_status(task.account_id, db, "cancelled", message)
+
+        logger.warning(
+            "task_manually_stopped",
+            task_id=task_id,
+            account_id=task.account_id,
+            previous_status=previous_status,
+            closed_node_count=len(closed_nodes),
+            reason=message,
+        )
+        return task, closed_nodes, True
+
+    async def delete_task(self, task_id: str, db: AsyncSession) -> dict[str, object]:
+        """Delete a task and its task-scoped runtime artifacts."""
+        from app.models.tables import (
+            AccountProfileModel,
+            ArticleDraftModel,
+            AuditResultModel,
+            EvidenceItemModel,
+            SkillInvocationLogModel,
+            SystemLogModel,
+            TopicCandidateModel,
+        )
+        from app.models.wechat_config import WeChatPublishRecordModel
+
+        task = await self._get_task(task_id, db)
+        previous_status = task.status
+        stopped = False
+        if task.status in {"pending", "running"}:
+            task, _, stopped = await self.stop_task(
+                task_id,
+                db,
+                reason="task deleted before completion",
+            )
+
+        draft_id_rows = await db.execute(select(ArticleDraftModel.id).where(ArticleDraftModel.task_id == task_id))
+        draft_ids = [row[0] for row in draft_id_rows.all()]
+        if draft_ids:
+            await db.execute(delete(WeChatPublishRecordModel).where(WeChatPublishRecordModel.draft_id.in_(draft_ids)))
+        await db.execute(delete(WeChatPublishRecordModel).where(WeChatPublishRecordModel.task_id == task_id))
+        await db.execute(delete(AuditResultModel).where(AuditResultModel.task_id == task_id))
+        await db.execute(delete(ArticleDraftModel).where(ArticleDraftModel.task_id == task_id))
+        await db.execute(delete(AccountProfileModel).where(AccountProfileModel.task_id == task_id))
+        await db.execute(delete(TopicCandidateModel).where(TopicCandidateModel.task_id == task_id))
+        await db.execute(delete(TaskNodeRunModel).where(TaskNodeRunModel.task_id == task_id))
+        await db.execute(delete(EvidenceItemModel).where(EvidenceItemModel.task_id == task_id))
+        await db.execute(delete(SkillInvocationLogModel).where(SkillInvocationLogModel.task_id == task_id))
+        await db.execute(delete(SystemLogModel).where(SystemLogModel.task_id == task_id))
+        await db.delete(task)
+        await db.flush()
+
+        logger.warning(
+            "task_deleted",
+            task_id=task_id,
+            previous_status=previous_status,
+            stopped_before_delete=stopped,
+        )
+        return {
+            "task_id": task_id,
+            "deleted": True,
+            "previous_status": previous_status,
+            "stopped_before_delete": stopped,
+        }
 
     async def _get_task(self, task_id: str, db: AsyncSession) -> TaskModel:
         """
@@ -472,6 +639,31 @@ class TaskService:
             raise TaskNotFoundError(task_id)
         return task
 
+    def calculate_elapsed_seconds(
+        self,
+        *,
+        status: str,
+        started_at: datetime | None,
+        completed_at: datetime | None,
+        elapsed_seconds: float | None,
+    ) -> float | None:
+        """Return persisted elapsed seconds or a live fallback for in-flight records."""
+        if elapsed_seconds is not None:
+            return elapsed_seconds
+
+        started = self._ensure_utc(started_at)
+        if started is None:
+            return None
+
+        completed = self._ensure_utc(completed_at)
+        if completed is not None:
+            return max((completed - started).total_seconds(), 0.0)
+
+        if status in {"pending", "running"}:
+            return max((datetime.now(timezone.utc) - started).total_seconds(), 0.0)
+
+        return None
+
     async def _refresh_account_next_run(self, account_id: str, db: AsyncSession) -> None:
         """
         内部方法：任务完成后刷新账号的下次运行时间。
@@ -486,6 +678,13 @@ class TaskService:
             logger.info("account_next_run_refreshed_after_task", account_id=account_id)
         except Exception as e:
             logger.warning("failed_to_refresh_account_next_run", account_id=account_id, error=str(e))
+
+    def _ensure_utc(self, dt: datetime | None) -> datetime | None:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
 
     async def _update_account_run_status(
         self, account_id: str, db: AsyncSession, status: str, error_message: str | None = None
@@ -508,6 +707,125 @@ class TaskService:
         except Exception as e:
             logger.warning("failed_to_update_account_run_status", account_id=account_id, error=str(e))
 
+    async def _reconcile_task_runtime_state(self, task: TaskModel, db: AsyncSession) -> None:
+        """Repair stale task/node state left behind by interrupted workers or old bugs."""
+        changed = False
+
+        if task.status in {"completed", "failed", "cancelled"}:
+            terminal_message = task.error_message or f"task already {task.status}"
+            closed_nodes = await self._mark_running_nodes_terminal(
+                task.id,
+                db,
+                terminal_message,
+                terminal_status="cancelled" if task.status == "cancelled" else "failed",
+            )
+            changed = bool(closed_nodes)
+        elif task.status == "running":
+            timeout_seconds = self._get_task_timeout_seconds()
+            live_elapsed = self.calculate_elapsed_seconds(
+                status=task.status,
+                started_at=task.started_at,
+                completed_at=task.completed_at,
+                elapsed_seconds=task.elapsed_seconds,
+            )
+            if live_elapsed is not None and live_elapsed >= timeout_seconds:
+                timeout_message = f"task execution timed out after {timeout_seconds}s"
+                timed_out_nodes = await self._mark_running_nodes_failed(task.id, db, timeout_message)
+                task.status = "failed"
+                task.error_message = timeout_message
+                task.completed_at = datetime.now(timezone.utc)
+                task.elapsed_seconds = self.calculate_elapsed_seconds(
+                    status="failed",
+                    started_at=task.started_at,
+                    completed_at=task.completed_at,
+                    elapsed_seconds=None,
+                )
+                task.result_data = self._attach_execution_meta(
+                    task.result_data if isinstance(task.result_data, dict) else {},
+                    trace_id=get_trace_id() or generate_trace_id(),
+                    timeout_seconds=timeout_seconds,
+                    simulated=False,
+                    simulation_source=None,
+                    provider=self._detect_provider(),
+                    timed_out=True,
+                )
+                db.add(task)
+                changed = True
+                if task.account_id:
+                    await self._update_account_run_status(task.account_id, db, "failed", timeout_message)
+                logger.warning(
+                    "stale_running_task_reconciled",
+                    task_id=task.id,
+                    account_id=task.account_id,
+                    timeout_seconds=timeout_seconds,
+                    node_count=len(timed_out_nodes),
+                )
+
+        if changed:
+            await db.commit()
+
+    async def _mark_running_nodes_failed(
+        self,
+        task_id: str,
+        db: AsyncSession,
+        error_message: str,
+    ) -> list[dict[str, str]]:
+        """Close node rows left in running state after a task-level failure."""
+        return await self._mark_running_nodes_terminal(
+            task_id,
+            db,
+            error_message,
+            terminal_status="failed",
+        )
+
+    async def _mark_running_nodes_terminal(
+        self,
+        task_id: str,
+        db: AsyncSession,
+        error_message: str,
+        *,
+        terminal_status: str,
+    ) -> list[dict[str, str]]:
+        """Close node rows left in running state after a task-level terminal transition."""
+        result = await db.execute(
+            select(TaskNodeRunModel).where(
+                TaskNodeRunModel.task_id == task_id,
+                TaskNodeRunModel.status == "running",
+            )
+        )
+        running_nodes = list(result.scalars().all())
+        if not running_nodes:
+            return []
+
+        completed_at = datetime.now(timezone.utc)
+        events: list[dict[str, str]] = []
+        for node in running_nodes:
+            started_at = node.started_at
+            if started_at is not None and started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            node.status = terminal_status
+            node.error_message = error_message
+            node.completed_at = completed_at
+            node.elapsed_seconds = self.calculate_elapsed_seconds(
+                status=node.status,
+                started_at=started_at,
+                completed_at=completed_at,
+                elapsed_seconds=None,
+            )
+            db.add(node)
+            events.append({"node_id": node.node_id, "agent_id": node.agent_id})
+
+        await db.flush()
+        logger.warning(
+            "task_running_nodes_marked_failed",
+            task_id=task_id,
+            terminal_status=terminal_status,
+            count=len(events),
+            error=error_message,
+            node_ids=[event["node_id"] for event in events],
+        )
+        return events
+
     async def _create_draft_from_task_result(
         self, task: TaskModel, result_data: dict, db: AsyncSession
     ) -> None:
@@ -529,6 +847,7 @@ class TaskService:
         try:
             from app.services.draft_service import draft_service
             from app.services.automation_plan_service import automation_plan_service
+            from app.services.draft_quality_gate_service import draft_quality_gate_service
 
             # 标准化结果数据
             result_data = article_assembler_service.normalize_result_data(result_data)
@@ -567,6 +886,15 @@ class TaskService:
                 operation_mode=operation_mode,
                 db=db
             )
+            gate_result = await draft_quality_gate_service.persist_for_draft(
+                draft=draft,
+                result_data=result_data,
+                db=db,
+            )
+            task.result_data = result_data
+            db.add(task)
+            if not gate_result.get("passed"):
+                auto_publish_enabled = False
             logger.info(
                 "draft_created_from_task",
                 task_id=task.id,
@@ -574,6 +902,7 @@ class TaskService:
                 draft_status=draft.draft_status,
                 effective_mode=operation_mode,
                 allow_auto_publish=auto_publish_enabled,
+                quality_gate_passed=gate_result.get("passed"),
             )
 
             # full_auto: 尝试自动发布到微信（不影响任务主流程）
@@ -613,10 +942,8 @@ class TaskService:
         Returns:
             int: 超时时间（秒）
         """
-        node_count = max(orchestrator_engine.get_workflow_node_count(), 1)
-        per_node_budget = settings.agent_timeout * node_count + 30
-        bounded_total_budget = settings.agent_timeout + settings.llm_timeout + 30
-        return max(min(per_node_budget, bounded_total_budget), settings.agent_timeout + 30)
+        configured_budget = int(getattr(settings, "task_timeout_seconds", 600) or 600)
+        return max(configured_budget, 600, settings.agent_timeout + 30)
 
     def _detect_provider(self) -> str:
         """

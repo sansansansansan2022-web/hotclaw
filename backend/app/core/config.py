@@ -137,11 +137,15 @@ class Settings(BaseSettings):
 
     # ========== 超时配置（秒）==========
     # agent_timeout: 单个智能体执行超时（正文生成可能需要较长时间）
-    agent_timeout: int = Field(default=120, description="智能体执行超时（秒）")
+    agent_timeout: int = Field(default=600, description="智能体执行超时（秒）")
+    # task_timeout_seconds: 单次创作链路的总预算，真实 LLM 链路需要覆盖选题、标题、大纲、写作、复审和后处理。
+    task_timeout_seconds: int = Field(default=1800, description="任务总执行超时（秒）")
     # skill_timeout: 单个技能执行超时
     skill_timeout: int = Field(default=60, description="技能执行超时（秒）")
     # llm_timeout: LLM API 调用超时
     llm_timeout: int = Field(default=60, description="LLM API 调用超时（秒）")
+    llm_max_retries: int = Field(default=1, description="LLM 运行时最大重试次数")
+    llm_retry_backoff_seconds: float = Field(default=0.6, description="LLM 运行时重试退避秒数")
 
     enable_github_skill: bool = Field(default=False, description="Enable GitHub research skill")
     enable_scholar_skill: bool = Field(default=False, description="Enable scholar research skill")
@@ -158,6 +162,14 @@ class Settings(BaseSettings):
         default=15,
         description="WeChat article search timeout in seconds",
     )
+
+    draft_quality_gate_enabled: bool = Field(default=True, description="Enable draft quality gate before post-processing and auto-publish")
+    draft_quality_gate_provider: str = Field(default="internal", description="Draft quality gate provider: internal or zhuque")
+    draft_quality_gate_min_score: float = Field(default=0.75, description="Minimum quality score required by the draft gate")
+    draft_quality_gate_timeout_seconds: int = Field(default=20, description="Draft quality gate provider timeout in seconds")
+    draft_quality_gate_fail_closed: bool = Field(default=True, description="Block drafts when the configured gate provider fails")
+    zhuque_ai_check_endpoint: str = Field(default="", description="Zhuque AI draft check endpoint")
+    zhuque_ai_check_api_key: str = Field(default="", description="Zhuque AI draft check API key")
 
     scholar_provider: str = Field(default="", description="Scholar provider strategy")
     scholar_provider_api_key: str = Field(default="", description="Scholar provider API key")
@@ -193,6 +205,30 @@ class Settings(BaseSettings):
         """
         super().__init__(**kwargs)
         # Load provider-specific LLM config
+        api_key, base_url, model = _get_llm_config()
+        self.llm_api_key = api_key
+        self.llm_api_base_url = base_url
+        self.llm_model_name = model
+
+    def reload(self) -> None:
+        """
+        重新加载 .env 文件中的配置。
+
+        【热加载支持】
+        修改 .env 文件后调用此方法可以重新加载配置，
+        无需重启服务。
+        """
+        if _env_file.exists():
+            with open(_env_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, _, value = line.partition("=")
+                        normalized_key = key.strip()
+                        normalized_value = value.strip()
+                        os.environ[normalized_key] = normalized_value
+
+        # 重新解析 LLM 配置
         api_key, base_url, model = _get_llm_config()
         self.llm_api_key = api_key
         self.llm_api_base_url = base_url

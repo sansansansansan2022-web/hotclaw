@@ -28,6 +28,7 @@ from app.core.logger import setup_logging, get_logger
 from app.core.tracer import generate_trace_id, set_trace_id
 from app.core.exceptions import HotClawError
 from app.schemas.common import ApiErrorResponse
+from app.services.schema_guard_service import schema_guard_service
 import app.skills  # noqa: F401
 
 # Import routes
@@ -47,6 +48,7 @@ from app.api.reference_source_routes import router as reference_source_router
 from app.api.recommendation_routes import router as recommendation_router
 from app.api.draft_routes import router as draft_router
 from app.api.wechat_routes import router as wechat_router
+from app.api.config_routes import router as config_router
 
 # Import agent implementations to register them
 # 【导入所有智能体】触发注册
@@ -59,6 +61,7 @@ from app.agents.section_writer_agent import SectionWriterAgent
 from app.agents.style_reviewer_agent import StyleReviewerAgent
 from app.agents.structure_reviewer_agent import StructureReviewerAgent
 from app.agents.rewrite_agent import RewriteAgent
+from app.agents.post_process_agent import PostProcessAgent
 from app.agents.content_writer_agent import ContentWriterAgent
 from app.agents.audit_agent import AuditAgent
 from app.agents.account_ops_agent import AccountOpsAgent
@@ -97,6 +100,7 @@ def _register_agents() -> None:
     agent_registry.register(StyleReviewerAgent())
     agent_registry.register(StructureReviewerAgent())
     agent_registry.register(RewriteAgent())
+    agent_registry.register(PostProcessAgent())
     agent_registry.register(ContentWriterAgent())
     agent_registry.register(AuditAgent())
     agent_registry.register(AccountOpsAgent())
@@ -126,6 +130,8 @@ async def lifespan(app: FastAPI):
         logger.warning("database_tables_auto_created")
     else:
         logger.info("database_table_auto_create_skipped")
+
+    await schema_guard_service.assert_runtime_schema()
 
     system_config_init_enabled = _env_flag("HOTCLAW_ENABLE_SYSTEM_CONFIG_INIT", _startup_default_enabled())
     if system_config_init_enabled:
@@ -281,6 +287,7 @@ app.include_router(compose_preview_router)
 app.include_router(reference_source_router)
 app.include_router(draft_router)
 app.include_router(wechat_router)
+app.include_router(config_router)
 
 
 @app.get("/api/v1/health")

@@ -229,6 +229,8 @@ class DraftService:
             "structure_review": task_result_data.get("structure_review"),
             "review_results": task_result_data.get("review_results"),
             "rewrite_result": task_result_data.get("rewrite_result"),
+            "draft_quality_gate": task_result_data.get("draft_quality_gate"),
+            "post_process_result": task_result_data.get("post_process_result"),
             "evaluation": task_result_data.get("evaluation"),
             "created_at": draft.created_at.isoformat() if draft.created_at else None,
             "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,

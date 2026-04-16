@@ -338,6 +338,18 @@ class ArticleAssemblerService:
                 and normalized.get("rewrite_result", {}).get("rewrite_failed")
             ),
         )
+        pipeline.setdefault("quality_gate_checked", bool(normalized.get("draft_quality_gate")))
+        pipeline.setdefault(
+            "quality_gate_passed",
+            None
+            if not isinstance(normalized.get("draft_quality_gate"), dict)
+            else bool(normalized.get("draft_quality_gate", {}).get("passed")),
+        )
+        pipeline.setdefault("post_process_attempted", bool(normalized.get("post_process_result")))
+        pipeline.setdefault(
+            "post_process_used",
+            bool(self._extract_post_process_content(normalized.get("post_process_result"))),
+        )
         pipeline.setdefault("degraded", bool(pipeline.get("fallback_to_content_writer")))
         normalized["content_pipeline"] = pipeline
         return normalized
@@ -400,6 +412,20 @@ class ArticleAssemblerService:
         assembled = self.extract_assembled_article_payload(result_data)
         if not isinstance(result_data, dict):
             return assembled
+
+        post_processed_content = self._extract_post_process_content(result_data.get("post_process_result"))
+        if post_processed_content:
+            finalized = dict(assembled)
+            finalized["content_markdown"] = post_processed_content
+            final_html = self.ensure_content_html(
+                (result_data.get("post_process_result") or {}).get("final_content_html")
+                or (result_data.get("post_process_result") or {}).get("content_html"),
+                post_processed_content,
+            )
+            if final_html:
+                finalized["content_html"] = final_html
+            finalized["word_count"] = self.count_words(post_processed_content)
+            return finalized
 
         rewrite_content = self._extract_rewrite_content(result_data.get("rewrite_result"))
         if not rewrite_content:
@@ -715,6 +741,17 @@ class ArticleAssemblerService:
             rewrite_result.get("revised_content_markdown")
             or rewrite_result.get("content_markdown")
             or rewrite_result.get("content")
+        )
+
+    def _extract_post_process_content(self, post_process_result: Any) -> str:
+        if not isinstance(post_process_result, dict):
+            return ""
+        if post_process_result.get("used_post_process") is False:
+            return ""
+        return self._clean_text(
+            post_process_result.get("final_content_markdown")
+            or post_process_result.get("content_markdown")
+            or post_process_result.get("content")
         )
 
     def _title_candidate_to_text(self, value: Any) -> str | None:
