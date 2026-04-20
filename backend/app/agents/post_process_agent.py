@@ -8,6 +8,7 @@ from typing import Any
 
 from app.agents.base import AgentResult, BaseAgent
 from app.services.article_assembler_service import article_assembler_service
+from app.services.post_process_service import post_process_service
 
 
 class PostProcessAgent(BaseAgent):
@@ -113,6 +114,8 @@ class PostProcessAgent(BaseAgent):
     )
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
+        return self._success(post_process_service.prepare(formatter=self, input_data=input_data))
+
         gate = input_data.get("draft_quality_gate") if isinstance(input_data.get("draft_quality_gate"), dict) else {}
         if gate.get("passed") is False:
             return self._success(

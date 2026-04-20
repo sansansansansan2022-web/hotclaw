@@ -30,10 +30,10 @@ class TestAgentContracts:
     """Test that all 6 agents have valid contracts."""
 
     @pytest.mark.parametrize("agent_class,expected_id,expected_skills", [
-        (ProfileAgent, "profile_agent", []),
+        (ProfileAgent, "profile_agent", ["profile_parse_skill"]),
         (HotTopicAgent, "hot_topic_agent", ["hot_topic_fetch_skill"]),
         (TopicPlannerAgent, "topic_planner_agent", []),
-        (TitleGeneratorAgent, "title_generator_agent", []),
+        (TitleGeneratorAgent, "title_generator_agent", ["title_generate_skill"]),
         (ContentWriterAgent, "content_writer_agent", []),
         (AuditAgent, "audit_agent", []),
     ])
