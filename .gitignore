@@ -55,3 +55,21 @@ nul
 tmp/
 files\ \(1\).zip
 files\ \(1\)/
+
+# HotClaw local artifacts
+backend/.tmp/
+test-results/
+tmp_target.docx
+tmp_template.docx
+hotclaw-images.tar
+
+# Local deployment/build work copies
+.modelscope-hotclaw-space/
+.modelscope-hotclaw1-space/
+.stable-build/
+
+# Local pytest temp workdirs
+backend/pytest-cache-files-*/
+
+# Local Codex/plugin source workdirs
+.codex-humanizer-zh-source/
