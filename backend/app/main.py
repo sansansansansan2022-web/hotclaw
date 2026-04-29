@@ -83,6 +83,11 @@ def _startup_default_enabled() -> bool:
     return str(settings.app_env or "").strip().lower() == "production"
 
 
+def _single_worker_startup_default_enabled() -> bool:
+    """Enable startup helpers that are only safe in local single-process runs."""
+    return str(settings.app_env or "").strip().lower() in {"development", "dev", "local"}
+
+
 def _register_agents() -> None:
     """
     Register all agents into the registry.
@@ -133,9 +138,28 @@ async def lifespan(app: FastAPI):
 
     await schema_guard_service.assert_runtime_schema()
 
+    from app.db.session import async_session_factory
+
+    recovery_enabled = _env_flag(
+        "HOTCLAW_RECOVER_INTERRUPTED_TASKS_ON_STARTUP",
+        _single_worker_startup_default_enabled(),
+    )
+    if recovery_enabled:
+        from app.services.task_service import task_service
+
+        try:
+            async with async_session_factory() as db:
+                recovered_count = await task_service.recover_interrupted_active_tasks(db)
+            if recovered_count:
+                logger.warning("startup_interrupted_tasks_recovered", count=recovered_count)
+        except OperationalError as exc:
+            logger.error("startup_interrupted_task_recovery_failed", error=str(exc))
+            raise
+    else:
+        logger.info("startup_interrupted_task_recovery_disabled")
+
     system_config_init_enabled = _env_flag("HOTCLAW_ENABLE_SYSTEM_CONFIG_INIT", _startup_default_enabled())
     if system_config_init_enabled:
-        from app.db.session import async_session_factory
         from app.services.system_config_service import init_default_configs
 
         try:
@@ -168,9 +192,25 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("account_scheduler_disabled")
 
+    recommendation_scheduler_enabled = _env_flag(
+        "HOTCLAW_ENABLE_RECOMMENDATION_SCHEDULER",
+        _single_worker_startup_default_enabled(),
+    )
+    recommendation_scheduler = None
+    if recommendation_scheduler_enabled:
+        from app.scheduler.recommendation_scheduler import recommendation_scheduler as rec_scheduler
+
+        recommendation_scheduler = rec_scheduler
+        await recommendation_scheduler.start()
+        logger.info("recommendation_scheduler_enabled")
+    else:
+        logger.info("recommendation_scheduler_disabled")
+
     logger.info("app_started", env=settings.app_env, debug=settings.app_debug)
     yield
     # ===== SHUTDOWN =====
+    if recommendation_scheduler is not None:
+        await recommendation_scheduler.stop()
     if account_scheduler is not None:
         await account_scheduler.stop()
     logger.info("app_shutdown")

@@ -46,5 +46,14 @@ class AccountRunDispatchService:
         )
         return task
 
+    def cancel(self, task_id: str) -> bool:
+        """Cancel an in-process account run if this backend owns it."""
+        task = self._background_tasks.pop(task_id, None)
+        if task is None:
+            return False
+        task.cancel()
+        logger.warning("account_run_background_cancelled", task_id=task_id)
+        return True
+
 
 account_run_dispatch_service = AccountRunDispatchService()

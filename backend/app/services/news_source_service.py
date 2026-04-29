@@ -49,6 +49,27 @@ DEFAULT_NEWS_FEEDS: list[dict[str, Any]] = [
         "authority": 0.76,
         "tags": ["ai", "startup", "product", "technology", "industry"],
     },
+    {
+        "key": "venturebeat_ai",
+        "label": "VentureBeat AI",
+        "url": "https://venturebeat.com/category/ai/feed/",
+        "authority": 0.74,
+        "tags": ["ai", "enterprise", "agent", "llm", "developer", "industry"],
+    },
+    {
+        "key": "theverge_ai",
+        "label": "The Verge AI",
+        "url": "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
+        "authority": 0.74,
+        "tags": ["ai", "product", "technology", "industry", "agent"],
+    },
+    {
+        "key": "ai_news",
+        "label": "AI News",
+        "url": "https://www.artificialintelligence-news.com/feed/",
+        "authority": 0.70,
+        "tags": ["ai", "enterprise", "agent", "llm", "model", "industry"],
+    },
 ]
 
 
@@ -147,7 +168,13 @@ class NewsSourceService:
         ]
         if not raw_queries:
             raw_queries = [str(item).strip() for item in (query_plan.get("search_terms") or []) if str(item).strip()]
-        queries = self._dedupe_strings(raw_queries)[:3]
+        live_queries = [
+            "AI agents",
+            "LLM agents",
+            "AI coding tools",
+            "artificial intelligence startups",
+        ]
+        queries = self._dedupe_strings([*live_queries, *raw_queries])[:4]
         if not queries:
             diagnostics.append(
                 {
@@ -170,7 +197,7 @@ class NewsSourceService:
         async def _fetch_query(query: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             feed_url = (
                 "https://news.google.com/rss/search?"
-                f"q={quote_plus(query + ' when:7d')}&hl=en-US&gl=US&ceid=US:en"
+                f"q={quote_plus(query + ' when:1d')}&hl=en-US&gl=US&ceid=US:en"
             )
             try:
                 response = await client.get(feed_url)
@@ -438,7 +465,7 @@ class NewsSourceService:
             overlap = len(feed_tags & keyword_set)
             scored.append((overlap, feed))
         scored.sort(key=lambda item: (item[0], float(item[1]["authority"])), reverse=True)
-        return [feed for _, feed in scored[:4]]
+        return [feed for _, feed in scored[:6]]
 
     def _build_news_candidate(
         self,
@@ -451,7 +478,7 @@ class NewsSourceService:
         account_keywords: list[str],
         topic_tags: list[str],
     ) -> dict[str, Any] | None:
-        title = str(entry.get("title") or "").strip()
+        title = unescape(str(entry.get("title") or "")).strip()
         url = str(entry.get("url") or "").strip()
         if not title or not url:
             return None
@@ -630,7 +657,7 @@ class NewsSourceService:
                 return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
             if "T" in text:
                 parsed = datetime.fromisoformat(text)
-                return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
             parsed = parsedate_to_datetime(text)
             return parsed.astimezone(timezone.utc) if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
         except Exception:

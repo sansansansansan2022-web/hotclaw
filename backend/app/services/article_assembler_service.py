@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import ast
 from copy import deepcopy
 from html import escape
 from typing import Any
@@ -470,9 +471,9 @@ class ArticleAssemblerService:
         content = content if isinstance(content, dict) else {}
 
         topic = (
-            self._clean_text(content.get("selected_topic"))
-            or self._clean_text(topics_data.get("selected_topic"))
-            or self._clean_text(titles_data.get("selected_topic"))
+            self._structured_text(content.get("selected_topic"), "title", "topic", "text", "angle")
+            or self._structured_text(topics_data.get("selected_topic"), "title", "topic", "text", "angle")
+            or self._structured_text(titles_data.get("selected_topic"), "title", "topic", "text", "angle")
         )
         if topic:
             return topic
@@ -481,7 +482,7 @@ class ArticleAssemblerService:
         if isinstance(topic_items, list):
             for item in topic_items:
                 if isinstance(item, dict):
-                    candidate = self._clean_text(item.get("title"))
+                    candidate = self._structured_text(item, "title", "topic", "text", "angle")
                     if candidate:
                         return candidate
         return ""
@@ -756,10 +757,44 @@ class ArticleAssemblerService:
 
     def _title_candidate_to_text(self, value: Any) -> str | None:
         if isinstance(value, str):
-            return self._clean_text(value)
+            return self._structured_text(value, "text", "title")
         if isinstance(value, dict):
-            return self._clean_text(value.get("text") or value.get("title"))
+            return self._structured_text(value, "text", "title")
         return None
+
+    def _structured_text(self, value: Any, *preferred_keys: str) -> str:
+        """Return human-facing text from dict-like LLM outputs or stringified dicts."""
+        if value is None:
+            return ""
+        if isinstance(value, dict):
+            for key in preferred_keys:
+                text = self._clean_text(value.get(key))
+                if text:
+                    return text
+            return ""
+        if isinstance(value, list):
+            for item in value:
+                text = self._structured_text(item, *preferred_keys)
+                if text:
+                    return text
+            return ""
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("{") and text.endswith("}"):
+                parsed = None
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    try:
+                        parsed = ast.literal_eval(text)
+                    except (SyntaxError, ValueError):
+                        parsed = None
+                if isinstance(parsed, (dict, list)):
+                    structured = self._structured_text(parsed, *preferred_keys)
+                    if structured:
+                        return structured
+            return self._clean_text(text)
+        return self._clean_text(value)
 
     def _normalize_string_list(self, value: Any) -> list[str]:
         if not isinstance(value, list):

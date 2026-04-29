@@ -1,9 +1,56 @@
 """System configuration service."""
 
+import json
 from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.tables import SystemConfigModel
+
+
+IMAGE_GENERATION_PROVIDER_PRESETS: list[dict[str, str]] = [
+    {
+        "provider_id": "dashscope",
+        "name": "Alibaba DashScope / Wan",
+        "default_model": "wan2.7-image",
+        "default_base_url": "https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation",
+        "api_key_hint": "DASHSCOPE_API_KEY",
+    },
+    {
+        "provider_id": "openai",
+        "name": "OpenAI Images",
+        "default_model": "gpt-image-1.5",
+        "default_base_url": "https://api.openai.com/v1/images/generations",
+        "api_key_hint": "OPENAI_API_KEY",
+    },
+    {
+        "provider_id": "google_vertex",
+        "name": "Google Vertex AI Imagen",
+        "default_model": "imagen-4.0-generate-001",
+        "default_base_url": "",
+        "api_key_hint": "Google Cloud ADC or service account",
+    },
+    {
+        "provider_id": "stability",
+        "name": "Stability AI",
+        "default_model": "stable-image-core",
+        "default_base_url": "https://api.stability.ai/v2beta/stable-image/generate/core",
+        "api_key_hint": "STABILITY_API_KEY",
+    },
+    {
+        "provider_id": "volcengine",
+        "name": "Volcengine Seedream",
+        "default_model": "doubao-seedream-4-5-251128",
+        "default_base_url": "https://ark.cn-beijing.volces.com/api/v3/images/generations",
+        "api_key_hint": "LAS_API_KEY or Volcengine credentials",
+    },
+    {
+        "provider_id": "custom",
+        "name": "Custom / proxy",
+        "default_model": "",
+        "default_base_url": "",
+        "api_key_hint": "Provider-specific API key",
+    },
+]
 
 
 # Default configuration keys and their values
@@ -81,6 +128,77 @@ DEFAULT_CONFIGS: list[dict] = [
         "is_system": False,
         "requires_restart": False,
     },
+    # Image assets
+    {
+        "key": "image_generation_enabled",
+        "value": "false",
+        "value_type": "boolean",
+        "description": "Enable AI image generation for draft preview image assets.",
+        "category": "image_assets",
+        "is_sensitive": False,
+        "is_system": True,
+        "requires_restart": False,
+    },
+    {
+        "key": "image_generation_provider",
+        "value": "dashscope",
+        "value_type": "string",
+        "description": "Provider used for AI image generation. This is independent from the default text LLM provider.",
+        "category": "image_assets",
+        "is_sensitive": False,
+        "is_system": True,
+        "requires_restart": False,
+    },
+    {
+        "key": "image_generation_model",
+        "value": "wan2.7-image",
+        "value_type": "string",
+        "description": "Default AI image generation model used by the future image asset pipeline.",
+        "category": "image_assets",
+        "is_sensitive": False,
+        "is_system": True,
+        "requires_restart": False,
+    },
+    {
+        "key": "image_generation_api_key",
+        "value": "",
+        "value_type": "string",
+        "description": "API key for the selected image generation provider.",
+        "category": "image_assets",
+        "is_sensitive": True,
+        "is_system": True,
+        "requires_restart": False,
+    },
+    {
+        "key": "image_generation_base_url",
+        "value": "https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation",
+        "value_type": "string",
+        "description": "Base URL or endpoint for the selected image generation provider.",
+        "category": "image_assets",
+        "is_sensitive": False,
+        "is_system": True,
+        "requires_restart": False,
+    },
+    {
+        "key": "image_generation_provider_presets",
+        "value": json.dumps(IMAGE_GENERATION_PROVIDER_PRESETS, ensure_ascii=False),
+        "value_type": "json",
+        "description": "Common image generation provider presets for the settings UI.",
+        "category": "image_assets",
+        "is_sensitive": False,
+        "is_system": True,
+        "requires_restart": False,
+    },
+    {
+        "key": "image_search_provider",
+        "value": "none",
+        "value_type": "string",
+        "description": "Optional external image search provider. Leave as none until a search API is wired.",
+        "category": "image_assets",
+        "is_sensitive": False,
+        "is_system": True,
+        "requires_restart": False,
+    },
     # Log
     {
         "key": "log_level",
@@ -145,6 +263,8 @@ DEFAULT_CONFIGS: list[dict] = [
         "requires_restart": False,
     },
 ]
+
+REFRESHABLE_DEFAULT_CONFIG_KEYS = {"image_generation_provider_presets"}
 
 
 class SystemConfigService:
@@ -228,6 +348,23 @@ class SystemConfigService:
         )
         return list(result.scalars().all())
 
+    async def get_image_generation_config(self) -> dict[str, Any]:
+        """Return the current image generation runtime configuration."""
+        return {
+            "provider": await self.get_typed_value("image_generation_provider", "dashscope"),
+            "model": await self.get_typed_value("image_generation_model", "wan2.7-image"),
+            "enabled": await self.get_typed_value("image_generation_enabled", False),
+            "api_key": await self.get_typed_value("image_generation_api_key", ""),
+            "base_url": await self.get_typed_value(
+                "image_generation_base_url",
+                "https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation",
+            ),
+            "provider_presets": await self.get_typed_value(
+                "image_generation_provider_presets",
+                IMAGE_GENERATION_PROVIDER_PRESETS,
+            ),
+        }
+
     async def to_dict(self, mask_sensitive: bool = True) -> dict[str, Any]:
         """Convert all configs to a dictionary, optionally masking sensitive values."""
         configs = await self.get_all()
@@ -249,5 +386,13 @@ async def init_default_configs(db: AsyncSession) -> None:
         if not existing:
             config = SystemConfigModel(**cfg)
             db.add(config)
+        elif cfg["key"] in REFRESHABLE_DEFAULT_CONFIG_KEYS:
+            existing.value = cfg["value"]
+            existing.value_type = cfg["value_type"]
+            existing.description = cfg["description"]
+            existing.category = cfg["category"]
+            existing.is_sensitive = cfg["is_sensitive"]
+            existing.is_system = cfg["is_system"]
+            existing.requires_restart = cfg["requires_restart"]
 
     await db.commit()

@@ -28,11 +28,12 @@ import type {
   RecommendationBucketedResponse,
   ReferenceSource,
 } from "@/types";
-import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, SkeletonRows, Textarea } from "@/components/console/ui";
+import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Select, SkeletonRows, Textarea } from "@/components/console/ui";
 import { Icon } from "@/components/console/icons";
 import { useAppStore } from "@/store/appStore";
 
 const MIN_COUNT_OPTIONS = [5, 8, 10] as const;
+const RECOMMENDATION_PAGE_SIZE_OPTIONS = [5, 10, 20] as const;
 
 function syncTone(status: string): "success" | "warning" | "danger" | "muted" {
   if (status === "synced" || status === "manual_only") return "success";
@@ -93,6 +94,143 @@ function scoreLabel(value: number | null) {
   return value.toFixed(2);
 }
 
+function formatRecommendationPublishedAt(value: string | null, locale: "en" | "zh-CN") {
+  if (!value) return null;
+  const label = locale === "zh-CN" ? "\u53d1\u5e03\u65f6\u95f4" : "Published";
+  return `${label} ${formatDateTime(value)}`;
+}
+
+function paginateRecommendations(items: RecommendedContentItem[], page: number, pageSize: number) {
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  const currentPage = Math.min(Math.max(page, 1), pageCount);
+  const start = (currentPage - 1) * pageSize;
+  return {
+    currentPage,
+    pageCount,
+    pageItems: items.slice(start, start + pageSize),
+  };
+}
+
+function RecommendationPagination({
+  page,
+  pageCount,
+  onPageChange,
+  locale,
+}: {
+  page: number;
+  pageCount: number;
+  onPageChange: (page: number) => void;
+  locale: "en" | "zh-CN";
+}) {
+  if (pageCount <= 1) return null;
+  const pages = Array.from({ length: pageCount }, (_, index) => index + 1);
+
+  return (
+    <div data-testid="recommendation-pagination" className="flex flex-wrap items-center justify-end gap-2 pt-1">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="whitespace-nowrap"
+        disabled={page <= 1}
+        onClick={() => onPageChange(page - 1)}
+      >
+        {locale === "zh-CN" ? "\u4e0a\u4e00\u9875" : "Previous"}
+      </Button>
+      {pages.map((pageNumber) => (
+        <button
+          key={pageNumber}
+          type="button"
+          onClick={() => onPageChange(pageNumber)}
+          className={`h-9 min-w-9 rounded-xl px-3 text-sm font-medium transition ${
+            pageNumber === page
+              ? "bg-brand-600 text-white shadow-sm"
+              : "border border-slate-200 bg-white text-slate-500 hover:border-brand-200 hover:text-brand-700"
+          }`}
+          aria-current={pageNumber === page ? "page" : undefined}
+        >
+          {pageNumber}
+        </button>
+      ))}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="whitespace-nowrap"
+        disabled={page >= pageCount}
+        onClick={() => onPageChange(page + 1)}
+      >
+        {locale === "zh-CN" ? "\u4e0b\u4e00\u9875" : "Next"}
+      </Button>
+    </div>
+  );
+}
+
+function RecommendationItemCard({
+  item,
+  locale,
+  selected,
+  muted = false,
+  busy,
+  addLabel,
+  removeLabel,
+  onToggle,
+}: {
+  item: RecommendedContentItem;
+  locale: "en" | "zh-CN";
+  selected: boolean;
+  muted?: boolean;
+  busy: boolean;
+  addLabel: string;
+  removeLabel: string;
+  onToggle: () => void;
+}) {
+  const publishedAt = formatRecommendationPublishedAt(item.source.published_at, locale);
+  const sourceUrl = item.source.source_url?.trim();
+  const sourceLinkLabel = locale === "zh-CN" ? "\u67e5\u770b\u539f\u6587" : "View Source";
+
+  return (
+    <div className={`rounded-2xl border border-slate-200 p-4 ${muted ? "bg-slate-50/70" : ""}`}>
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-slate-900">{item.title}</p>
+            <Badge tone={muted ? "warning" : recommendationTone(item)}>{scoreLabel(item.scores.overall)}</Badge>
+            <Badge tone="muted">{item.source.source_name || item.source.source_type}</Badge>
+            {publishedAt ? (
+              <Badge data-testid="recommendation-published-at" tone="muted">
+                {publishedAt}
+              </Badge>
+            ) : null}
+          </div>
+          {item.summary ? <p className="mt-2 text-sm leading-6 text-slate-600">{item.summary}</p> : null}
+          <p className="mt-2 text-sm text-slate-500">{item.rationale.reason}</p>
+        </div>
+        <div className="flex shrink-0 flex-col gap-2 md:w-36 md:items-stretch">
+          {sourceUrl ? (
+            <a
+              data-testid="recommendation-source-link"
+              href={sourceUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="inline-flex h-9 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700"
+            >
+              {sourceLinkLabel}
+            </a>
+          ) : null}
+          <Button
+            size="sm"
+            variant={selected ? "secondary" : "primary"}
+            className="w-full whitespace-nowrap md:w-36"
+            disabled={busy}
+            onClick={onToggle}
+          >
+            {selected ? removeLabel : addLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
   const { locale } = useI18n();
   const router = useRouter();
@@ -105,6 +243,9 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
   const [recommendations, setRecommendations] = useState<RecommendationBucketedResponse | null>(null);
   const [preview, setPreview] = useState<ComposePreviewResponse | null>(null);
   const [minCount, setMinCount] = useState<(typeof MIN_COUNT_OPTIONS)[number]>(5);
+  const [recommendationPageSize, setRecommendationPageSize] = useState<(typeof RECOMMENDATION_PAGE_SIZE_OPTIONS)[number]>(5);
+  const [highRecommendationPage, setHighRecommendationPage] = useState(1);
+  const [extendedRecommendationPage, setExtendedRecommendationPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [recommendationError, setRecommendationError] = useState<string | null>(null);
@@ -125,20 +266,22 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
         description: "先把推荐资讯和参考文章加入本次任务，再生成预览并提交正式生成。",
         backAccount: "返回账号",
         backWorkspace: "返回工作台",
-        refreshRecommendations: "刷新推荐",
+        recommendationRefreshCadence: "每 6 小时自动更新",
+        refreshRecommendations: "立即刷新",
+        refreshingRecommendations: "刷新中...",
         bootstrapError: "无法初始化任务草稿。",
         loadError: "无法加载新建任务页面。",
-        recommendationError: "无法刷新推荐资讯。",
+        recommendationError: "无法加载推荐资讯。",
         previewError: "生成预览失败。",
         submitError: "提交生成失败。",
         sessionSummary: "当前任务草稿",
         accountSummary: "账号摘要",
         recommendationZone: "推荐资讯",
-        recommendationDesc: "根据账号定位、受众和内容方向返回高相关候选；不足时会单独给出扩展推荐。",
+        recommendationDesc: "根据账号定位、受众和内容方向返回高相关候选；后台每 6 小时自动更新。",
         highRelevance: "高相关推荐",
         extended: "扩展推荐",
         noRecommendations: "还没有推荐资讯",
-        noRecommendationsDesc: "先刷新推荐，或者稍后再回来查看可用来源。",
+        noRecommendationsDesc: "后台会每 6 小时自动刷新一次；你也可以稍后再回来查看可用来源。",
         selectedSources: "已加入本次创作的推荐资讯",
         selectedSourcesDesc: "这些推荐资讯会进入预览和正式生成。",
         noSelectedSources: "还没有加入推荐资讯",
@@ -184,20 +327,22 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
         description: "Pick recommendation candidates and reference articles first, then preview the angle before submitting generation.",
         backAccount: "Back to Account",
         backWorkspace: "Back to Workspace",
-        refreshRecommendations: "Refresh Recommendations",
+        recommendationRefreshCadence: "Auto refreshes every 6 hours",
+        refreshRecommendations: "Refresh Now",
+        refreshingRecommendations: "Refreshing...",
         bootstrapError: "Unable to initialize the task draft.",
         loadError: "Unable to load the new task flow.",
-        recommendationError: "Unable to refresh recommendations.",
+        recommendationError: "Unable to load recommendations.",
         previewError: "Failed to build the compose preview.",
         submitError: "Failed to submit generation.",
         sessionSummary: "Current Task Draft",
         accountSummary: "Account Summary",
         recommendationZone: "Recommended News",
-        recommendationDesc: "Recommendations are ranked to the account's positioning, audience, and content lane, then split into high relevance and extended buckets.",
+        recommendationDesc: "Recommendations are ranked to the account's positioning, audience, and content lane, then refreshed automatically every 6 hours.",
         highRelevance: "High Relevance",
         extended: "Extended Picks",
         noRecommendations: "No recommendations yet",
-        noRecommendationsDesc: "Refresh recommendations now, or come back later when more sources are available.",
+        noRecommendationsDesc: "Recommendations refresh automatically every 6 hours. Come back later if the background cache is still empty.",
         selectedSources: "Recommendation Basket",
         selectedSourcesDesc: "These recommendation items will feed the preview and the formal generation input.",
         noSelectedSources: "No selected recommendations yet",
@@ -264,10 +409,7 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
   const loadRecommendationsForCount = async (targetMinCount: (typeof MIN_COUNT_OPTIONS)[number]) => {
     setRecommendationLoading(true);
     try {
-      let response = await getRecommendations(accountId, { min_count: targetMinCount });
-      if (response.total === 0) {
-        response = await refreshRecommendations(accountId, { min_count: targetMinCount });
-      }
+      const response = await getRecommendations(accountId, { min_count: targetMinCount });
       setRecommendationError(null);
       setRecommendations(response);
     } catch (error) {
@@ -363,6 +505,11 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
     void loadRecommendationsForCount(minCount);
   }, [accountId, sessionId, minCount]);
 
+  useEffect(() => {
+    setHighRecommendationPage(1);
+    setExtendedRecommendationPage(1);
+  }, [recommendations, recommendationPageSize]);
+
   const selectedRecommendationItems = useMemo(() => {
     if (!recommendations) {
       return [];
@@ -375,6 +522,17 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
       .map((id) => byId.get(id))
       .filter((item): item is RecommendedContentItem => Boolean(item));
   }, [recommendations, selectedRecommendationIds]);
+
+  const highRecommendationPagination = paginateRecommendations(
+    recommendations?.high_relevance_items ?? [],
+    highRecommendationPage,
+    recommendationPageSize,
+  );
+  const extendedRecommendationPagination = paginateRecommendations(
+    recommendations?.extended_items ?? [],
+    extendedRecommendationPage,
+    recommendationPageSize,
+  );
 
   const selectedReferenceItems = useMemo(() => {
     const byId = new Map<number, ReferenceSource>();
@@ -599,17 +757,25 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
       setLegacyRunning(false);
     }
   };
+
   const manualRefreshRecommendations = async () => {
     try {
       setRecommendationLoading(true);
       const response = await refreshRecommendations(accountId, { min_count: minCount });
       setRecommendationError(null);
       setRecommendations(response);
+      pushToast({
+        tone: "success",
+        title: copy.refreshRecommendations,
+        message: `${copy.generatedAt}: ${formatDateTime(response.refreshed_at)}`,
+      });
     } catch (refreshError) {
+      const message = refreshError instanceof Error ? refreshError.message : copy.recommendationError;
+      setRecommendationError(message);
       pushToast({
         tone: "danger",
         title: copy.recommendationError,
-        message: refreshError instanceof Error ? refreshError.message : copy.recommendationError,
+        message,
       });
     } finally {
       setRecommendationLoading(false);
@@ -630,10 +796,6 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
             <Link href={`/accounts/${accountId}/workspace`}>
               <Button variant="secondary">{copy.backWorkspace}</Button>
             </Link>
-            <Button variant="secondary" onClick={() => void manualRefreshRecommendations()} disabled={recommendationLoading}>
-              <Icon name="refresh" className="h-4 w-4" />
-              {copy.refreshRecommendations}
-            </Button>
           </>
         }
       />
@@ -684,20 +846,57 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
           </div>
 
           <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-            <Card title={copy.recommendationZone} description={copy.recommendationDesc}>
+            <Card
+              title={copy.recommendationZone}
+              description={copy.recommendationDesc}
+              action={
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Badge tone="muted">{copy.recommendationRefreshCadence}</Badge>
+                  <Button
+                    data-testid="recommendation-refresh-button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void manualRefreshRecommendations()}
+                    disabled={recommendationLoading}
+                  >
+                    <Icon name="refresh" className={`h-4 w-4 ${recommendationLoading ? "animate-spin" : ""}`} />
+                    {recommendationLoading ? copy.refreshingRecommendations : copy.refreshRecommendations}
+                  </Button>
+                </div>
+              }
+            >
               <div className="space-y-5">
-                <div className="flex flex-wrap items-center gap-2">
-                  {MIN_COUNT_OPTIONS.map((value) => (
-                    <Button
-                      key={value}
-                      size="sm"
-                      variant={minCount === value ? "primary" : "secondary"}
-                      onClick={() => setMinCount(value)}
-                      disabled={recommendationLoading}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {MIN_COUNT_OPTIONS.map((value) => (
+                      <Button
+                        key={value}
+                        size="sm"
+                        variant={minCount === value ? "primary" : "secondary"}
+                        onClick={() => setMinCount(value)}
+                        disabled={recommendationLoading}
+                      >
+                        {value}
+                      </Button>
+                    ))}
+                  </div>
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-500">
+                    <span>{locale === "zh-CN" ? "\u6bcf\u9875\u663e\u793a" : "Per page"}</span>
+                    <Select
+                      data-testid="recommendation-page-size"
+                      className="h-9 w-28 rounded-xl py-1.5 text-xs"
+                      value={recommendationPageSize}
+                      onChange={(event) =>
+                        setRecommendationPageSize(Number(event.target.value) as (typeof RECOMMENDATION_PAGE_SIZE_OPTIONS)[number])
+                      }
                     >
-                      {value}
-                    </Button>
-                  ))}
+                      {RECOMMENDATION_PAGE_SIZE_OPTIONS.map((value) => (
+                        <option key={value} value={value}>
+                          {locale === "zh-CN" ? `${value} \u6761` : `${value}`}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
                 </div>
 
                 {recommendations && recommendations.shortage_notice.status !== "ok" ? (
@@ -749,32 +948,27 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
                   </div>
                   {recommendations?.high_relevance_items.length ? (
                     <div className="space-y-3">
-                      {recommendations.high_relevance_items.map((item) => {
+                      {highRecommendationPagination.pageItems.map((item) => {
                         const selected = selectedRecommendationIds.includes(item.id);
                         return (
-                          <div key={item.id} className="rounded-2xl border border-slate-200 p-4">
-                            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                                  <Badge tone={recommendationTone(item)}>{scoreLabel(item.scores.overall)}</Badge>
-                                  <Badge tone="muted">{item.source.source_name || item.source.source_type}</Badge>
-                                </div>
-                                {item.summary ? <p className="mt-2 text-sm leading-6 text-slate-600">{item.summary}</p> : null}
-                                <p className="mt-2 text-sm text-slate-500">{item.rationale.reason}</p>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant={selected ? "secondary" : "primary"}
-                                disabled={selectionBusyKey === `rec:${item.id}`}
-                                onClick={() => void toggleRecommendation(item)}
-                              >
-                                {selected ? copy.removeFromBasket : copy.addToCreation}
-                              </Button>
-                            </div>
-                          </div>
+                          <RecommendationItemCard
+                            key={item.id}
+                            item={item}
+                            locale={locale}
+                            selected={selected}
+                            busy={selectionBusyKey === `rec:${item.id}`}
+                            addLabel={copy.addToCreation}
+                            removeLabel={copy.removeFromBasket}
+                            onToggle={() => void toggleRecommendation(item)}
+                          />
                         );
                       })}
+                      <RecommendationPagination
+                        page={highRecommendationPagination.currentPage}
+                        pageCount={highRecommendationPagination.pageCount}
+                        locale={locale}
+                        onPageChange={setHighRecommendationPage}
+                      />
                     </div>
                   ) : (
                     <EmptyState title={copy.noRecommendations} description={copy.noRecommendationsDesc} />
@@ -788,32 +982,28 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
                       <Badge tone="warning">{recommendations.coverage.extended_count}</Badge>
                     </div>
                     <div className="space-y-3">
-                      {recommendations.extended_items.map((item) => {
+                      {extendedRecommendationPagination.pageItems.map((item) => {
                         const selected = selectedRecommendationIds.includes(item.id);
                         return (
-                          <div key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-                            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                              <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                                  <Badge tone="warning">{scoreLabel(item.scores.overall)}</Badge>
-                                  <Badge tone="muted">{item.source.source_name || item.source.source_type}</Badge>
-                                </div>
-                                {item.summary ? <p className="mt-2 text-sm leading-6 text-slate-600">{item.summary}</p> : null}
-                                <p className="mt-2 text-sm text-slate-500">{item.rationale.reason}</p>
-                              </div>
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                disabled={selectionBusyKey === `rec:${item.id}`}
-                                onClick={() => void toggleRecommendation(item)}
-                              >
-                                {selected ? copy.removeFromBasket : copy.addToCreation}
-                              </Button>
-                            </div>
-                          </div>
+                          <RecommendationItemCard
+                            key={item.id}
+                            item={item}
+                            locale={locale}
+                            selected={selected}
+                            muted
+                            busy={selectionBusyKey === `rec:${item.id}`}
+                            addLabel={copy.addToCreation}
+                            removeLabel={copy.removeFromBasket}
+                            onToggle={() => void toggleRecommendation(item)}
+                          />
                         );
                       })}
+                      <RecommendationPagination
+                        page={extendedRecommendationPagination.currentPage}
+                        pageCount={extendedRecommendationPagination.pageCount}
+                        locale={locale}
+                        onPageChange={setExtendedRecommendationPage}
+                      />
                     </div>
                   </div>
                 ) : null}
@@ -824,22 +1014,16 @@ export function AccountComposeFlowPage({ accountId }: { accountId: string }) {
               {selectedRecommendationItems.length ? (
                 <div className="space-y-3">
                   {selectedRecommendationItems.map((item) => (
-                    <div key={item.id} className="rounded-2xl border border-slate-200 p-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{item.title}</p>
-                          <p className="mt-1 text-sm text-slate-500">{truncate(item.summary || item.rationale.reason || "", 120)}</p>
-                        </div>
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          disabled={selectionBusyKey === `rec:${item.id}`}
-                          onClick={() => void toggleRecommendation(item)}
-                        >
-                          {copy.removeFromBasket}
-                        </Button>
-                      </div>
-                    </div>
+                    <RecommendationItemCard
+                      key={item.id}
+                      item={item}
+                      locale={locale}
+                      selected
+                      busy={selectionBusyKey === `rec:${item.id}`}
+                      addLabel={copy.addToCreation}
+                      removeLabel={copy.removeFromBasket}
+                      onToggle={() => void toggleRecommendation(item)}
+                    />
                   ))}
                 </div>
               ) : (

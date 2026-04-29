@@ -61,6 +61,8 @@ class DraftDetail(BaseModel):
     """Full draft detail."""
     id: int
     task_id: str
+    latest_draft_id: int | None = None
+    is_latest_for_task: bool = True
     account_id: str | None
     account_name: str | None
     title: str
@@ -88,6 +90,8 @@ class DraftDetail(BaseModel):
     structure_review: dict | None = None
     review_results: list | dict | None = None
     rewrite_result: dict | None = None
+    draft_quality_gate: dict | None = None
+    post_process_result: dict | None = None
     evaluation: dict | None = None
     created_at: datetime
     updated_at: datetime

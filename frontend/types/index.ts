@@ -7,7 +7,7 @@ export interface ApiOriginDebugInfo {
   source: ApiOriginSource;
 }
 
-export type TaskStatus = "pending" | "running" | "completed" | "failed";
+export type TaskStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
 export type NodeStatus = "pending" | "running" | "completed" | "failed" | "skipped";
 export type OperationMode = "manual" | "semi_auto" | "full_auto";
 export type PostingFrequency = "daily" | "weekly" | "biweekly" | "monthly";
@@ -46,6 +46,14 @@ export interface TaskCreateData {
   status: TaskStatus;
   created_at: string;
   workflow_id: string;
+}
+
+export interface TaskDeleteData {
+  task_id: string;
+  deleted: boolean;
+  previous_status: TaskStatus | string;
+  stopped_before_delete: boolean;
+  cancelled_worker?: boolean;
 }
 
 export interface TaskDetail {
@@ -1033,9 +1041,47 @@ export interface AuditResultInfo {
   issues: unknown[] | null;
 }
 
+export interface DraftImageSlot {
+  slot_id: string;
+  placement?: string | null;
+  template_id?: string | null;
+  status?: "planned" | "bound" | "injected" | "failed" | string;
+  image_kind?: "cover" | "inline" | "evidence" | "explainer" | string;
+  asset_origin?: "none" | "manual" | "generated" | "extracted" | string;
+  binding_status?: "not_bound" | "bound" | "failed" | string;
+  draft_visibility?: "planned_only" | "visible" | "fallback" | string;
+  fallback_behavior?: "render_without_image" | string;
+  purpose?: string | null;
+  prompt?: string | null;
+  source_hint?: string[] | null;
+  selected_asset_url?: string | null;
+  selected_asset_path?: string | null;
+  caption?: string | null;
+  credit?: string | null;
+  copyright_note?: string | null;
+}
+
+export interface PostProcessResult {
+  used_post_process?: boolean;
+  post_process_skipped?: boolean;
+  skip_reason?: string | null;
+  layout_template?: Record<string, unknown> | null;
+  template_options?: Record<string, unknown>[];
+  layout_blocks?: Record<string, unknown>[];
+  final_content_markdown?: string;
+  final_content_html?: string | null;
+  polishing_summary?: string | null;
+  layout_notes?: string[];
+  image_slots?: DraftImageSlot[];
+  cover_image_prompt?: string | null;
+  wechat_publish_format?: Record<string, unknown>;
+}
+
 export interface DraftDetail {
   id: number;
   task_id: string;
+  latest_draft_id?: number | null;
+  is_latest_for_task?: boolean;
   account_id: string | null;
   account_name: string | null;
   title: string;
@@ -1063,6 +1109,8 @@ export interface DraftDetail {
   structure_review?: ReviewResult | Record<string, unknown> | null;
   review_results?: ReviewResult[] | Record<string, unknown> | null;
   rewrite_result?: RewriteResult | Record<string, unknown> | null;
+  draft_quality_gate?: Record<string, unknown> | null;
+  post_process_result?: PostProcessResult | Record<string, unknown> | null;
   evaluation?: EvaluationSummary | Record<string, unknown> | null;
   created_at: string;
   updated_at: string;

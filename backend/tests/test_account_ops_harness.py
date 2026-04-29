@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, ArticleDraftModel, TaskModel
+from app.services.account_harness_service import account_harness_service
 from app.services.task_service import task_service
 
 
@@ -19,10 +20,10 @@ async def _create_account(client, payload: dict) -> str:
 
 @pytest.mark.asyncio
 async def test_account_run_records_ops_context_and_downgrades_full_auto(client, monkeypatch):
-    async def _noop_background(*args, **kwargs):
+    def _noop_background(*args, **kwargs):
         return None
 
-    monkeypatch.setattr("app.api.account_routes._run_account_task_in_background", _noop_background)
+    monkeypatch.setattr("app.api.account_routes.account_run_dispatch_service.schedule", _noop_background)
 
     account_id = await _create_account(
         client,
@@ -139,3 +140,85 @@ async def test_run_task_uses_effective_mode_for_draft_creation(db_session, monke
     task_result = await db_session.execute(select(TaskModel).where(TaskModel.id == task.id))
     saved_task = task_result.scalar_one()
     assert saved_task.result_data["ops_context"]["run_strategy"]["effective_mode"] == "semi_auto"
+
+
+def _risk_recovery_snapshot(*, trigger_source: str) -> dict:
+    return {
+        "account": {
+            "account_id": "acc-risk-recovery",
+            "name": "Risk Recovery Account",
+            "category": None,
+            "positioning": "AI engineering analysis",
+            "audience": None,
+            "tone_style": None,
+            "content_strategy": None,
+            "is_active": True,
+        },
+        "automation_plan": {"plan_type": "manual"},
+        "reference_sources": [],
+        "recent_tasks": [],
+        "recent_drafts": [],
+        "recent_publishes": [],
+        "signals": {
+            "enabled_reference_source_count": 0,
+            "pending_review_count": 0,
+            "recent_failed_publish_count": 0,
+            "recent_success_publish_count": 0,
+            "recent_failed_task_count": 4,
+            "preferred_content_lane": "AI engineering",
+        },
+        "trigger": {
+            "source": trigger_source,
+            "requested_plan_type": "manual",
+        },
+    }
+
+
+def test_manual_risk_recovery_keeps_post_process_enabled():
+    ops_context = account_harness_service._normalize_ops_context(
+        _risk_recovery_snapshot(trigger_source="manual"),
+        {
+            "account_health": {"status": "risk_recovery", "issues": ["recent failures"]},
+            "operation_stage": "risk_recovery",
+            "run_strategy": {
+                "allow_run": True,
+                "effective_mode": "manual",
+                "allow_auto_publish": False,
+                "allow_reviewers": True,
+                "reviewer_mode": "single",
+                "allow_rewrite": True,
+                "allow_post_process": False,
+            },
+            "ops_notes": [],
+        },
+        fallback_used=False,
+    )
+
+    assert ops_context["trigger"]["source"] == "manual"
+    assert ops_context["operation_stage"] == "risk_recovery"
+    assert ops_context["run_strategy"]["allow_post_process"] is True
+
+
+def test_scheduler_risk_recovery_can_keep_post_process_disabled():
+    ops_context = account_harness_service._normalize_ops_context(
+        _risk_recovery_snapshot(trigger_source="scheduler"),
+        {
+            "account_health": {"status": "risk_recovery", "issues": ["recent failures"]},
+            "operation_stage": "risk_recovery",
+            "run_strategy": {
+                "allow_run": True,
+                "effective_mode": "manual",
+                "allow_auto_publish": False,
+                "allow_reviewers": True,
+                "reviewer_mode": "single",
+                "allow_rewrite": True,
+                "allow_post_process": False,
+            },
+            "ops_notes": [],
+        },
+        fallback_used=False,
+    )
+
+    assert ops_context["trigger"]["source"] == "scheduler"
+    assert ops_context["operation_stage"] == "risk_recovery"
+    assert ops_context["run_strategy"]["allow_post_process"] is False

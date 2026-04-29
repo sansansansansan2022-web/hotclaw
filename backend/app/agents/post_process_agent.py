@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
+import base64
 import re
 from html import escape
 from typing import Any
 
 from app.agents.base import AgentResult, BaseAgent
-from app.services.article_assembler_service import article_assembler_service
+from app.services.image_generation_service import image_generation_service
 from app.services.post_process_service import post_process_service
 
 
 class PostProcessAgent(BaseAgent):
-    """Polish, format, and suggest images after the draft quality gate passes."""
+    """Polish, format, and suggest preview images after the draft quality gate passes."""
 
     agent_id = "post_process_agent"
     name = "Post-process Agent"
-    description = "Prepare a passed draft for human review with WeChat formatting and image placement suggestions."
+    description = "Prepare a passed draft for human review with WeChat formatting and preview image placeholders."
 
     input_schema = {
         "type": "object",
@@ -31,6 +32,7 @@ class PostProcessAgent(BaseAgent):
             "topics": {"type": "object"},
             "account_context": {"type": "object"},
             "source_candidates": {"type": "array"},
+            "reference_digest": {"type": "object"},
         },
         "required": ["draft_quality_gate"],
     }
@@ -114,100 +116,7 @@ class PostProcessAgent(BaseAgent):
     )
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
-        return self._success(post_process_service.prepare(formatter=self, input_data=input_data))
-
-        gate = input_data.get("draft_quality_gate") if isinstance(input_data.get("draft_quality_gate"), dict) else {}
-        if gate.get("passed") is False:
-            return self._success(
-                {
-                    "used_post_process": False,
-                    "post_process_skipped": True,
-                    "skip_reason": "draft_quality_gate_blocked",
-                    "layout_template": None,
-                    "template_options": self._template_options(),
-                    "layout_blocks": [],
-                    "final_content_markdown": "",
-                    "final_content_html": "",
-                    "polishing_summary": "Skipped post-processing because the draft quality gate did not pass.",
-                    "layout_notes": [],
-                    "image_slots": [],
-                    "cover_image_prompt": "",
-                    "wechat_publish_format": {},
-                }
-            )
-
-        article = article_assembler_service.extract_article_payload(
-            {
-                "content": input_data.get("content"),
-                "assembled_article": input_data.get("assembled_article"),
-                "rewrite_result": input_data.get("rewrite_result"),
-                "titles": input_data.get("titles"),
-                "topics": input_data.get("topics"),
-                "outline_plan": input_data.get("outline_plan"),
-                "section_drafts": input_data.get("section_drafts"),
-            }
-        )
-        title = str(article.get("selected_title") or "Untitled").strip()
-        content_markdown = str(article.get("content_markdown") or "").strip()
-        account_context = input_data.get("account_context") if isinstance(input_data.get("account_context"), dict) else {}
-        outline_plan = input_data.get("outline_plan") if isinstance(input_data.get("outline_plan"), dict) else {}
-        template = self._select_template(
-            article=article,
-            account_context=account_context,
-            outline_plan=outline_plan,
-            source_candidates=input_data.get("source_candidates") if isinstance(input_data.get("source_candidates"), list) else [],
-        )
-        final_markdown = self._format_markdown(title, content_markdown)
-        layout_blocks = self._parse_markdown(final_markdown, title=title)
-        final_html = self._render_wechat_html(
-            title=title,
-            summary=str(article.get("summary") or "").strip(),
-            blocks=layout_blocks,
-            template=template,
-            account_context=account_context,
-            outline_plan=outline_plan,
-        )
-        headings = self._extract_headings(final_markdown)
-        image_slots = self._build_image_slots(
-            title=title,
-            headings=headings,
-            source_candidates=input_data.get("source_candidates") if isinstance(input_data.get("source_candidates"), list) else [],
-            template=template,
-        )
-        digest = self._digest(article, final_markdown)
-
-        return self._success(
-            {
-                "used_post_process": True,
-                "layout_template": self._public_template(template),
-                "template_options": self._template_options(),
-                "layout_blocks": self._public_blocks(layout_blocks),
-                "final_content_markdown": final_markdown,
-                "final_content_html": final_html,
-                "polishing_summary": (
-                    f"Applied the {template['name']} template with mobile-first spacing, "
-                    "section hierarchy, highlight callouts, image placement hints, and WeChat inline HTML."
-                ),
-                "layout_notes": self._layout_notes(template),
-                "image_slots": image_slots,
-                "cover_image_prompt": self._cover_prompt(title, account_context, template),
-                "wechat_publish_format": {
-                    "title": title[:64],
-                    "digest": digest,
-                    "template_id": template["id"],
-                    "template_name": template["name"],
-                    "content_format": "wechat_inline_html",
-                    "recommended_preview_image_slot": image_slots[0]["slot_id"] if image_slots else None,
-                    "review_checklist": [
-                        "确认标题、摘要与正文判断一致。",
-                        "确认事实、来源和引用都可追溯。",
-                        "确认图片版权、清晰度和公众号封面裁切效果。",
-                    ],
-                    "needs_human_image_selection": True,
-                    "ready_for_review": True,
-                },
-            }
-        )
+        return self._success(await post_process_service.prepare(formatter=self, input_data=input_data, context=context))
 
     def _template_options(self) -> list[dict[str, Any]]:
         return [self._public_template(template) for template in self.LAYOUT_TEMPLATES]
@@ -244,7 +153,7 @@ class PostProcessAgent(BaseAgent):
             )
         ).lower()
         source_count = len(source_candidates)
-        word_count = int(article.get("word_count") or article_assembler_service.count_words(str(article.get("content_markdown") or "")))
+        word_count = int(article.get("word_count") or self._count_words(str(article.get("content_markdown") or "")))
 
         scores = {template["id"]: 0 for template in self.LAYOUT_TEMPLATES}
         if source_count >= 2 or any(keyword in text for keyword in ("资讯", "新闻", "快讯", "动态", "latest", "news", "brief")):
@@ -275,7 +184,7 @@ class PostProcessAgent(BaseAgent):
         if title and not re.match(r"^#\s+", text):
             text = f"# {title}\n\n{text}" if text else f"# {title}"
         text = re.sub(r"\n{3,}", "\n\n", text)
-        text = re.sub(r"(?<!\n)\n(?!\n|#|[-*] |\d+\. |>|\s*$)", "\n\n", text)
+        text = re.sub(r"(?<!\n)\n(?!\n|#|[-*] |\d+\. |> |\s*$)", "\n\n", text)
         return text.strip()
 
     def _parse_markdown(self, markdown: str, *, title: str) -> list[dict[str, Any]]:
@@ -339,7 +248,7 @@ class PostProcessAgent(BaseAgent):
                 if list_type and list_type != next_type:
                     flush_list()
                 list_type = next_type
-                list_items.append((unordered_match or ordered_match).group(1).strip())  # type: ignore[union-attr]
+                list_items.append((unordered_match or ordered_match).group(1).strip())
                 continue
 
             flush_list()
@@ -372,94 +281,113 @@ class PostProcessAgent(BaseAgent):
         title: str,
         summary: str,
         blocks: list[dict[str, Any]],
+        image_slots: list[dict[str, Any]],
         template: dict[str, Any],
         account_context: dict[str, Any],
         outline_plan: dict[str, Any],
     ) -> str:
         accent = template["accent_color"]
         accent_soft = template["accent_soft"]
-        surface = template["surface"]
         body_background = template["body_background"]
         account_name = str(account_context.get("account_name") or account_context.get("name") or "HotClaw").strip()
         lead_text = self._lead_text(summary, blocks)
         read_minutes = self._read_minutes(blocks)
         ending_cta = str(outline_plan.get("ending_cta") or "").strip()
-        rendered_blocks = self._render_blocks(blocks, template=template)
+        rendered_blocks = self._render_blocks(blocks, image_slots=image_slots, template=template)
+        cover_slot = next((slot for slot in image_slots if slot.get("slot_id") == "cover"), None)
 
         html_parts = [
             (
-                f'<section data-hotclaw-template="{escape(str(template["id"]), quote=True)}" '
-                f'style="max-width:677px;margin:0 auto;background:{body_background};'
-                'padding:0 0 28px 0;color:#1f2937;font-family:-apple-system,BlinkMacSystemFont,'
-                '\'PingFang SC\',\'Microsoft YaHei\',\'Helvetica Neue\',Arial,sans-serif;">'
-            ),
-            (
-                f'<section style="margin:0 0 22px 0;padding:34px 28px 30px;border-radius:0 0 28px 28px;'
-                f'background:{template["hero_background"]};color:#fff;">'
-                f'<p style="margin:0 0 14px 0;font-size:13px;letter-spacing:2px;opacity:.82;">'
-                f'{escape(account_name)} · {escape(str(template["name"]))}</p>'
-                f'<h1 style="margin:0;font-size:28px;line-height:1.28;font-weight:800;letter-spacing:-.4px;">'
-                f'{self._inline(title)}</h1>'
-                f'<p style="margin:18px 0 0 0;font-size:13px;line-height:1.8;opacity:.82;">'
-                f'预计阅读 {read_minutes} 分钟 · 已套用公众号排版模板</p>'
-                '</section>'
+                f'<section class="rich_media" data-hotclaw-template="{escape(str(template["id"]), quote=True)}" '
+                f'style="max-width:677px;margin:0 auto;background:{body_background};color:#3f3f3f;'
+                'word-wrap:break-word;">'
+                '<section class="rich_media_area_primary" '
+                'style="position:relative;margin:0 auto;padding:22px 16px 28px;background:#fff;">'
+                f'<h1 class="rich_media_title" style="margin:0 0 14px 0;color:#0f172a;'
+                f'font-size:25px;line-height:1.4;font-weight:700;">{self._inline(title)}</h1>'
+                '<p class="rich_media_meta_list" style="margin:0 0 18px 0;color:#8c8c8c;'
+                'font-size:14px;line-height:1.6;">'
+                f'<span class="rich_media_meta rich_media_meta_text" style="margin-right:8px;">{escape(account_name)}</span>'
+                f'<span class="rich_media_meta rich_media_meta_text" style="margin-right:8px;">{escape(str(template["name"]))}</span>'
+                f'<span class="rich_media_meta rich_media_meta_text">预计阅读 {read_minutes} 分钟</span>'
+                '</p>'
             ),
         ]
 
+        if cover_slot:
+            html_parts.append(self._render_image_figure(cover_slot, template=template, caption=title, variant="cover"))
+
         if lead_text:
             html_parts.append(
-                f'<section style="margin:0 18px 22px;padding:18px 18px;border-radius:20px;'
-                f'background:{surface};border:1px solid {accent_soft};box-shadow:0 8px 24px rgba(15,23,42,.06);">'
+                f'<section style="margin:0 0 22px 0;padding:14px 16px;border-left:4px solid {accent};'
+                f'background:{accent_soft};border-radius:0 12px 12px 0;">'
                 f'<p style="margin:0 0 8px 0;color:{accent};font-size:13px;font-weight:700;">先给结论</p>'
                 f'<p style="margin:0;color:#334155;font-size:16px;line-height:1.85;">{self._inline(lead_text)}</p>'
                 '</section>'
             )
 
         html_parts.append(
-            f'<section style="margin:0 18px;padding:20px 18px 24px;border-radius:24px;'
-            f'background:{surface};box-shadow:0 12px 34px rgba(15,23,42,.07);">'
+            '<section class="rich_media_content" '
+            'style="overflow:hidden;color:#3e3e3e;font-size:16px;line-height:1.8;">'
             f'{rendered_blocks}'
             '</section>'
         )
 
         if ending_cta:
             html_parts.append(
-                f'<section style="margin:22px 18px 0;padding:18px 18px;border-radius:22px;'
-                f'background:{accent_soft};border-left:5px solid {accent};">'
+                f'<section style="margin:24px 0 0 0;padding:16px 16px;border-radius:12px;'
+                f'background:{accent_soft};border-left:4px solid {accent};">'
                 f'<p style="margin:0 0 8px 0;color:{accent};font-size:13px;font-weight:800;">收束一下</p>'
                 f'<p style="margin:0;color:#334155;font-size:15px;line-height:1.85;">{self._inline(ending_cta)}</p>'
                 '</section>'
             )
 
         html_parts.append(
-            '<section style="margin:20px 18px 0;text-align:center;color:#94a3b8;font-size:12px;line-height:1.7;">'
-            '排版由 HotClaw 智能体生成，发布前请确认事实、图片版权与封面裁切。'
+            '<section style="margin:24px 0 0 0;text-align:center;color:#94a3b8;font-size:12px;line-height:1.7;">'
+            '排版和配图由 HotClaw 智能体生成；正式发布前请确认图片版权、事实和品牌风格。'
             '</section>'
         )
-        html_parts.append("</section>")
+        html_parts.append("</section></section>")
         return "".join(html_parts)
 
-    def _render_blocks(self, blocks: list[dict[str, Any]], *, template: dict[str, Any]) -> str:
+    def _render_blocks(self, blocks: list[dict[str, Any]], *, image_slots: list[dict[str, Any]], template: dict[str, Any]) -> str:
         rendered: list[str] = []
         heading_index = 0
+        paragraphs_in_section = 0
+        inserted_slots: set[str] = set()
         accent = template["accent_color"]
         accent_soft = template["accent_soft"]
+        inline_slots = {
+            str(slot.get("placement")): slot
+            for slot in image_slots
+            if slot.get("image_kind") == "inline"
+        }
 
         for block in blocks:
             block_type = block.get("type")
             if block_type == "heading":
                 heading_index += 1
-                rendered.append(self._render_heading(str(block.get("text") or ""), heading_index, template))
+                paragraphs_in_section = 0
+                heading_text = str(block.get("text") or "")
+                rendered.append(self._render_heading(heading_text, heading_index, template))
             elif block_type == "paragraph":
+                paragraphs_in_section += 1
                 rendered.append(
-                    '<p style="margin:0 0 18px 0;color:#334155;font-size:16px;line-height:1.95;'
-                    f'letter-spacing:.1px;">{self._inline(str(block.get("text") or ""))}</p>'
+                    '<p style="clear:both;min-height:1em;margin:0 0 1.15em 0;color:#3f3f3f;'
+                    f'font-size:16px;line-height:1.9;letter-spacing:.02em;white-space:pre-wrap;">'
+                    f'{self._inline(str(block.get("text") or ""))}</p>'
                 )
+                slot_key = f"after_section_{heading_index}"
+                slot = inline_slots.get(slot_key)
+                if slot and slot_key not in inserted_slots and paragraphs_in_section == 2:
+                    caption = str(slot.get("caption") or block.get("text") or "")
+                    rendered.append(self._render_image_figure(slot, template=template, caption=caption, variant="inline"))
+                    inserted_slots.add(slot_key)
             elif block_type == "quote":
                 rendered.append(
-                    f'<blockquote style="margin:6px 0 20px 0;padding:14px 16px;border-left:4px solid {accent};'
-                    f'background:{accent_soft};border-radius:0 16px 16px 0;color:#334155;font-size:15px;'
-                    f'line-height:1.85;">{self._inline(str(block.get("text") or ""))}</blockquote>'
+                    f'<blockquote style="margin:8px 0 1.2em 0;padding:10px 0 10px 12px;'
+                    f'border-left:3px solid {accent};background:transparent;color:#64748b;'
+                    f'font-size:15px;line-height:1.85;">{self._inline(str(block.get("text") or ""))}</blockquote>'
                 )
             elif block_type == "list":
                 ordered = bool(block.get("ordered"))
@@ -470,13 +398,11 @@ class PostProcessAgent(BaseAgent):
                     for item in items
                 )
                 rendered.append(
-                    f'<{tag} style="margin:2px 0 20px 0;padding-left:22px;color:#334155;font-size:15px;">'
+                    f'<{tag} style="margin:0 0 1.2em 0;padding-left:24px;color:#3f3f3f;font-size:16px;line-height:1.8;">'
                     f'{rendered_items}</{tag}>'
                 )
             elif block_type == "divider":
-                rendered.append(
-                    '<p style="margin:24px auto;width:52px;border-top:2px solid #e2e8f0;height:1px;"></p>'
-                )
+                rendered.append('<p style="margin:24px auto;width:52px;border-top:2px solid #e2e8f0;height:1px;"></p>')
 
         return "".join(rendered)
 
@@ -488,34 +414,61 @@ class PostProcessAgent(BaseAgent):
 
         if style == "numbered_bar":
             return (
-                '<section style="margin:28px 0 16px 0;">'
-                f'<p style="margin:0 0 8px 0;color:{accent};font-size:12px;font-weight:800;letter-spacing:1.5px;">'
+                '<section style="margin:2em 0 1em 0;">'
+                f'<p style="margin:0 0 6px 0;color:{accent};font-size:12px;font-weight:700;letter-spacing:1.5px;">'
                 f'PART {index:02d}</p>'
-                f'<h2 style="margin:0;padding:0 0 0 12px;border-left:5px solid {accent};'
-                f'color:#0f172a;font-size:21px;line-height:1.45;font-weight:800;">{safe_text}</h2>'
+                f'<h2 style="margin:0;padding:0 0 0 10px;border-left:4px solid {accent};'
+                f'color:#0f172a;font-size:21px;line-height:1.45;font-weight:700;">{safe_text}</h2>'
                 '</section>'
             )
         if style == "tag_bar":
             return (
-                '<section style="margin:28px 0 16px 0;">'
+                '<section style="margin:2em 0 1em 0;">'
                 f'<p style="display:inline-block;margin:0 0 10px 0;padding:4px 10px;border-radius:999px;'
-                f'background:{accent_soft};color:{accent};font-size:12px;font-weight:800;">要点 {index}</p>'
-                f'<h2 style="margin:0;color:#0f172a;font-size:21px;line-height:1.45;font-weight:800;">{safe_text}</h2>'
+                f'background:{accent_soft};color:{accent};font-size:12px;font-weight:700;">要点 {index}</p>'
+                f'<h2 style="margin:0;color:#0f172a;font-size:21px;line-height:1.45;font-weight:700;">{safe_text}</h2>'
                 '</section>'
             )
         if style == "playbook_step":
             return (
-                '<section style="margin:28px 0 16px 0;display:block;">'
-                f'<p style="margin:0 0 10px 0;color:{accent};font-size:12px;font-weight:800;letter-spacing:1px;">STEP {index}</p>'
-                f'<h2 style="margin:0;padding:12px 14px;border-radius:16px;background:{accent_soft};'
-                f'color:#111827;font-size:20px;line-height:1.45;font-weight:800;">{safe_text}</h2>'
+                '<section style="margin:2em 0 1em 0;display:block;">'
+                f'<p style="margin:0 0 8px 0;color:{accent};font-size:12px;font-weight:700;letter-spacing:1px;">STEP {index}</p>'
+                f'<h2 style="margin:0;padding:10px 12px;border-radius:10px;background:{accent_soft};'
+                f'color:#111827;font-size:20px;line-height:1.45;font-weight:700;">{safe_text}</h2>'
                 '</section>'
             )
         return (
-            '<section style="margin:28px 0 16px 0;text-align:left;">'
+            '<section style="margin:2em 0 1em 0;text-align:left;">'
             f'<p style="margin:0 0 8px 0;color:{accent};font-size:18px;line-height:1;">✦</p>'
-            f'<h2 style="margin:0;color:#0f172a;font-size:21px;line-height:1.45;font-weight:800;">{safe_text}</h2>'
+            f'<h2 style="margin:0;color:#0f172a;font-size:21px;line-height:1.45;font-weight:700;">{safe_text}</h2>'
             '</section>'
+        )
+
+    def _render_image_figure(self, slot: dict[str, Any], *, template: dict[str, Any], caption: str, variant: str) -> str:
+        accent = template["accent_color"]
+        accent_soft = template["accent_soft"]
+        image_url = str(slot.get("selected_asset_url") or "").strip()
+        if not image_url:
+            return ""
+
+        wrapper_margin = "0 0 22px 0" if variant == "cover" else "4px 0 1.4em 0"
+        border_radius = "10px" if variant == "cover" else "8px"
+        origin = str(slot.get("asset_origin") or "")
+        note = "AI 生成封面" if variant == "cover" and origin == "generated" else (
+            "AI 生成配图" if origin == "generated" else ("语义配图预览" if variant == "cover" else "段间配图预览")
+        )
+        caption_text = str(slot.get("caption") or caption or "").strip()
+        credit = str(slot.get("credit") or "").strip()
+        suffix = f" · {credit}" if credit else ""
+        return (
+            f'<figure data-hotclaw-image-slot="{escape(str(slot.get("slot_id") or "image"), quote=True)}" '
+            f'style="margin:{wrapper_margin};padding:0;border-radius:{border_radius};background:#fff;'
+            f'border:1px solid {accent_soft};overflow:hidden;">'
+            f'<img src="{escape(image_url, quote=True)}" alt="{escape(caption, quote=True)}" '
+            f'style="display:block;width:100%;max-width:100%;height:auto!important;object-fit:cover;background:{accent_soft};" />'
+            f'<figcaption style="margin:0;padding:8px 12px;color:{accent};font-size:12px;line-height:1.7;background:#fff;">'
+            f'{note}{suffix} · {self._inline(self._clip(caption_text, 48))}</figcaption>'
+            '</figure>'
         )
 
     def _lead_text(self, summary: str, blocks: list[dict[str, Any]]) -> str:
@@ -527,9 +480,11 @@ class PostProcessAgent(BaseAgent):
         return ""
 
     def _read_minutes(self, blocks: list[dict[str, Any]]) -> int:
-        text = " ".join(str(block.get("text") or " ".join(str(item) for item in block.get("items", []))) for block in blocks)
-        words = article_assembler_service.count_words(text)
-        return max(1, round(words / 420))
+        text = " ".join(
+            str(block.get("text") or " ".join(str(item) for item in block.get("items", [])))
+            for block in blocks
+        )
+        return max(1, round(self._count_words(text) / 420))
 
     def _extract_headings(self, markdown: str) -> list[str]:
         headings = [
@@ -549,41 +504,331 @@ class PostProcessAgent(BaseAgent):
         headings: list[str],
         source_candidates: list[Any],
         template: dict[str, Any],
+        account_context: dict[str, Any] | None = None,
+        reference_digest: dict[str, Any] | None = None,
+        summary: str = "",
     ) -> list[dict[str, Any]]:
-        source_names = []
+        source_names: list[str] = []
         for item in source_candidates[:3]:
             if isinstance(item, dict):
                 name = str(item.get("source_name") or item.get("source_title") or "").strip()
                 if name:
                     source_names.append(name)
-        slots = [
+
+        source_label = " · ".join(source_names[:2]) or template["name"]
+        visual_sections = self._select_visual_sections(headings)
+        slots: list[dict[str, Any]] = [
             {
                 "slot_id": "cover",
                 "placement": "cover",
                 "template_id": template["id"],
-                "purpose": "建立文章打开前的第一视觉，风格要和正文模板一致。",
-                "prompt": (
-                    f"Editorial WeChat cover image for: {title}. "
-                    f"Match the {template['name']} layout, clean composition, high contrast, no embedded text."
+                "status": "planned",
+                "image_kind": "cover",
+                "asset_origin": "planned_generation",
+                "binding_status": "bound",
+                "draft_visibility": "visible",
+                "fallback_behavior": "generate_semantic_preview_if_model_unavailable",
+                "purpose": "建立文章第一视觉，用一个抽象但贴题的画面概括全文判断。",
+                "prompt": self._image_prompt(
+                    title=title,
+                    summary=summary,
+                    section_heading="",
+                    template=template,
+                    account_context=account_context or {},
+                    image_kind="cover",
                 ),
                 "source_hint": source_names[:2],
+                "selected_asset_url": "",
+                "selected_asset_path": None,
+                "caption": title,
+                "credit": None,
+                "copyright_note": "AI 生成预览图；正式发布前请确认商用授权与品牌合规。",
+                "placement_reason": "封面位承担第一印象，应概括全文主题而不是复用来源配图。",
             }
         ]
-        for index, heading in enumerate(headings[:3], start=1):
+
+        for index, heading in visual_sections:
             slots.append(
                 {
                     "slot_id": f"inline_{index}",
                     "placement": f"after_section_{index}",
                     "template_id": template["id"],
-                    "purpose": "在长段落之间制造停顿，同时强化本节核心判断。",
-                    "prompt": (
-                        f"Illustration for section '{heading}' in article '{title}', "
-                        f"{template['name']} WeChat editorial style, no text."
+                    "status": "planned",
+                    "image_kind": "inline",
+                    "asset_origin": "planned_generation",
+                    "binding_status": "bound",
+                    "draft_visibility": "visible",
+                    "fallback_behavior": "generate_semantic_preview_if_model_unavailable",
+                    "purpose": "插在本节首段之后，作为读者理解框架或关键矛盾的视觉停顿。",
+                    "prompt": self._image_prompt(
+                        title=title,
+                        summary=summary,
+                        section_heading=heading,
+                        template=template,
+                        account_context=account_context or {},
+                        image_kind="inline",
                     ),
                     "source_hint": source_names[:2],
+                    "selected_asset_url": "",
+                    "selected_asset_path": None,
+                    "caption": heading,
+                    "credit": None,
+                    "copyright_note": "AI 生成段间配图；正式发布前请确认商用授权与品牌合规。",
+                    "placement_reason": "本节进入具体论证后插图，避免图片抢在观点之前出现。",
                 }
             )
         return slots
+
+    async def _resolve_image_slots(
+        self,
+        image_slots: list[dict[str, Any]],
+        *,
+        image_generation_config: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        resolved: list[dict[str, Any]] = []
+        for slot in image_slots:
+            next_slot = dict(slot)
+            prompt = str(next_slot.get("prompt") or "").strip()
+            image_kind = str(next_slot.get("image_kind") or "inline")
+            size = "1200x628" if image_kind == "cover" else "1024x768"
+            result = await image_generation_service.generate(
+                config=image_generation_config,
+                prompt=prompt,
+                size=size,
+            )
+            if result.success and result.asset_url:
+                next_slot.update(
+                    {
+                        "status": "generated",
+                        "asset_origin": "generated",
+                        "selected_asset_url": result.asset_url,
+                        "provider": result.provider,
+                        "model": result.model,
+                        "generation_error": None,
+                    }
+                )
+            else:
+                fallback_label = self._slot_fallback_label(next_slot)
+                next_slot.update(
+                    {
+                        "status": "preview_ready",
+                        "asset_origin": "generated_preview",
+                        "selected_asset_url": self._build_preview_image_url(
+                            primary_text=fallback_label["primary"],
+                            secondary_text=fallback_label["secondary"],
+                            template=self._template_by_id(str(next_slot.get("template_id") or "")),
+                            image_kind=image_kind,
+                        ),
+                        "provider": result.provider,
+                        "model": result.model,
+                        "generation_error": result.error_message,
+                    }
+                )
+            resolved.append(next_slot)
+        return resolved
+
+    def _select_visual_sections(self, headings: list[str]) -> list[tuple[int, str]]:
+        if not headings:
+            return []
+        priority_keywords = (
+            "框架",
+            "决策",
+            "结构",
+            "路径",
+            "方法",
+            "流程",
+            "架构",
+            "问题",
+            "趋势",
+            "pattern",
+            "framework",
+            "architecture",
+            "workflow",
+        )
+        ranked: list[tuple[int, int, str]] = []
+        for index, heading in enumerate(headings[:4], start=1):
+            text = heading.lower()
+            score = 2 if any(keyword in text for keyword in priority_keywords) else 0
+            if index in {1, 2}:
+                score += 1
+            ranked.append((score, index, heading))
+        ranked.sort(key=lambda item: (-item[0], item[1]))
+        return [(index, heading) for _, index, heading in ranked[:1]]
+
+    def _image_prompt(
+        self,
+        *,
+        title: str,
+        summary: str,
+        section_heading: str,
+        template: dict[str, Any],
+        account_context: dict[str, Any],
+        image_kind: str,
+    ) -> str:
+        tone = str(account_context.get("tone_style") or "professional, editorial, analytical").strip()
+        audience = str(account_context.get("target_audience") or account_context.get("audience") or "").strip()
+        focus = section_heading or title
+        role = "cover image" if image_kind == "cover" else "inline section illustration"
+        composition = (
+            "wide editorial cover, one clear focal metaphor, cinematic lighting"
+            if image_kind == "cover"
+            else "clean conceptual illustration placed between paragraphs, clear visual hierarchy"
+        )
+        return (
+            f"Create a WeChat public account {role} for an article titled: {title}. "
+            f"Article summary: {summary or title}. Visual focus: {focus}. "
+            f"Audience: {audience or 'AI engineers, product builders, and technical decision makers'}. "
+            f"Tone: {tone}. Template mood: {template['name']} with accent color {template['accent_color']}. "
+            f"Style: modern editorial illustration, {composition}, high quality, coherent with the full article. "
+            "Avoid screenshots, UI mockups, logos, brand marks, random text, watermarks, and dense diagrams. "
+            "No embedded words or readable text in the image."
+        )
+
+    def _slot_fallback_label(self, slot: dict[str, Any]) -> dict[str, str]:
+        primary = str(slot.get("caption") or "文章配图").strip()
+        if slot.get("image_kind") == "cover":
+            secondary = "全文主题视觉"
+        else:
+            secondary = "段落核心观点"
+        return {"primary": primary, "secondary": secondary}
+
+    def _template_by_id(self, template_id: str) -> dict[str, Any]:
+        return next((template for template in self.LAYOUT_TEMPLATES if template["id"] == template_id), self.LAYOUT_TEMPLATES[0])
+
+    def _collect_source_image_assets(
+        self,
+        *,
+        source_candidates: list[Any],
+        account_context: dict[str, Any],
+        reference_digest: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        assets: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def add(url: Any, *, caption: str = "", credit: str = "", source_hint: list[str] | None = None) -> None:
+            text = str(url or "").strip()
+            if not self._is_usable_image_url(text) or text in seen:
+                return
+            seen.add(text)
+            assets.append(
+                {
+                    "url": text,
+                    "caption": caption or None,
+                    "credit": credit or None,
+                    "source_hint": source_hint or ([credit] if credit else []),
+                    "copyright_note": "从已同步参考源/原文摘要中提取；发布前请确认授权与版权。",
+                }
+            )
+
+        def scan_text(text: Any, *, caption: str = "", credit: str = "", source_hint: list[str] | None = None) -> None:
+            if not isinstance(text, str) or "http" not in text:
+                return
+            for match in re.finditer(r"!\[[^\]]*\]\((https?://[^)\s]+)\)", text):
+                add(match.group(1), caption=caption, credit=credit, source_hint=source_hint)
+            for match in re.finditer(r"<img[^>]+src=[\"'](https?://[^\"']+)[\"']", text, flags=re.I):
+                add(match.group(1), caption=caption, credit=credit, source_hint=source_hint)
+            for match in re.finditer(r"(https?://[^\s\"')<>]+?\.(?:png|jpe?g|webp|gif)(?:\?[^\s\"')<>]*)?)", text, flags=re.I):
+                add(match.group(1), caption=caption, credit=credit, source_hint=source_hint)
+
+        def scan_record(record: Any, *, fallback_caption: str = "", fallback_credit: str = "") -> None:
+            if not isinstance(record, dict):
+                return
+            caption = str(
+                record.get("title")
+                or record.get("source_title")
+                or record.get("resolved_title")
+                or fallback_caption
+                or ""
+            ).strip()
+            credit = str(record.get("source_name") or record.get("name") or fallback_credit or "").strip()
+            hint = [item for item in (credit, caption) if item]
+            for key in (
+                "image_url",
+                "cover_image_url",
+                "thumbnail_url",
+                "thumb_url",
+                "og_image",
+                "image",
+                "cover",
+            ):
+                add(record.get(key), caption=caption, credit=credit, source_hint=hint)
+            for key in ("content_markdown", "content_markdown_excerpt", "html", "preview", "snippet", "summary"):
+                scan_text(record.get(key), caption=caption, credit=credit, source_hint=hint)
+            for nested_key in ("entry", "source", "metadata_json", "source_payload_json"):
+                scan_record(record.get(nested_key), fallback_caption=caption, fallback_credit=credit)
+            samples = record.get("article_samples")
+            if isinstance(samples, list):
+                for sample in samples:
+                    scan_record(sample, fallback_caption=caption, fallback_credit=credit)
+
+        for digest in reference_digest.get("source_digests") or []:
+            scan_record(digest)
+        for snippet in reference_digest.get("source_snippets") or []:
+            scan_record(snippet)
+        selected_source_ids = [
+            str(source_id)
+            for source_id in (reference_digest.get("selected_source_ids") or [])
+            if source_id is not None
+        ]
+        reference_sources = list(account_context.get("reference_sources") or [])
+        if selected_source_ids:
+            order = {source_id: index for index, source_id in enumerate(selected_source_ids)}
+            reference_sources.sort(key=lambda item: order.get(str((item or {}).get("id")), 999))
+        for source in reference_sources:
+            scan_record(source)
+        for item in source_candidates:
+            scan_record(item)
+
+        return assets[:4]
+
+    def _is_usable_image_url(self, value: str) -> bool:
+        if not value.startswith(("http://", "https://")):
+            return False
+        lowered = value.lower()
+        if any(token in lowered for token in ("avatar", "profile_photo", "emoji")):
+            return False
+        return any(token in lowered for token in (".png", ".jpg", ".jpeg", ".webp", ".gif", "mmbiz.qpic.cn"))
+
+    def _build_preview_image_url(
+        self,
+        *,
+        primary_text: str,
+        secondary_text: str,
+        template: dict[str, Any],
+        image_kind: str,
+    ) -> str:
+        width, height = (1200, 628) if image_kind == "cover" else (1200, 720)
+        primary = escape(self._clip(primary_text, 34))
+        secondary = escape(self._clip(secondary_text, 42))
+        accent = template["accent_color"]
+        accent_soft = template["accent_soft"]
+        surface = template["surface"]
+        svg = f"""
+<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="{accent}" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="{surface}" stop-opacity="0.98" />
+      <stop offset="100%" stop-color="{accent_soft}" stop-opacity="0.96" />
+    </linearGradient>
+  </defs>
+  <rect width="{width}" height="{height}" rx="36" fill="url(#bg)" />
+  <circle cx="{width - 140}" cy="120" r="90" fill="white" fill-opacity="0.12" />
+  <circle cx="120" cy="{height - 120}" r="72" fill="white" fill-opacity="0.08" />
+  <rect x="72" y="78" width="{width - 144}" height="{height - 156}" rx="32" fill="url(#card)" />
+  <rect x="104" y="118" width="164" height="42" rx="21" fill="{accent_soft}" />
+  <text x="186" y="145" text-anchor="middle" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="20" font-weight="700" fill="{accent}">{escape(template['name'])}</text>
+  <text x="104" y="246" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="52" font-weight="800" fill="#0f172a">{primary}</text>
+  <text x="104" y="308" font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" font-size="28" font-weight="500" fill="#334155">{secondary}</text>
+  <rect x="104" y="{height - 134}" width="260" height="16" rx="8" fill="{accent}" fill-opacity="0.22" />
+  <rect x="104" y="{height - 102}" width="188" height="16" rx="8" fill="{accent}" fill-opacity="0.14" />
+</svg>
+""".strip()
+        encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        return f"data:image/svg+xml;base64,{encoded}"
 
     def _cover_prompt(self, title: str, account_context: dict[str, Any], template: dict[str, Any]) -> str:
         tone = str(account_context.get("tone_style") or "clear, professional").strip()
@@ -595,9 +840,10 @@ class PostProcessAgent(BaseAgent):
     def _layout_notes(self, template: dict[str, Any]) -> list[str]:
         return [
             f"已选择「{template['name']}」模板：{template['scenario']}",
-            "正文使用公众号兼容的内联 HTML 样式，发布到微信草稿时不会依赖外部 CSS。",
-            "长段落会被拆短，H2 会被转换成视觉分节，降低移动端阅读疲劳。",
-            "发布前图片仍需要人工确认版权、清晰度和封面裁切。",
+            "正文使用公众号兼容的内联 HTML 样式，预览无需依赖外部 CSS。",
+            "配图先根据标题、摘要和分节语义生成图片计划，再调用已配置的图像模型生成。",
+            "图像模型不可用时才使用语义预览占位图，确保演示预览不会空白。",
+            "正式发布前仍需要人工确认图片版权、清晰度和品牌风格。",
         ]
 
     def _digest(self, article: dict[str, Any], markdown: str) -> str:
@@ -637,3 +883,10 @@ class PostProcessAgent(BaseAgent):
     def _clip(self, value: str, limit: int) -> str:
         value = str(value or "").strip()
         return value[:limit] + ("..." if len(value) > limit else "")
+
+    def _count_words(self, text: str) -> int:
+        if not text:
+            return 0
+        chinese = len(re.findall(r"[\u4e00-\u9fff]", text))
+        english = len(re.findall(r"[A-Za-z0-9_]+", text))
+        return chinese + english

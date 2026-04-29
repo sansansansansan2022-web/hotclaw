@@ -22,6 +22,7 @@ from app.orchestrator.broadcaster import broadcaster
 from app.orchestrator.workspace import Workspace
 from app.services.account_service import account_service
 from app.services.article_assembler_service import article_assembler_service
+from app.services.system_config_service import SystemConfigService
 
 logger = get_logger(__name__)
 
@@ -420,10 +421,15 @@ class OrchestratorEngine:
             if structured_pipeline_degraded and node_id in STRUCTURED_CONTENT_NODE_IDS:
                 await self._record_skipped_node(task.id, node_def, db, "legacy_content_fallback")
                 continue
-            if quality_gate_blocked and node_id in POST_PROCESS_NODE_IDS:
+            ops_context = workspace.get("ops_context")
+            if (
+                quality_gate_blocked
+                and node_id in POST_PROCESS_NODE_IDS
+                and not self._allow_manual_post_process_after_quality_gate(ops_context)
+            ):
                 await self._record_skipped_node(task.id, node_def, db, "draft_quality_gate_blocked")
                 continue
-            run_strategy = self._extract_run_strategy(workspace.get("ops_context"))
+            run_strategy = self._extract_run_strategy(ops_context)
             strategy_skip_reason = self._strategy_skip_reason(node_id, run_strategy)
             if strategy_skip_reason:
                 await self._record_skipped_node(task.id, node_def, db, strategy_skip_reason)
@@ -874,6 +880,8 @@ class OrchestratorEngine:
         enriched_context["account_id"] = account_id
         enriched_context["trace_id"] = trace_id
         enriched_context["node_timeout_seconds"] = self._node_timeout_seconds(node_def)
+        if node_def.get("node_id") in POST_PROCESS_NODE_IDS:
+            enriched_context["image_generation_config"] = await SystemConfigService(db).get_image_generation_config()
         run_strategy = self._extract_run_strategy(context.get("ops_context"))
         enriched_context["runtime_policy"] = {
             "max_retries": settings.llm_max_retries,
@@ -1370,7 +1378,19 @@ class OrchestratorEngine:
             if isinstance(run_strategy, dict):
                 return run_strategy
         return {}
-
+    def _allow_manual_post_process_after_quality_gate(self, ops_context: Any) -> bool:
+        if not isinstance(ops_context, dict):
+            return False
+        run_strategy = self._extract_run_strategy(ops_context)
+        if run_strategy.get("allow_post_process") is False:
+            return False
+        trigger = ops_context.get("trigger")
+        if isinstance(trigger, dict):
+            source = str(trigger.get("source") or "").strip().lower()
+            if source == "manual":
+                return True
+        effective_mode = str(run_strategy.get("effective_mode") or "").strip().lower()
+        return effective_mode == "manual"
     def _strategy_skip_reason(self, node_id: str, run_strategy: dict[str, Any]) -> str | None:
         if not run_strategy:
             return None

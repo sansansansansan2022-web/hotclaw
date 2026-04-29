@@ -259,7 +259,7 @@ class AccountHarnessService:
 
         if operation_stage == "risk_recovery":
             reviewer_mode = "single"
-            allow_post_process = False
+            allow_post_process = trigger["source"] == "manual"
             if not high_cost_model_nodes:
                 high_cost_model_nodes = []
         elif not high_cost_model_nodes and effective_mode in {"semi_auto", "full_auto"} and operation_stage == "steady_state":

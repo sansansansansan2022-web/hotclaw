@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   confirmPublishDraft,
   discardDraft,
@@ -58,6 +59,7 @@ function fallbackSections(detail: DraftDetail | null): SectionDraft[] {
 
 export function DraftDetailPage({ draftId }: { draftId: string }) {
   const { locale, draftStatusLabel, publishStatusLabel } = useI18n();
+  const router = useRouter();
   const parsedId = Number(draftId);
   const pushToast = useAppStore((state) => state.pushToast);
   const [detail, setDetail] = useState<DraftDetail | null>(null);
@@ -94,6 +96,13 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
   useEffect(() => {
     void load();
   }, [draftId]);
+
+  useEffect(() => {
+    if (!detail || detail.is_latest_for_task !== false || !detail.latest_draft_id) {
+      return;
+    }
+    router.replace(`/drafts/${detail.latest_draft_id}`);
+  }, [detail, router]);
 
   const actions = useMemo(() => {
     if (!detail) return { canApprove: false, canReject: false, canDiscard: false, canPublish: false, canRetry: false };
@@ -162,7 +171,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
     }
 
     return detail.content_html ? (
-      <div className="prose prose-slate max-w-none text-sm" dangerouslySetInnerHTML={{ __html: detail.content_html }} />
+      <div className="max-w-none text-sm" dangerouslySetInnerHTML={{ __html: detail.content_html }} />
     ) : (
       <EmptyState
         title={locale === "zh-CN" ? "暂无 HTML 预览" : "No rendered HTML yet"}

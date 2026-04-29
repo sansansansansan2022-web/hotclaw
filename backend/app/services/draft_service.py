@@ -167,6 +167,15 @@ class DraftService:
         """
         draft = await self.get_draft(draft_id, db)
 
+        latest_stmt = (
+            select(ArticleDraftModel.id)
+            .where(ArticleDraftModel.task_id == draft.task_id)
+            .order_by(desc(ArticleDraftModel.updated_at), desc(ArticleDraftModel.id))
+            .limit(1)
+        )
+        latest_result = await db.execute(latest_stmt)
+        latest_draft_id = latest_result.scalar_one_or_none() or draft.id
+
         # Fetch account name if available
         account_name = None
         if draft.account_id:
@@ -194,20 +203,44 @@ class DraftService:
         if not isinstance(task_result_data, dict):
             task_result_data = {}
         task_result_data = article_assembler_service.normalize_result_data(task_result_data)
+        selected_topic = article_assembler_service.extract_selected_topic(
+            task_result_data.get("topics"),
+            task_result_data.get("titles"),
+            {"selected_topic": draft.selected_topic},
+        )
+        selected_title = article_assembler_service.extract_selected_title(
+            task_result_data.get("titles"),
+            {"selected_title": draft.title},
+        )
+        summary = (
+            article_assembler_service._clip_text(draft.summary, 500)
+            if draft.summary
+            else None
+        )
         content_html = article_assembler_service.ensure_content_html(
             draft.content_html,
             draft.content_markdown,
+        )
+        content_html = self._ensure_review_preview_html(
+            title=selected_title or draft.title,
+            summary=summary or "",
+            content_markdown=draft.content_markdown,
+            content_html=content_html,
+            account_name=account_name,
+            task_result_data=task_result_data,
         )
 
         return {
             "id": draft.id,
             "task_id": draft.task_id,
+            "latest_draft_id": latest_draft_id,
+            "is_latest_for_task": draft.id == latest_draft_id,
             "account_id": draft.account_id,
             "account_name": account_name,
-            "title": draft.title,
+            "title": selected_title or draft.title,
             "title_candidates": draft.title_candidates,
-            "selected_topic": draft.selected_topic,
-            "summary": draft.summary,
+            "selected_topic": selected_topic or draft.selected_topic,
+            "summary": summary,
             "content_markdown": draft.content_markdown,
             "content_html": content_html,
             "word_count": draft.word_count,
@@ -222,7 +255,7 @@ class DraftService:
             "publish_error_message": draft.publish_error_message,
             "audit_result": audit_result,
             "style_profile": task_result_data.get("style_profile"),
-            "retrieved_memories": task_result_data.get("retrieved_memories"),
+            "retrieved_memories": self._build_retrieved_memories(task_result_data),
             "outline_plan": task_result_data.get("outline_plan"),
             "section_drafts": task_result_data.get("section_drafts"),
             "style_review": task_result_data.get("style_review"),
@@ -235,6 +268,167 @@ class DraftService:
             "created_at": draft.created_at.isoformat() if draft.created_at else None,
             "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,
         }
+
+    def _build_retrieved_memories(self, task_result_data: dict[str, Any]) -> Any:
+        """Expose historical/reference articles even when the pipeline stores them under reference_digest."""
+        existing = task_result_data.get("retrieved_memories")
+        if isinstance(existing, list) and existing:
+            return existing
+        if isinstance(existing, dict) and any(existing.values()):
+            return existing
+
+        reference_digest = task_result_data.get("reference_digest")
+        account_context = task_result_data.get("account_context")
+        source_rows: list[Any] = []
+        if isinstance(reference_digest, dict) and isinstance(reference_digest.get("source_digests"), list):
+            source_rows = reference_digest["source_digests"]
+        elif isinstance(account_context, dict) and isinstance(account_context.get("reference_sources"), list):
+            source_rows = account_context["reference_sources"]
+
+        memories: list[dict[str, Any]] = []
+        for index, source in enumerate(source_rows):
+            if not isinstance(source, dict):
+                continue
+            title = (
+                self._clean_reference_text(source.get("title"))
+                or self._clean_reference_text(source.get("source_title"))
+                or self._clean_reference_text(source.get("resolved_title"))
+                or self._clean_reference_text(source.get("name"))
+            )
+            if not title:
+                continue
+            summary = (
+                self._clean_reference_text(source.get("summary"))
+                or self._clean_reference_text(source.get("style_brief"))
+                or self._clean_reference_text(source.get("structure_brief"))
+                or self._clean_reference_text(source.get("snippet"))
+                or self._clean_reference_text(source.get("preview"))
+            )
+            excerpt = (
+                self._clean_reference_text(source.get("content_excerpt"))
+                or self._clean_reference_text(source.get("excerpt"))
+                or self._clean_reference_text(source.get("snippet"))
+                or self._clean_reference_text(source.get("preview"))
+            )
+            tags = [
+                value
+                for value in [
+                    self._clean_reference_text(source.get("source_type")),
+                    self._clean_reference_text(source.get("source_name")),
+                    self._clean_reference_text(source.get("origin")),
+                ]
+                if value
+            ]
+            memories.append(
+                {
+                    "id": source.get("source_id") or source.get("id") or f"reference-{index}",
+                    "title": title,
+                    "source_title": title,
+                    "summary": summary,
+                    "snippet": summary,
+                    "content_excerpt": excerpt,
+                    "tags": tags,
+                    "fit_score": source.get("fit_score"),
+                    "metadata": source,
+                }
+            )
+        return memories
+
+    def _clean_reference_text(self, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, (int, float)):
+            return str(value)
+        if not isinstance(value, str):
+            return None
+        trimmed = " ".join(value.split())
+        return trimmed or None
+
+    def _ensure_review_preview_html(
+        self,
+        *,
+        title: str,
+        summary: str,
+        content_markdown: str,
+        content_html: str | None,
+        account_name: str | None,
+        task_result_data: dict[str, Any],
+    ) -> str | None:
+        """Apply a preview-only WeChat layout when persisted HTML is plain markdown HTML."""
+        if content_html and "rich_media_content" in content_html:
+            return content_html
+        if not content_markdown:
+            return content_html
+
+        try:
+            from app.agents.post_process_agent import PostProcessAgent
+
+            formatter = PostProcessAgent()
+            article = {
+                "selected_title": title,
+                "selected_topic": article_assembler_service.extract_selected_topic(
+                    task_result_data.get("topics"),
+                    task_result_data.get("titles"),
+                    {},
+                ),
+                "summary": summary,
+                "content_markdown": content_markdown,
+                "word_count": self._count_words(content_markdown),
+            }
+            outline_plan = task_result_data.get("outline_plan") if isinstance(task_result_data.get("outline_plan"), dict) else {}
+            account_context = {
+                "account_name": account_name or "HotClaw",
+                "positioning": "",
+                "tone_style": "",
+            }
+            template = formatter._select_template(
+                article=article,
+                account_context=account_context,
+                outline_plan=outline_plan,
+                source_candidates=[],
+            )
+            final_markdown = formatter._format_markdown(title, content_markdown)
+            blocks = formatter._parse_markdown(final_markdown, title=title)
+            headings = formatter._extract_headings(final_markdown)
+            image_slots = formatter._build_image_slots(
+                title=title,
+                headings=headings,
+                source_candidates=[],
+                template=template,
+                account_context=account_context,
+                reference_digest={},
+                summary=summary,
+            )
+            preview_slots: list[dict[str, Any]] = []
+            for slot in image_slots:
+                image_kind = str(slot.get("image_kind") or "inline")
+                fallback_label = formatter._slot_fallback_label(slot)
+                preview_slot = dict(slot)
+                preview_slot.update(
+                    {
+                        "status": "preview_ready",
+                        "asset_origin": "generated_preview",
+                        "selected_asset_url": formatter._build_preview_image_url(
+                            primary_text=fallback_label["primary"],
+                            secondary_text=fallback_label["secondary"],
+                            template=template,
+                            image_kind=image_kind,
+                        ),
+                    }
+                )
+                preview_slots.append(preview_slot)
+            return formatter._render_wechat_html(
+                title=title,
+                summary=summary,
+                blocks=blocks,
+                image_slots=preview_slots,
+                template=template,
+                account_context=account_context,
+                outline_plan=outline_plan,
+            )
+        except Exception as exc:
+            logger.warning("draft_preview_layout_fallback_failed", error=str(exc))
+            return content_html
 
     async def list_drafts(
         self,

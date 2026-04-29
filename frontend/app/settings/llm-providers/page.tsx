@@ -466,6 +466,11 @@ export default function LLMProvidersPage() {
                             </>
                           ) : (
                             <>
+                              {selected ? (
+                                <Button variant="secondary" onClick={() => void handleTest()} disabled={testing}>
+                                  {testing ? "Testing..." : "Test Connection"}
+                                </Button>
+                              ) : null}
                               {selected && !selected.is_default ? (
                                 <Button variant="secondary" onClick={() => void handleSetDefault()}>
                                   Set as Default

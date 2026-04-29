@@ -112,8 +112,8 @@ export function Card({
   className,
   children,
 }: {
-  title?: string;
-  description?: string;
+  title?: React.ReactNode;
+  description?: React.ReactNode;
   action?: React.ReactNode;
   className?: string;
   children: React.ReactNode;
@@ -124,7 +124,7 @@ export function Card({
         <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
           <div className="space-y-1">
             {title ? <h2 className="text-lg font-semibold text-slate-900">{title}</h2> : null}
-            {description ? <p className="text-sm text-slate-500">{description}</p> : null}
+            {description ? <div className="text-sm text-slate-500">{description}</div> : null}
           </div>
           {action}
         </div>

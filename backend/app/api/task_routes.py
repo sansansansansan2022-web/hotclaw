@@ -36,6 +36,7 @@ from app.orchestrator.engine import orchestrator_engine
 from app.services.task_service import task_service
 from app.services.task_artifact_service import task_artifact_service
 from app.services.account_harness_service import account_harness_service
+from app.services.account_run_dispatch_service import account_run_dispatch_service
 from app.skills.services.evidence_service import evidence_service
 from app.skills.services.skill_runtime_service import skill_runtime_service
 from app.core.tracer import get_trace_id, generate_trace_id, set_trace_id, set_task_id
@@ -443,3 +444,24 @@ async def rerun_task(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiRes
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "workflow_id": task.workflow_id,
     })
+
+
+@router.delete("/{task_id}")
+async def delete_task(task_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
+    """
+    Delete a task and its task-scoped artifacts.
+
+    Active tasks are first cancelled/stopped, then drafts, node runs, evidence,
+    publish records and task-scoped logs are removed.
+    """
+    local_task = _background_tasks.pop(task_id, None)
+    cancelled_local_worker = False
+    if local_task is not None:
+        local_task.cancel()
+        cancelled_local_worker = True
+    cancelled_account_worker = account_run_dispatch_service.cancel(task_id)
+
+    result = await task_service.delete_task(task_id, db)
+    await db.commit()
+    result["cancelled_worker"] = bool(cancelled_local_worker or cancelled_account_worker)
+    return ApiResponse(data=result)

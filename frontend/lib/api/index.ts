@@ -41,6 +41,7 @@ import type {
   SystemConfigMap,
   SystemConfigValue,
   TaskCreateData,
+  TaskDeleteData,
   TaskDetail,
   TaskArtifact,
   TaskArtifactListResponse,
@@ -120,6 +121,73 @@ interface LLMProviderTestResponse {
   response_preview?: string;
   error_message?: string;
 }
+
+interface ImageGenerationConnectionTestRequest {
+  provider?: string;
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+}
+
+interface ImageGenerationConnectionTestResponse {
+  success: boolean;
+  latency_ms?: number;
+  response_preview?: string;
+  error_message?: string;
+}
+
+export interface ImageGenerationProviderPreset {
+  provider_id: string;
+  name: string;
+  default_model: string;
+  default_base_url: string;
+  api_key_hint: string;
+}
+
+export const IMAGE_GENERATION_PROVIDER_PRESETS: ImageGenerationProviderPreset[] = [
+  {
+    provider_id: "dashscope",
+    name: "Alibaba DashScope / Wan",
+    default_model: "wan2.7-image",
+    default_base_url: "https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation",
+    api_key_hint: "DASHSCOPE_API_KEY",
+  },
+  {
+    provider_id: "openai",
+    name: "OpenAI Images",
+    default_model: "gpt-image-1.5",
+    default_base_url: "https://api.openai.com/v1/images/generations",
+    api_key_hint: "OPENAI_API_KEY",
+  },
+  {
+    provider_id: "google_vertex",
+    name: "Google Vertex AI Imagen",
+    default_model: "imagen-4.0-generate-001",
+    default_base_url: "",
+    api_key_hint: "Google Cloud ADC or service account",
+  },
+  {
+    provider_id: "stability",
+    name: "Stability AI",
+    default_model: "stable-image-core",
+    default_base_url: "https://api.stability.ai/v2beta/stable-image/generate/core",
+    api_key_hint: "STABILITY_API_KEY",
+  },
+  {
+    provider_id: "volcengine",
+    name: "Volcengine Seedream",
+    default_model: "doubao-seedream-4-5-251128",
+    default_base_url: "https://ark.cn-beijing.volces.com/api/v3/images/generations",
+    api_key_hint: "LAS_API_KEY or Volcengine credentials",
+  },
+  {
+    provider_id: "custom",
+    name: "Custom / proxy",
+    default_model: "",
+    default_base_url: "",
+    api_key_hint: "Provider-specific API key",
+  },
+];
 
 export const LLM_PROVIDER_TEMPLATES: LLMProviderTemplate[] = [
   {
@@ -448,6 +516,10 @@ export async function getTaskEffectiveInput(taskId: string): Promise<TaskEffecti
 
 export async function rerunTask(taskId: string): Promise<TaskCreateData> {
   return request<TaskCreateData>(`/tasks/${taskId}/rerun`, { method: "POST" });
+}
+
+export async function deleteTask(taskId: string): Promise<TaskDeleteData> {
+  return request<TaskDeleteData>(`/tasks/${taskId}`, { method: "DELETE" });
 }
 
 export async function createAccount(data: AccountCreateRequest): Promise<AccountCreateData> {
@@ -893,6 +965,19 @@ export async function testLLMProvider(data: LLMProviderTestRequest): Promise<LLM
   });
 }
 
+export async function testImageGenerationConnection(
+  data: ImageGenerationConnectionTestRequest,
+): Promise<ImageGenerationConnectionTestResponse> {
+  return request<ImageGenerationConnectionTestResponse>(
+    "/system-configs/image-generation/test",
+    {
+      method: "POST",
+      body: JSON.stringify(data),
+    },
+    "raw",
+  );
+}
+
 export async function setDefaultLLMProvider(providerId: string): Promise<{ provider_id: string; message: string }> {
   return request<{ provider_id: string; message: string }>(`/llm-providers/active/default/${providerId}`, {
     method: "POST",
@@ -974,10 +1059,17 @@ export async function getSystemConfigValue(key: string, defaultValue?: string): 
   return result.value;
 }
 
+interface SystemConfigUpsertOptions {
+  category?: string;
+  description?: string;
+  isSensitive?: boolean;
+}
+
 export async function upsertSystemConfig(
   key: string,
   value: string,
   valueType: "string" | "number" | "boolean" | "json" = "string",
+  options: SystemConfigUpsertOptions = {},
 ): Promise<void> {
   try {
     await request(`/system-configs/${key}`, {
@@ -997,9 +1089,9 @@ export async function upsertSystemConfig(
       key,
       value,
       value_type: valueType,
-      category: "app",
-      description: "Global console language",
-      is_sensitive: false,
+      category: options.category ?? "app",
+      description: options.description ?? key,
+      is_sensitive: options.isSensitive ?? false,
     }),
   }, "raw");
 }

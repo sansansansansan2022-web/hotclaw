@@ -1,5 +1,6 @@
 from sqlalchemy import select
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
 from app.models.tables import RecommendedContentItemModel
 from app.services.account_service import account_service
@@ -26,6 +27,8 @@ async def _seed_recommendation(
     authority_score: float,
     freshness_score: float,
     source_payload_json: dict | None = None,
+    status: str = "new",
+    published_at=None,
 ):
     row = RecommendedContentItemModel(
         id=recommendation_id,
@@ -41,7 +44,8 @@ async def _seed_recommendation(
         reason="Account-fit recommendation",
         topic_tags_json=["AI", "Developer Tools"],
         source_payload_json=source_payload_json or {},
-        status="new",
+        status=status,
+        published_at=published_at,
     )
     db_session.add(row)
     await db_session.commit()
@@ -118,14 +122,21 @@ async def test_list_recommendations_bucket_high_and_extended(client, db_session)
     payload = response.json()
 
     assert payload["min_count"] == 5
-    assert payload["coverage"]["high_relevance_count"] == 3
-    assert payload["coverage"]["extended_count"] == 2
+    assert payload["coverage"]["high_relevance_count"] == 5
+    assert payload["coverage"]["extended_count"] == 0
     assert payload["coverage"]["returned_count"] == 5
     assert payload["coverage"]["meets_requested_min_count"] is True
-    assert payload["shortage_notice"]["status"] == "insufficient_high_relevance"
-    assert payload["shortage_notice"]["reason_code"] == "extended_items_needed"
-    assert [item["id"] for item in payload["high_relevance_items"]] == ["rec_high_1", "rec_high_2", "rec_high_3"]
-    assert [item["id"] for item in payload["extended_items"]] == ["rec_ext_1", "rec_ext_2"]
+    assert payload["coverage"]["relaxed_count"] == 2
+    assert payload["shortage_notice"]["status"] == "ok"
+    assert payload["shortage_notice"]["reason_code"] is None
+    assert [item["id"] for item in payload["high_relevance_items"]] == [
+        "rec_high_1",
+        "rec_high_2",
+        "rec_high_3",
+        "rec_ext_1",
+        "rec_ext_2",
+    ]
+    assert payload["extended_items"] == []
     returned_ids = {
         item["id"]
         for item in [*payload["high_relevance_items"], *payload["extended_items"]]
@@ -144,6 +155,45 @@ async def test_list_recommendations_rejects_invalid_min_count(client):
     response = await client.get(f"/api/v1/accounts/{account_id}/recommendations?min_count=6")
     assert response.status_code == 400, response.text
     assert "min_count" in response.json()["detail"]
+
+
+async def test_list_recommendations_keeps_stale_selected_items_below_fresh_candidates(client, db_session):
+    account_id = await _create_account(
+        client,
+        {
+            "name": "Recommendation Freshness Account",
+            "positioning": "A developer-facing AI tooling account.",
+        },
+    )
+
+    await _seed_recommendation(
+        db_session,
+        account_id=account_id,
+        recommendation_id="rec_selected_old",
+        title="Old selected item",
+        relevance_score=0.51,
+        authority_score=0.50,
+        freshness_score=0.35,
+        status="selected",
+        published_at=datetime(2026, 4, 13, tzinfo=timezone.utc),
+    )
+    await _seed_recommendation(
+        db_session,
+        account_id=account_id,
+        recommendation_id="rec_new_fresh",
+        title="Fresh candidate",
+        relevance_score=0.45,
+        authority_score=0.60,
+        freshness_score=1.00,
+        published_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+    )
+
+    response = await client.get(f"/api/v1/accounts/{account_id}/recommendations?min_count=5")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    returned_items = [*payload["high_relevance_items"], *payload["extended_items"]]
+    assert returned_items[0]["title"] == "Fresh candidate"
 
 
 async def test_list_recommendations_promotes_decent_news_matches_into_high_relevance(client, db_session):
@@ -213,6 +263,7 @@ async def test_refresh_recommendations_returns_bucketed_shape(client, db_session
         relevance_score=0.84,
         authority_score=0.72,
         freshness_score=0.69,
+        source_payload_json={"collector": {"source_key": "news_article_feed"}},
     )
     extended = await _seed_recommendation(
         db_session,
@@ -222,6 +273,7 @@ async def test_refresh_recommendations_returns_bucketed_shape(client, db_session
         relevance_score=0.56,
         authority_score=0.51,
         freshness_score=0.47,
+        source_payload_json={"collector": {"source_key": "news_article_feed"}},
     )
 
     async def _fake_refresh(target_account_id: str, db):
@@ -270,13 +322,15 @@ async def test_refresh_recommendations_returns_bucketed_shape(client, db_session
     payload = response.json()
 
     assert payload["min_count"] == 5
-    assert payload["coverage"]["high_relevance_count"] == 1
-    assert payload["coverage"]["extended_count"] == 1
+    assert payload["coverage"]["high_relevance_count"] == 2
+    assert payload["coverage"]["extended_count"] == 0
     assert payload["coverage"]["returned_count"] == 2
     assert payload["coverage"]["shortage_count"] == 3
+    assert payload["coverage"]["relaxed_count"] == 1
     assert payload["shortage_notice"]["status"] == "insufficient_total"
     assert payload["shortage_notice"]["reason_code"] == "insufficient_total"
     assert payload["source_diagnostics"][0]["label"] == "News Feed"
+    assert payload["filter_diagnostics"]["high_relevance_count"] == payload["coverage"]["high_relevance_count"]
     returned_ids = [
         item["id"] for item in [*payload["high_relevance_items"], *payload["extended_items"]]
     ]

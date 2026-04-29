@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import select
 
 from app.core.exceptions import HotClawError
-from app.models.tables import AccountModel, TaskModel
+from app.models.tables import AccountModel, TaskModel, TaskNodeRunModel
 from app.services.task_service import task_service
 
 
@@ -155,5 +155,54 @@ async def test_run_task_marks_timeout_with_terminal_state(db_session, monkeypatc
     assert "timed out" in (refreshed_task.error_message or "")
     assert isinstance(refreshed_task.result_data, dict)
     assert refreshed_task.result_data["execution_meta"]["timed_out"] is True
+    assert refreshed_account is not None
+    assert refreshed_account.last_run_status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_recover_interrupted_active_tasks_unblocks_account(db_session):
+    """Startup recovery should fail orphaned active tasks from a previous process."""
+    account = AccountModel(
+        id="acc-interrupted",
+        name="A",
+        positioning="P",
+        operation_mode="semi_auto",
+        auto_run_enabled=True,
+        is_active=True,
+        posting_frequency="daily",
+        last_run_status="running",
+    )
+    task = TaskModel(
+        id="task-interrupted",
+        workflow_id="default_pipeline",
+        status="running",
+        input_data={"positioning": "x"},
+        account_id=account.id,
+        started_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+    )
+    node = TaskNodeRunModel(
+        task_id=task.id,
+        node_id="section_writer",
+        agent_id="section_writer_agent",
+        status="running",
+        started_at=datetime.now(timezone.utc) - timedelta(minutes=4),
+    )
+    db_session.add_all([account, task, node])
+    await db_session.commit()
+
+    recovered_count = await task_service.recover_interrupted_active_tasks(db_session)
+
+    refreshed_task = await db_session.get(TaskModel, task.id)
+    refreshed_node = await db_session.get(TaskNodeRunModel, node.id)
+    refreshed_account = await db_session.get(AccountModel, account.id)
+
+    assert recovered_count == 1
+    assert refreshed_task is not None
+    assert refreshed_task.status == "failed"
+    assert refreshed_task.completed_at is not None
+    assert "backend restart" in (refreshed_task.error_message or "")
+    assert refreshed_node is not None
+    assert refreshed_node.status == "failed"
+    assert refreshed_node.completed_at is not None
     assert refreshed_account is not None
     assert refreshed_account.last_run_status == "failed"

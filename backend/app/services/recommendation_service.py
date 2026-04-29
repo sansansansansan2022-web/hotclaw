@@ -172,7 +172,7 @@ class RecommendationService:
                 "source_type": row.source_type,
                 "source_name": row.source_name,
                 "source_url": row.source_url,
-                "published_at": row.published_at,
+                "published_at": self._as_utc_datetime(row.published_at),
             },
             "scores": {
                 "relevance": row.relevance_score,
@@ -190,6 +190,13 @@ class RecommendationService:
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
+
+    def _as_utc_datetime(self, value: datetime | None) -> datetime | None:
+        if not isinstance(value, datetime):
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     def build_list_summary(self, rows: list[RecommendedContentItemModel]) -> dict[str, dict[str, int]]:
         source_counts: dict[str, int] = {}
@@ -220,7 +227,7 @@ class RecommendationService:
         requested = self.normalize_min_count(min_count)
         high_relevance_items: list[RecommendedContentItemModel] = []
         extended_items: list[RecommendedContentItemModel] = []
-        ranked_rows = sorted(rows, key=self._recommendation_quality_score, reverse=True)
+        ranked_rows = sorted(rows, key=self._recommendation_rank_key, reverse=True)
         dynamic_high_bar = self._dynamic_high_relevance_bar(ranked_rows)
 
         for row in ranked_rows:
@@ -231,6 +238,7 @@ class RecommendationService:
                 extended_items.append(row)
 
         promoted_items = self._promote_best_extended_items(
+            requested_count=requested,
             high_relevance_items=high_relevance_items,
             extended_items=extended_items,
         )
@@ -255,15 +263,21 @@ class RecommendationService:
             "returned_count": returned_count,
             "shortage_count": shortage_count,
             "meets_requested_min_count": returned_count >= requested,
+            "relaxed_count": len(promoted_items),
         }
+        normalized_diagnostics = self._build_diagnostics_payload(
+            rows=ranked_rows,
+            source_diagnostics=(diagnostics or {}).get("source_diagnostics") or [],
+            promoted_high_ids={item.id for item in promoted_items},
+        )
         return {
             "min_count": requested,
             "high_relevance_items": high_relevance_items,
             "extended_items": extended_items,
             "coverage": coverage,
             "shortage_notice": shortage_notice,
-            "source_diagnostics": (diagnostics or {}).get("source_diagnostics") or [],
-            "filter_diagnostics": (diagnostics or {}).get("filter_diagnostics") or self._build_filter_diagnostics(rows),
+            "source_diagnostics": normalized_diagnostics["source_diagnostics"],
+            "filter_diagnostics": normalized_diagnostics["filter_diagnostics"],
         }
 
     async def _collect_hot_topic_recommendations(
@@ -856,6 +870,33 @@ class RecommendationService:
             4,
         )
 
+    def _recommendation_rank_key(self, row: RecommendedContentItemModel) -> tuple[float, float, float, float, float]:
+        status_rank = 0.0 if str(row.status or "") == "selected" else 1.0
+        activity_time = row.published_at or row.updated_at or row.created_at
+        published_ts = row.published_at.timestamp() if isinstance(row.published_at, datetime) else 0.0
+        return (
+            status_rank,
+            self._recency_rank(row),
+            published_ts,
+            self._recommendation_quality_score(row),
+            float(row.freshness_score or 0.0),
+        )
+
+    def _recency_rank(self, row: RecommendedContentItemModel) -> float:
+        activity_time = row.published_at
+        if not isinstance(activity_time, datetime):
+            return 0.0
+        if activity_time.tzinfo is None:
+            activity_time = activity_time.replace(tzinfo=timezone.utc)
+        age_hours = max((datetime.now(timezone.utc) - activity_time.astimezone(timezone.utc)).total_seconds() / 3600.0, 0.0)
+        if age_hours <= 24:
+            return 3.0
+        if age_hours <= 48:
+            return 2.0
+        if age_hours <= 168:
+            return 1.0
+        return 0.0
+
     def _dynamic_high_relevance_bar(self, rows: list[RecommendedContentItemModel]) -> float:
         if not rows:
             return 0.72
@@ -889,21 +930,24 @@ class RecommendationService:
     def _promote_best_extended_items(
         self,
         *,
+        requested_count: int,
         high_relevance_items: list[RecommendedContentItemModel],
         extended_items: list[RecommendedContentItemModel],
     ) -> list[RecommendedContentItemModel]:
-        if high_relevance_items or not extended_items:
+        needed = max(int(requested_count) - len(high_relevance_items), 0)
+        if needed <= 0 or not extended_items:
             return []
         promotable = [
             row
             for row in extended_items
-            if self._recommendation_quality_score(row) >= 0.56
-            and float(row.relevance_score or 0.0) >= 0.50
+            if self._recommendation_quality_score(row) >= 0.48
+            and float(row.relevance_score or 0.0) >= 0.42
             and self._account_fit_score(row) >= 0.45
-            and float(row.authority_score or 0.0) >= 0.32
+            and float(row.authority_score or 0.0) >= 0.28
+            and self._overall_score(row) >= 0.48
         ]
-        promotable.sort(key=self._recommendation_quality_score, reverse=True)
-        return promotable[:2]
+        promotable.sort(key=self._recommendation_rank_key, reverse=True)
+        return promotable[:needed]
 
     def _build_shortage_notice(
         self,
@@ -922,17 +966,11 @@ class RecommendationService:
                 "recommended_action": None,
             }
         if returned_count >= requested_min_count:
-            top_tier_label = "high-relevance"
-            if high_relevance_count <= 0 and extended_count > 0:
-                top_tier_label = "top-tier"
             return {
-                "status": "insufficient_high_relevance",
-                "reason_code": "extended_items_needed",
-                "message": (
-                    f"Only {high_relevance_count} {top_tier_label} recommendation(s) met the account-fit bar. "
-                    f"Added {extended_count} extended item(s) to reach the requested {requested_min_count}."
-                ),
-                "recommended_action": "Review extended items as optional supporting sources before previewing the piece.",
+                "status": "ok",
+                "reason_code": None,
+                "message": None,
+                "recommended_action": None,
             }
         filter_diagnostics = diagnostics.get("filter_diagnostics") if isinstance(diagnostics, dict) else {}
         source_diagnostics = diagnostics.get("source_diagnostics") if isinstance(diagnostics, dict) else []
@@ -992,9 +1030,21 @@ class RecommendationService:
         *,
         rows: list[RecommendedContentItemModel],
         source_diagnostics: list[dict[str, Any]],
+        promoted_high_ids: set[str] | None = None,
     ) -> dict[str, Any]:
-        source_summary = self._hydrate_source_diagnostics(rows, source_diagnostics)
-        filter_diagnostics = self._build_filter_diagnostics(rows)
+        ranked_rows = sorted(rows, key=self._recommendation_quality_score, reverse=True)
+        dynamic_high_bar = self._dynamic_high_relevance_bar(ranked_rows)
+        source_summary = self._hydrate_source_diagnostics(
+            ranked_rows,
+            source_diagnostics,
+            dynamic_high_bar=dynamic_high_bar,
+            promoted_high_ids=promoted_high_ids or set(),
+        )
+        filter_diagnostics = self._build_filter_diagnostics(
+            ranked_rows,
+            dynamic_high_bar=dynamic_high_bar,
+            promoted_high_ids=promoted_high_ids or set(),
+        )
         filter_diagnostics["sources_failed_or_disabled"] = len(
             [
                 item
@@ -1011,7 +1061,11 @@ class RecommendationService:
         self,
         rows: list[RecommendedContentItemModel],
         source_diagnostics: list[dict[str, Any]],
+        *,
+        dynamic_high_bar: float | None = None,
+        promoted_high_ids: set[str] | None = None,
     ) -> list[dict[str, Any]]:
+        promoted_high_ids = promoted_high_ids or set()
         grouped: dict[str, dict[str, int]] = {}
         for row in rows:
             payload = row.source_payload_json if isinstance(row.source_payload_json, dict) else {}
@@ -1022,7 +1076,7 @@ class RecommendationService:
                 {"candidate_count": 0, "high_relevance_count": 0, "extended_count": 0},
             )
             bucket["candidate_count"] += 1
-            if self._is_high_relevance(row):
+            if row.id in promoted_high_ids or self._is_high_relevance(row, dynamic_high_bar=dynamic_high_bar):
                 bucket["high_relevance_count"] += 1
             elif self._is_extended_candidate(row):
                 bucket["extended_count"] += 1
@@ -1078,7 +1132,14 @@ class RecommendationService:
         )
         return hydrated
 
-    def _build_filter_diagnostics(self, rows: list[RecommendedContentItemModel]) -> dict[str, int]:
+    def _build_filter_diagnostics(
+        self,
+        rows: list[RecommendedContentItemModel],
+        *,
+        dynamic_high_bar: float | None = None,
+        promoted_high_ids: set[str] | None = None,
+    ) -> dict[str, int]:
+        promoted_high_ids = promoted_high_ids or set()
         diagnostics = {
             "raw_candidate_count": len(rows),
             "high_relevance_count": 0,
@@ -1096,7 +1157,7 @@ class RecommendationService:
             source_key = str(collector.get("source_key") or row.source_type or "").strip()
             if source_key:
                 source_keys.add(source_key)
-            if self._is_high_relevance(row):
+            if row.id in promoted_high_ids or self._is_high_relevance(row, dynamic_high_bar=dynamic_high_bar):
                 diagnostics["high_relevance_count"] += 1
                 continue
             if self._is_extended_candidate(row):

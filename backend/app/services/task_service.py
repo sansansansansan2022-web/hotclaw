@@ -764,6 +764,68 @@ class TaskService:
         if changed:
             await db.commit()
 
+    async def recover_interrupted_active_tasks(
+        self,
+        db: AsyncSession,
+        *,
+        reason: str = "task interrupted by backend restart",
+    ) -> int:
+        """Fail active tasks that cannot be resumed after an in-process worker restart."""
+        result = await db.execute(
+            select(TaskModel).where(TaskModel.status.in_(["pending", "running"]))
+        )
+        active_tasks = list(result.scalars().all())
+        if not active_tasks:
+            return 0
+
+        completed_at = datetime.now(timezone.utc)
+        timeout_seconds = self._get_task_timeout_seconds()
+        recovered_count = 0
+
+        for task in active_tasks:
+            previous_status = task.status
+            closed_nodes = await self._mark_running_nodes_terminal(
+                task.id,
+                db,
+                reason,
+                terminal_status="failed",
+            )
+            task.status = "failed"
+            task.error_message = reason
+            task.completed_at = completed_at
+            task.elapsed_seconds = self.calculate_elapsed_seconds(
+                status="failed",
+                started_at=task.started_at,
+                completed_at=completed_at,
+                elapsed_seconds=None,
+            )
+            task.result_data = self._attach_execution_meta(
+                task.result_data if isinstance(task.result_data, dict) else {},
+                trace_id=get_trace_id() or generate_trace_id(),
+                timeout_seconds=timeout_seconds,
+                simulated=False,
+                simulation_source=None,
+                provider=self._detect_provider(),
+                timed_out=False,
+            )
+            db.add(task)
+            recovered_count += 1
+
+            if task.account_id:
+                await self._update_account_run_status(task.account_id, db, "failed", reason)
+
+            logger.warning(
+                "interrupted_active_task_recovered",
+                task_id=task.id,
+                account_id=task.account_id,
+                previous_status=previous_status,
+                closed_node_count=len(closed_nodes),
+                reason=reason,
+            )
+
+        await db.commit()
+        return recovered_count
+
     async def _mark_running_nodes_failed(
         self,
         task_id: str,

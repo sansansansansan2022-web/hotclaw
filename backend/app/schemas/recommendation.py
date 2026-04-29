@@ -66,6 +66,7 @@ class RecommendationCoverageResponse(BaseModel):
     returned_count: int
     shortage_count: int
     meets_requested_min_count: bool
+    relaxed_count: int = 0
 
 
 class RecommendationShortageNoticeResponse(BaseModel):

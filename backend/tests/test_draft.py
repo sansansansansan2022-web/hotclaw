@@ -199,4 +199,149 @@ class TestDraftService:
         detail = await draft_service.get_draft_detail(pending_draft.id, db_session)
 
         assert detail["content_html"]
-        assert "<h1>" in detail["content_html"]
+        assert "rich_media_title" in detail["content_html"]
+
+    @pytest.mark.asyncio
+    async def test_get_draft_detail_marks_superseded_task_draft(self, db_session, pending_draft):
+        newer_draft = ArticleDraftModel(
+            task_id=pending_draft.task_id,
+            account_id=pending_draft.account_id,
+            title="Newer draft",
+            content_markdown="# Newer draft",
+            content_html="<h1>Newer draft</h1><img src=\"data:image/svg+xml;base64,abc\" />",
+            word_count=20,
+            draft_status="draft",
+            publish_status="not_published",
+            source_type="manual_task",
+        )
+        db_session.add(newer_draft)
+        await db_session.commit()
+
+        detail = await draft_service.get_draft_detail(pending_draft.id, db_session)
+
+        assert detail["is_latest_for_task"] is False
+        assert detail["latest_draft_id"] == newer_draft.id
+
+    @pytest.mark.asyncio
+    async def test_draft_detail_api_exposes_superseded_task_draft(self, db_session, client, pending_draft):
+        newer_draft = ArticleDraftModel(
+            task_id=pending_draft.task_id,
+            account_id=pending_draft.account_id,
+            title="Newest API draft",
+            content_markdown="# Newest API draft",
+            content_html="<h1>Newest API draft</h1>",
+            word_count=20,
+            draft_status="draft",
+            publish_status="not_published",
+            source_type="manual_task",
+        )
+        db_session.add(newer_draft)
+        await db_session.commit()
+
+        response = await client.get(f"/api/v1/drafts/{pending_draft.id}")
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["is_latest_for_task"] is False
+        assert payload["latest_draft_id"] == newer_draft.id
+
+    @pytest.mark.asyncio
+    async def test_draft_detail_api_exposes_post_process_result(self, db_session, client, account):
+        task = TaskModel(
+            id="draft-post-process-api-task",
+            account_id=account.id,
+            workflow_id="default_pipeline",
+            status="completed",
+            result_data={
+                "content": {
+                    "selected_title": "草稿配图规划",
+                    "content_markdown": "# 草稿配图规划\n\n正文",
+                    "word_count": 20,
+                    "tags": ["配图"],
+                },
+                "post_process_result": {
+                    "used_post_process": True,
+                    "final_content_markdown": "# 草稿配图规划\n\n增强正文",
+                    "final_content_html": "<section><h1>草稿配图规划</h1><p>增强正文</p></section>",
+                    "image_slots": [
+                        {
+                            "slot_id": "cover",
+                            "placement": "cover",
+                            "status": "planned",
+                            "image_kind": "cover",
+                            "asset_origin": "none",
+                            "binding_status": "not_bound",
+                            "draft_visibility": "planned_only",
+                        }
+                    ],
+                    "cover_image_prompt": "Cover prompt",
+                },
+            },
+        )
+        db_session.add(task)
+        await db_session.commit()
+
+        draft = await draft_service.create_draft_from_task(
+            task_id=task.id,
+            result_data=task.result_data,
+            account_id=account.id,
+            operation_mode="manual",
+            db=db_session,
+        )
+        await db_session.commit()
+
+        response = await client.get(f"/api/v1/drafts/{draft.id}")
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["latest_draft_id"] == draft.id
+        assert payload["is_latest_for_task"] is True
+        assert payload["post_process_result"]["used_post_process"] is True
+        assert payload["post_process_result"]["image_slots"][0]["slot_id"] == "cover"
+
+    @pytest.mark.asyncio
+    async def test_draft_detail_falls_back_to_reference_digest_memories(self, db_session, client, account):
+        task = TaskModel(
+            id="draft-reference-digest-api-task",
+            account_id=account.id,
+            workflow_id="default_pipeline",
+            status="completed",
+            result_data={
+                "content": {
+                    "selected_title": "Reference Digest Draft",
+                    "content_markdown": "# Reference Digest Draft\n\nBody",
+                    "word_count": 20,
+                    "tags": [],
+                },
+                "reference_digest": {
+                    "source_digests": [
+                        {
+                            "source_id": "ref-1",
+                            "source_type": "wechat_account",
+                            "source_name": "Reference Account",
+                            "source_title": "Historical Article Title",
+                            "snippet": "Useful historical article excerpt.",
+                            "fit_score": 0.72,
+                        }
+                    ]
+                },
+            },
+        )
+        db_session.add(task)
+        await db_session.commit()
+
+        draft = await draft_service.create_draft_from_task(
+            task_id=task.id,
+            result_data=task.result_data,
+            account_id=account.id,
+            operation_mode="manual",
+            db=db_session,
+        )
+        await db_session.commit()
+
+        response = await client.get(f"/api/v1/drafts/{draft.id}")
+
+        assert response.status_code == 200, response.text
+        payload = response.json()
+        assert payload["retrieved_memories"][0]["title"] == "Historical Article Title"
+        assert payload["retrieved_memories"][0]["content_excerpt"] == "Useful historical article excerpt."

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { listTasks, rerunTask } from "@/lib/api";
+import { deleteTask, listTasks, rerunTask } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatDateTime, formatDuration, formatNumber, truncate } from "@/lib/utils";
 import type { TaskSummary } from "@/types";
@@ -63,6 +63,31 @@ export function TaskHistoryPage({ initialAccountId }: { initialAccountId?: strin
         tone: "danger",
         title: t("tasks.rerunFailed"),
         message: rerunError instanceof Error ? rerunError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error",
+      });
+    }
+  };
+
+  const removeTask = async (taskId: string) => {
+    const confirmed = window.confirm(
+      locale === "zh-CN"
+        ? `确定删除任务 ${taskId} 吗？运行中的任务会先停止，关联草稿和执行记录也会被清理。`
+        : `Delete task ${taskId}? Running work will be stopped and related drafts/traces will be removed.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteTask(taskId);
+      pushToast({
+        tone: "success",
+        title: locale === "zh-CN" ? "任务已删除" : "Task deleted",
+        message: locale === "zh-CN" ? `任务 ${taskId} 已清理。` : `Task ${taskId} was removed.`,
+      });
+      await load();
+    } catch (deleteError) {
+      pushToast({
+        tone: "danger",
+        title: locale === "zh-CN" ? "删除任务失败" : "Failed to delete task",
+        message: deleteError instanceof Error ? deleteError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error",
       });
     }
   };
@@ -151,6 +176,9 @@ export function TaskHistoryPage({ initialAccountId }: { initialAccountId?: strin
                   </Link>
                   <Button variant="ghost" size="sm" onClick={() => void rerun(task.task_id)}>
                     {t("tasks.rerun")}
+                  </Button>
+                  <Button variant="destructive" size="sm" onClick={() => void removeTask(task.task_id)}>
+                    {locale === "zh-CN" ? "删除" : "Delete"}
                   </Button>
                 </div>
               </td>

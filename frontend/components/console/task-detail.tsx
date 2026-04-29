@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { getTaskArtifacts, getTaskDetail, getTaskEffectiveInput, getTaskNodes, rerunTask } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { deleteTask, getTaskArtifacts, getTaskDetail, getTaskEffectiveInput, getTaskNodes, rerunTask } from "@/lib/api";
 import {
   normalizeContentMemories,
   normalizeEvaluation,
@@ -30,6 +31,7 @@ import {
 } from "@/components/console/content-insights";
 import { Badge, Button, Card, EmptyState, ErrorState, PageHeader, SkeletonRows, StatCard, Table } from "@/components/console/ui";
 import { Icon } from "@/components/console/icons";
+import { useAppStore } from "@/store/appStore";
 
 function taskTone(status: string): "success" | "warning" | "danger" | "muted" {
   if (status === "completed") return "success";
@@ -54,8 +56,106 @@ function fallbackSections(detail: TaskDetail | null): SectionDraft[] {
   }));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function countItems(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function firstText(value: unknown, keys: string[]): string | null {
+  if (!isRecord(value)) return null;
+  for (const key of keys) {
+    const text = value[key];
+    if (typeof text === "string" && text.trim()) {
+      return text.trim();
+    }
+  }
+  return null;
+}
+
+function summarizeEffectiveInput(
+  effectiveInput: TaskEffectiveInputResponse | null,
+  detail: TaskDetail | null,
+  locale: string,
+): string[] {
+  const isZh = locale === "zh-CN";
+  const lines: string[] = [];
+  const explicitInput = effectiveInput?.explicit_input ?? null;
+  const hasExplicitInput = Boolean(explicitInput && Object.keys(explicitInput).length > 0);
+  const positioning =
+    typeof effectiveInput?.positioning === "string" && effectiveInput.positioning.trim()
+      ? effectiveInput.positioning.trim()
+      : typeof detail?.input_data?.positioning === "string" && detail.input_data.positioning.trim()
+        ? detail.input_data.positioning.trim()
+        : null;
+
+  const selectedRecommendations =
+    countItems(effectiveInput?.selected_recommendations) || countItems(explicitInput?.selected_recommendations);
+  const selectedReferenceSources =
+    countItems(effectiveInput?.selected_reference_sources) || countItems(explicitInput?.selected_reference_sources);
+  const queryLane =
+    firstText((effectiveInput?.query_plan as Record<string, unknown> | null | undefined)?.lane, ["label", "name"]) ??
+    firstText((explicitInput?.query_plan as Record<string, unknown> | null | undefined)?.lane, ["label", "name"]);
+  const outlineSeed = effectiveInput?.outline_seed ?? explicitInput?.outline_seed;
+  const outlineTitle = firstText(outlineSeed, ["title", "topic", "heading"]);
+  const creationNote =
+    typeof effectiveInput?.creation_note === "string" && effectiveInput.creation_note.trim()
+      ? effectiveInput.creation_note.trim()
+      : typeof explicitInput?.creation_note === "string" && explicitInput.creation_note.trim()
+        ? explicitInput.creation_note.trim()
+        : null;
+
+  if (positioning) {
+    lines.push(isZh ? `\u521b\u4f5c\u5b9a\u4f4d\uff1a${positioning}` : `Positioning: ${positioning}`);
+  }
+
+  if (hasExplicitInput) {
+    lines.push(
+      isZh
+        ? "\u672c\u6b21\u4efb\u52a1\u4f7f\u7528\u4e86\u4eba\u5de5\u786e\u8ba4\u7684\u663e\u5f0f\u521b\u4f5c\u8f93\u5165\uff0c\u539f\u59cb payload \u5df2\u5728\u524d\u7aef\u9690\u85cf\u3002"
+        : "This task used an explicit creation payload. The raw payload is hidden in the UI.",
+    );
+  } else {
+    lines.push(
+      isZh
+        ? "\u672a\u68c0\u6d4b\u5230\u663e\u5f0f\u521b\u4f5c\u8f93\u5165\uff1b\u539f\u59cb task input \u4e0d\u5728\u524d\u7aef\u76f4\u63a5\u5c55\u793a\u3002"
+        : "No explicit creation payload was detected. The raw task input is not rendered directly.",
+    );
+  }
+
+  if (selectedRecommendations > 0) {
+    lines.push(
+      isZh
+        ? `\u5df2\u9009\u62e9 ${selectedRecommendations} \u6761\u63a8\u8350\u7d20\u6750\u3002`
+        : `${selectedRecommendations} recommendation${selectedRecommendations === 1 ? "" : "s"} selected.`,
+    );
+  }
+  if (selectedReferenceSources > 0) {
+    lines.push(
+      isZh
+        ? `\u5df2\u7ed1\u5b9a ${selectedReferenceSources} \u4e2a\u53c2\u8003\u6765\u6e90\u3002`
+        : `${selectedReferenceSources} reference source${selectedReferenceSources === 1 ? "" : "s"} attached.`,
+    );
+  }
+  if (queryLane) {
+    lines.push(isZh ? `\u5185\u5bb9\u65b9\u5411\uff1a${queryLane}` : `Content lane: ${queryLane}`);
+  }
+  if (outlineTitle) {
+    lines.push(isZh ? `\u5927\u7eb2\u79cd\u5b50\uff1a${outlineTitle}` : `Outline seed: ${outlineTitle}`);
+  }
+  if (creationNote) {
+    lines.push(isZh ? `\u521b\u4f5c\u5907\u6ce8\uff1a${creationNote}` : `Creation note: ${creationNote}`);
+  }
+
+  return lines;
+}
+
 export function TaskDetailPage({ taskId }: { taskId: string }) {
   const { locale, taskStatusLabel } = useI18n();
+  const router = useRouter();
+  const pushToast = useAppStore((state) => state.pushToast);
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [nodes, setNodes] = useState<NodeRun[]>([]);
   const [artifacts, setArtifacts] = useState<TaskArtifact[]>([]);
@@ -137,21 +237,7 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
     };
   }, [artifactMap, detail]);
 
-  const inputSnapshot = useMemo(() => {
-    if (effectiveInput?.explicit_input && Object.keys(effectiveInput.explicit_input).length > 0) {
-      return JSON.stringify(effectiveInput.explicit_input, null, 2);
-    }
-
-    if (!detail?.input_data) {
-      return locale === "zh-CN" ? "暂无输入快照。" : "No input snapshot available.";
-    }
-
-    if (typeof detail.input_data.positioning === "string" && detail.input_data.positioning.trim()) {
-      return detail.input_data.positioning;
-    }
-
-    return JSON.stringify(detail.input_data, null, 2);
-  }, [detail, effectiveInput, locale]);
+  const inputSummary = useMemo(() => summarizeEffectiveInput(effectiveInput, detail, locale), [detail, effectiveInput, locale]);
 
   const positioningSnapshot = useMemo(() => {
     if (typeof effectiveInput?.positioning === "string" && effectiveInput.positioning.trim()) {
@@ -160,12 +246,36 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
     if (typeof detail?.input_data?.positioning === "string" && detail.input_data.positioning.trim()) {
       return detail.input_data.positioning;
     }
-    return inputSnapshot;
-  }, [detail, effectiveInput, inputSnapshot]);
+    return inputSummary[0] ?? (locale === "zh-CN" ? "\u6682\u65e0\u8f93\u5165\u6458\u8981\u3002" : "No input summary available.");
+  }, [detail, effectiveInput, inputSummary, locale]);
 
   const opsContext = detail?.ops_context ?? null;
   const runStrategy = opsContext?.run_strategy ?? null;
   const healthSummary = opsContext?.account_health ?? null;
+  const removeTask = async () => {
+    const confirmed = window.confirm(
+      locale === "zh-CN"
+        ? `确定删除任务 ${taskId} 吗？运行中的任务会先停止，关联草稿和执行记录也会被清理。`
+        : `Delete task ${taskId}? Running work will be stopped and related drafts/traces will be removed.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteTask(taskId);
+      pushToast({
+        tone: "success",
+        title: locale === "zh-CN" ? "任务已删除" : "Task deleted",
+        message: locale === "zh-CN" ? `任务 ${taskId} 已清理。` : `Task ${taskId} was removed.`,
+      });
+      router.push(detail?.account_id ? `/tasks/history?account_id=${encodeURIComponent(detail.account_id)}` : "/tasks/history");
+    } catch (deleteError) {
+      pushToast({
+        tone: "danger",
+        title: locale === "zh-CN" ? "删除任务失败" : "Failed to delete task",
+        message: deleteError instanceof Error ? deleteError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error",
+      });
+    }
+  };
 
   return (
     <div className="space-y-8">
@@ -201,6 +311,9 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
               }}
             >
               {locale === "zh-CN" ? "重新运行" : "Rerun"}
+            </Button>
+            <Button variant="destructive" data-testid="task-delete-button" onClick={() => void removeTask()}>
+              {locale === "zh-CN" ? "删除任务" : "Delete Task"}
             </Button>
             <Link href="/tasks/history">
               <Button variant="secondary">{locale === "zh-CN" ? "返回任务历史" : "Back to History"}</Button>
@@ -317,7 +430,7 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
             title={locale === "zh-CN" ? "阶段产物" : "Stage Artifacts"}
             description={
               locale === "zh-CN"
-                ? "浠ュ眬閮ㄧ敤鎴疯瑙掓煡鐪嬭繖娆′换鍔＄湡姝ｅ唴鍚冧簡浠€涔堛€佷骇鍑轰簡浠€涔堬紝鑺傜偣杞ㄨ抗鏀惧埌浜岀骇瑙嗗浘銆?"
+                ? "\u5148\u4ece\u5c40\u90e8\u7528\u6237\u89c6\u89d2\u67e5\u770b\u8fd9\u6b21\u4efb\u52a1\u771f\u6b63\u5403\u5230\u4e86\u4ec0\u4e48\u3001\u4ea7\u51fa\u4e86\u4ec0\u4e48\uff0c\u8282\u70b9\u8f68\u8ff9\u653e\u5230\u4e8c\u7ea7\u89c6\u56fe\u3002"
                 : "Review the user-facing stage artifacts first, then drop into node trace when you need lower-level debugging."
             }
           >
@@ -447,14 +560,20 @@ export function TaskDetailPage({ taskId }: { taskId: string }) {
           ) : null}
 
           <Card
-            title={locale === "zh-CN" ? "有效输入" : "Effective Input"}
+            title={locale === "zh-CN" ? "\u521b\u4f5c\u8f93\u5165\u6458\u8981" : "Creation Input Summary"}
             description={
               locale === "zh-CN"
-                ? "优先显示这次任务真正吃到的显式创作输入；如果没有，再回退到原始 task input。"
-                : "Prefer the explicit creation payload actually consumed by this run, then fall back to the raw task input."
+                ? "\u53ea\u5c55\u793a\u53ef\u8bfb\u6458\u8981\uff0c\u4e0d\u5728\u9875\u9762\u76f4\u63a5\u66b4\u9732\u539f\u59cb task input \u6216\u663e\u5f0f payload\u3002"
+                : "Show a readable summary only. Raw task input and explicit payloads are not rendered on this page."
             }
           >
-            <pre className="whitespace-pre-wrap text-sm leading-7 text-slate-600">{inputSnapshot}</pre>
+            <ul className="space-y-2 text-sm leading-7 text-slate-600">
+              {inputSummary.map((line) => (
+                <li key={line} className="rounded-2xl bg-slate-50 px-4 py-2">
+                  {line}
+                </li>
+              ))}
+            </ul>
           </Card>
 
           <div className="space-y-6">
