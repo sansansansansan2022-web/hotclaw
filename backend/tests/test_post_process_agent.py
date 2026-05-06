@@ -63,6 +63,10 @@ async def test_post_process_agent_generates_wechat_layout_template():
     assert "发布前检查" not in result.data["final_content_markdown"]
     assert result.data["wechat_publish_format"]["content_format"] == "wechat_inline_html"
     assert result.data["wechat_publish_format"]["template_id"] == result.data["layout_template"]["id"]
+    layout_artifacts = result.data["layout_artifacts"]
+    assert layout_artifacts["primary"]["artifact_type"] == "html_ppt_deck"
+    assert layout_artifacts["primary"]["status"] == "preview_ready"
+    assert layout_artifacts["primary"]["entry_html"].startswith("<!doctype html>")
     assert result.data["image_slots"][0]["slot_id"] == "cover"
     for slot in result.data["image_slots"]:
         assert slot["status"] == "preview_ready"

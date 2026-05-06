@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.services.article_assembler_service import article_assembler_service
+from app.services.html_ppt_layout_service import html_ppt_layout_service
 
 
 class PostProcessService:
@@ -80,6 +81,16 @@ class PostProcessService:
             outline_plan=outline_plan,
         )
         digest = formatter._digest(article, final_markdown)
+        layout_artifacts = {
+            "primary": html_ppt_layout_service.render(
+                article=article,
+                outline_plan=outline_plan,
+                section_drafts=input_data.get("section_drafts"),
+                account_context=account_context,
+                template=template,
+                image_slots=image_slots,
+            )
+        }
 
         return {
             "used_post_process": True,
@@ -106,6 +117,7 @@ class PostProcessService:
             )
             + formatter._layout_notes(template),
             "image_slots": image_slots,
+            "layout_artifacts": layout_artifacts,
             "cover_image_prompt": formatter._cover_prompt(title, account_context, template),
             "wechat_publish_format": {
                 "title": title[:64],

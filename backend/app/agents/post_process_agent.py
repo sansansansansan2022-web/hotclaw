@@ -49,6 +49,7 @@ class PostProcessAgent(BaseAgent):
             "polishing_summary": {"type": "string"},
             "layout_notes": {"type": "array", "items": {"type": "string"}},
             "image_slots": {"type": "array", "items": {"type": "object"}},
+            "layout_artifacts": {"type": "object"},
             "cover_image_prompt": {"type": "string"},
             "wechat_publish_format": {"type": "object"},
         },

@@ -121,6 +121,12 @@ ARTIFACT_SPECS: tuple[dict[str, Any], ...] = (
         "title": "Post-process Result",
         "source_node_ids": ("post_process_agent",),
     },
+    {
+        "artifact_key": "layout_artifacts",
+        "stage": "post_process",
+        "title": "Layout Artifacts",
+        "source_node_ids": ("post_process_agent",),
+    },
 )
 
 
@@ -512,6 +518,10 @@ class TaskArtifactService:
         if artifact_key == "post_process_result":
             post_process = self._coalesce(result_data.get("post_process_result"), self._node_output(source_nodes, "post_process_agent"))
             return {"post_process_result": post_process} if post_process is not None else None
+        if artifact_key == "layout_artifacts":
+            post_process = self._coalesce(result_data.get("post_process_result"), self._node_output(source_nodes, "post_process_agent"))
+            layout_artifacts = post_process.get("layout_artifacts") if isinstance(post_process, dict) else None
+            return {"layout_artifacts": layout_artifacts} if layout_artifacts is not None else None
         return None
 
     def _raw_output_for(

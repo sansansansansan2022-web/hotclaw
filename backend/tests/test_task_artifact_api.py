@@ -172,6 +172,20 @@ async def test_task_artifacts_and_effective_input_contract(client, db_session):
                 "final_score": 0.91,
                 "summary": "Strong final draft.",
             },
+            "post_process_result": {
+                "used_post_process": True,
+                "final_content_markdown": "Rewritten final article",
+                "final_content_html": "<section>Rewritten final article</section>",
+                "layout_artifacts": {
+                    "primary": {
+                        "artifact_type": "html_ppt_deck",
+                        "renderer": "html-ppt-skill",
+                        "status": "preview_ready",
+                        "entry_html": "<!doctype html><html><body class='html-ppt-root'></body></html>",
+                        "slide_count": 3,
+                    }
+                },
+            },
         },
     )
     db_session.add_all(
@@ -258,6 +272,13 @@ async def test_task_artifacts_and_effective_input_contract(client, db_session):
                 status="completed",
                 output_data=task.result_data["audit_result"],
             ),
+            TaskNodeRunModel(
+                task_id=task.id,
+                node_id="post_process_agent",
+                agent_id="post_process_agent",
+                status="completed",
+                output_data=task.result_data["post_process_result"],
+            ),
         ]
     )
     await db_session.commit()
@@ -278,6 +299,7 @@ async def test_task_artifacts_and_effective_input_contract(client, db_session):
     assert "review_bundle" in artifacts
     assert "draft_gate_result" in artifacts
     assert "assembled_article" in artifacts
+    assert "layout_artifacts" in artifacts
     assert artifacts["evidence_bundle"]["display_payload"]["query_plan"]["lane"]["label"] == "AI Tools"
     assert artifacts["query_plan"]["display_payload"]["query_plan"]["lane"]["label"] == "AI Tools"
     assert artifacts["reference_digest"]["display_payload"]["reference_digest"]["summary"] == "Use GitHub evidence plus account references."
@@ -286,6 +308,7 @@ async def test_task_artifacts_and_effective_input_contract(client, db_session):
     assert artifacts["review_bundle"]["display_payload"]["handoff_metrics"]["reviewer_count"] == 1
     assert artifacts["draft_gate_result"]["display_payload"]["audit_result"]["passed"] is True
     assert artifacts["assembled_article"]["display_payload"]["content"]["content_markdown"] == "Final assembled article"
+    assert artifacts["layout_artifacts"]["display_payload"]["layout_artifacts"]["primary"]["artifact_type"] == "html_ppt_deck"
     assert artifacts["review_summary"]["status"] == "available"
 
     outline_response = await client.get(f"/api/v1/tasks/{task.id}/artifacts/outline_preview")

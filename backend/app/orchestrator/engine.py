@@ -1356,6 +1356,7 @@ class OrchestratorEngine:
                 for item in data.get("image_slots", [])
                 if isinstance(item, dict)
             ] if isinstance(data.get("image_slots"), list) else [],
+            "layout_artifacts": data.get("layout_artifacts") if isinstance(data.get("layout_artifacts"), dict) else {},
             "cover_image_prompt": str(data.get("cover_image_prompt") or "").strip(),
             "wechat_publish_format": data.get("wechat_publish_format") if isinstance(data.get("wechat_publish_format"), dict) else {},
         }
