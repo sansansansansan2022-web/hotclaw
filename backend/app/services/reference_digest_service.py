@@ -30,13 +30,21 @@ class ReferenceDigestService:
         limit: int = 3,
     ) -> dict[str, Any]:
         sources = self._extract_sources(account_context)
+        sources = self._order_by_preferences(sources, ops_context)
         selected = sources[: max(0, int(limit or 0))]
+
+        style_takeaways: list[str] = []
+        for item in selected:
+            name = self._source_name(item)
+            note = (item.get("notes") or item.get("preview") or "").strip()
+            if name and note:
+                style_takeaways.append(f"{name}: {note}")
 
         digest: dict[str, Any] = {
             "source_count": len(sources),
             "selected_source_ids": [self._source_id(item) for item in selected],
             "preferred_source_names": [self._source_name(item) for item in selected],
-            "style_takeaways": [],
+            "style_takeaways": style_takeaways,
             "structure_takeaways": [],
             "usage_rules": [],
             "source_digests": [self._source_digest(item) for item in selected],
@@ -58,6 +66,29 @@ class ReferenceDigestService:
         if not isinstance(raw, list):
             return []
         return [item for item in raw if isinstance(item, dict)]
+
+    @staticmethod
+    def _order_by_preferences(
+        sources: list[dict[str, Any]],
+        ops_context: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        if not sources:
+            return sources
+        run_strategy = (ops_context or {}).get("run_strategy") if isinstance(ops_context, dict) else None
+        if not isinstance(run_strategy, dict):
+            return sources
+        preferred_raw = run_strategy.get("preferred_reference_source_ids") or []
+        if not preferred_raw:
+            return sources
+        order_map = {str(pid): idx for idx, pid in enumerate(preferred_raw)}
+
+        def sort_key(item: dict[str, Any]) -> tuple[int, int]:
+            sid = ReferenceDigestService._source_id(item)
+            if sid in order_map:
+                return (0, order_map[sid])
+            return (1, 0)
+
+        return sorted(sources, key=sort_key)
 
     @staticmethod
     def _source_id(source: dict[str, Any]) -> str:

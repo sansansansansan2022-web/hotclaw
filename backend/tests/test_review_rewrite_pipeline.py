@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -13,16 +12,16 @@ from app.agents.base import AgentResult
 from app.agents.rewrite_agent import RewriteAgent
 from app.agents.structure_reviewer_agent import StructureReviewerAgent
 from app.agents.style_reviewer_agent import StyleReviewerAgent
+from app.llm.base import LLMResponse
 from app.models.tables import AccountModel, ArticleDraftModel, TaskModel, TaskNodeRunModel
 from app.orchestrator.engine import orchestrator_engine
 from app.services.article_assembler_service import article_assembler_service
 from app.services.task_service import task_service
 
 
-def _fake_llm_response(payload: dict) -> SimpleNamespace:
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))]
-    )
+def _fake_llm_response(payload: dict) -> LLMResponse:
+    text = json.dumps(payload)
+    return LLMResponse(content=text, model="mock", provider="mock", parsed=payload)
 
 
 @pytest.mark.asyncio
@@ -47,7 +46,7 @@ async def test_style_reviewer_execute_normalizes_output(monkeypatch):
             }
         )
 
-    monkeypatch.setattr("app.agents.style_reviewer_agent.litellm.acompletion", _fake_completion)
+    monkeypatch.setattr("app.agents.style_reviewer_agent.llm_gateway.complete", _fake_completion)
 
     agent = StyleReviewerAgent()
     result = await agent.execute(
@@ -90,7 +89,7 @@ async def test_structure_reviewer_execute_normalizes_output(monkeypatch):
             }
         )
 
-    monkeypatch.setattr("app.agents.structure_reviewer_agent.litellm.acompletion", _fake_completion)
+    monkeypatch.setattr("app.agents.structure_reviewer_agent.llm_gateway.complete", _fake_completion)
 
     agent = StructureReviewerAgent()
     result = await agent.execute(
@@ -123,7 +122,7 @@ async def test_rewrite_agent_execute_normalizes_output(monkeypatch):
             }
         )
 
-    monkeypatch.setattr("app.agents.rewrite_agent.litellm.acompletion", _fake_completion)
+    monkeypatch.setattr("app.agents.rewrite_agent.llm_gateway.complete", _fake_completion)
 
     agent = RewriteAgent()
     result = await agent.execute(

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -12,6 +11,7 @@ from sqlalchemy import select
 from app.agents.base import AgentResult
 from app.agents.outline_planner_agent import OutlinePlannerAgent
 from app.agents.section_writer_agent import SectionWriterAgent
+from app.llm.base import LLMResponse
 from app.models.tables import AccountModel, ArticleDraftModel, TaskModel, TaskNodeRunModel
 from app.orchestrator.engine import orchestrator_engine
 from app.services.article_assembler_service import article_assembler_service
@@ -19,10 +19,9 @@ from app.services.draft_service import draft_service
 from app.services.task_service import task_service
 
 
-def _fake_llm_response(payload: dict) -> SimpleNamespace:
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload, ensure_ascii=False)))]
-    )
+def _fake_llm_response(payload: dict) -> LLMResponse:
+    text = json.dumps(payload, ensure_ascii=False)
+    return LLMResponse(content=text, model="mock", provider="mock", parsed=payload)
 
 
 @pytest.mark.asyncio
@@ -94,7 +93,7 @@ async def test_outline_execute_falls_back_when_generated_outline_drifts(monkeypa
             }
         )
 
-    monkeypatch.setattr("app.agents.outline_planner_agent.litellm.acompletion", _fake_completion)
+    monkeypatch.setattr("app.agents.outline_planner_agent.llm_gateway.complete", _fake_completion)
 
     agent = OutlinePlannerAgent()
     result = await agent.execute(
@@ -128,7 +127,7 @@ async def test_section_writer_execute_falls_back_when_generated_sections_drift(m
             }
         )
 
-    monkeypatch.setattr("app.agents.section_writer_agent.litellm.acompletion", _fake_completion)
+    monkeypatch.setattr("app.agents.section_writer_agent.llm_gateway.complete", _fake_completion)
 
     agent = SectionWriterAgent()
     result = await agent.execute(
