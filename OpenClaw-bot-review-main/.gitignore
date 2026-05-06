@@ -1,0 +1,8 @@
+node_modules
+.next
+*.tsbuildinfo
+next-env.d.ts
+.idea
+.DS_Store
+/.openclaw
+/public/assets/pixel-office/*.mp3

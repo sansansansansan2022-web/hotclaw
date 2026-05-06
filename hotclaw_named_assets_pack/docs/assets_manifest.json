@@ -1,0 +1,71 @@
+{
+  "project": "HotClaw 像素编辑部前端资产命名包",
+  "version": "v1",
+  "assumption_note": "以下五个智能体名称基于你当前项目的公众号/编辑部工作流假设映射，可在前端代码中继续改名。",
+  "assets": [
+    {
+      "file": "agents/agent_01_dispatcher_orchestrator.png",
+      "type": "agent_sprite",
+      "size": [
+        16,
+        16
+      ]
+    },
+    {
+      "file": "agents/agent_02_topic_researcher.png",
+      "type": "agent_sprite",
+      "size": [
+        16,
+        16
+      ]
+    },
+    {
+      "file": "agents/agent_03_tool_operator.png",
+      "type": "agent_sprite",
+      "size": [
+        16,
+        16
+      ]
+    },
+    {
+      "file": "agents/agent_04_writer_editor.png",
+      "type": "agent_sprite",
+      "size": [
+        16,
+        16
+      ]
+    },
+    {
+      "file": "agents/agent_05_publish_operator.png",
+      "type": "agent_sprite",
+      "size": [
+        16,
+        16
+      ]
+    },
+    {
+      "file": "scenes/scene_hotclaw_editorial_floor_large.png",
+      "type": "scene",
+      "size": [
+        1024,
+        896
+      ]
+    },
+    {
+      "file": "scenes/scene_hotclaw_editorial_floor_base.png",
+      "type": "scene",
+      "size": [
+        256,
+        224
+      ]
+    },
+    {
+      "file": "scenes/tileset_hotclaw_office_props.png",
+      "type": "tileset",
+      "size": [
+        256,
+        160
+      ]
+    }
+  ]
+}
