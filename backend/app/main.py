@@ -45,6 +45,7 @@ from app.api.memory_routes import router as memory_router
 
 # Import agent implementations to register them
 # 銆愬叧閿€戝鍏ユ墍鏈夋櫤鑳戒綋绫伙紝瑙﹀彂娉ㄥ唽
+from app.agents.context_builder_agent import ContextBuilderAgent
 from app.agents.profile_agent import ProfileAgent
 from app.agents.hot_topic_agent import HotTopicAgent
 from app.agents.topic_planner_agent import TopicPlannerAgent
@@ -70,6 +71,7 @@ def _register_agents() -> None:
     搴旂敤鍚姩鏃讹紝灏嗘墍鏈夋櫤鑳戒綋娉ㄥ唽鍒板叏灞€娉ㄥ唽琛ㄣ€?
     鍚庣画缂栨帓寮曟搸閫氳繃 agent_registry.get(agent_id) 鑾峰彇瀹炰緥銆?
     """
+    agent_registry.register(ContextBuilderAgent())
     agent_registry.register(ProfileAgent())
     agent_registry.register(HotTopicAgent())
     agent_registry.register(TopicPlannerAgent())
@@ -130,6 +132,12 @@ async def lifespan(app: FastAPI):
     async with async_session_factory() as db:
         await init_default_configs(db)
     logger.info("system_configs_initialized")
+
+    from app.db.migrations import migrate_legacy_profile_json
+    async with async_session_factory() as db:
+        await migrate_legacy_profile_json(db)
+        await db.commit()
+    logger.info("legacy_profile_migration_checked")
 
     # Initialize LLM Gateway (load DB providers + select default)
     # 【LLM 网关启动钩子】

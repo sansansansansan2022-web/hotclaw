@@ -18,7 +18,6 @@ from app.core.tracer import get_trace_id
 from app.models.tables import AgentModel, TaskModel, TaskNodeRunModel
 from app.orchestrator.broadcaster import broadcaster
 from app.orchestrator.workspace import Workspace
-from app.services.account_service import account_service
 from app.services.article_assembler_service import article_assembler_service
 
 logger = get_logger(__name__)
@@ -56,11 +55,14 @@ LEGACY_CONTENT_FALLBACK_NODE = {
 
 DEFAULT_WORKFLOW_NODES = [
     {
-        "node_id": "profile_parsing",
-        "agent_id": "profile_agent",
-        "name": "Profile Parsing",
-        "input_mapping": {"positioning": "input.positioning"},
-        "output_key": "profile",
+        "node_id": "context_building",
+        "agent_id": "context_builder_agent",
+        "name": "Context Building",
+        "input_mapping": {
+            "positioning": "input.positioning",
+            "account_id": "input.account_id",
+        },
+        "output_key": "run_context",
         "required": True,
     },
     {
@@ -231,24 +233,11 @@ class OrchestratorEngine:
         total_tokens = 0
         structured_pipeline_degraded = False
 
-        account_context = await account_service.get_account_context(task.account_id, db)
-        if account_context:
-            workspace.set("account_context", account_context)
-            logger.info("account_context_injected", account_id=task.account_id)
-
-        ops_context = None
-        if isinstance(task.input_data, dict):
-            candidate = task.input_data.get("ops_context")
-            if isinstance(candidate, dict):
-                ops_context = candidate
-        if ops_context:
-            workspace.set("ops_context", ops_context)
-            logger.info(
-                "ops_context_injected",
-                account_id=task.account_id,
-                task_id=task.id,
-                effective_mode=(ops_context.get("run_strategy") or {}).get("effective_mode"),
-            )
+        if task.account_id:
+            if task.input_data is None:
+                task.input_data = {}
+            if isinstance(task.input_data, dict):
+                task.input_data.setdefault("account_id", task.account_id)
 
         task.status = "running"
         task.started_at = datetime.now(timezone.utc)
@@ -483,6 +472,7 @@ class OrchestratorEngine:
         )
         enriched_context = dict(context)
         enriched_context["system_prompt"] = effective_prompt
+        enriched_context["db"] = db
         return await self._execute_agent_with_timeout(agent, input_data, enriched_context, trace_id)
 
     async def _execute_service_node(
@@ -631,6 +621,20 @@ class OrchestratorEngine:
         self, workspace: Workspace, node_def: dict[str, Any], data: dict[str, Any]
     ) -> None:
         node_id = node_def["node_id"]
+        if node_id == "context_building":
+            workspace.set(node_def["output_key"], data)
+            profile = data.get("effective_profile")
+            if isinstance(profile, dict):
+                workspace.set("profile", profile)
+                workspace.set("effective_profile", profile)
+            if data.get("account_context") is not None:
+                workspace.set("account_context", data.get("account_context"))
+            oc = data.get("ops_context")
+            if isinstance(oc, dict):
+                workspace.set("ops_context", oc)
+            if data.get("retrieved_memories") is not None:
+                workspace.set("retrieved_memories", data.get("retrieved_memories"))
+            return
         if node_id == "article_assembler":
             workspace.set(node_def["output_key"], data)
             workspace.set("content", data)

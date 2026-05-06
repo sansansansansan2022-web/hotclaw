@@ -253,8 +253,18 @@ async def test_reviewer_failure_does_not_block_pipeline(db_session, monkeypatch)
 
     async def _fake_execute_node(node_def, input_data, context, trace_id, db):
         node_id = node_def["node_id"]
-        if node_id == "profile_parsing":
-            return AgentResult("success", node_def["agent_id"], data={"domain": "growth", "tone": "warm"})
+        if node_id == "context_building":
+            return AgentResult(
+                "success",
+                node_def["agent_id"],
+                data={
+                    "effective_profile": {"domain": "growth", "tone": "warm"},
+                    "account_context": None,
+                    "ops_context": {},
+                    "retrieved_memories": [],
+                    "positioning": input_data.get("positioning", ""),
+                },
+            )
         if node_id == "hot_topic_analysis":
             return AgentResult("success", node_def["agent_id"], data={"hot_topics": [{"title": "Confidence"}]})
         if node_id == "topic_planning":

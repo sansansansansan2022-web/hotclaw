@@ -51,7 +51,7 @@ export interface NodeState {
  * 所有节点初始状态为 pending
  */
 const INITIAL_NODES: Omit<NodeState, "status" | "elapsed_seconds" | "error" | "output_summary" | "degraded">[] = [
-  { node_id: "profile_parsing",     agent_id: "profile_agent",       name: "账号定位解析" },
+  { node_id: "context_building", agent_id: "context_builder_agent", name: "上下文装配" },
   { node_id: "hot_topic_analysis",   agent_id: "hot_topic_agent",     name: "热点分析" },
   { node_id: "topic_planning",      agent_id: "topic_planner_agent", name: "选题策划" },
   { node_id: "title_generation",     agent_id: "title_generator_agent", name: "标题生成" },

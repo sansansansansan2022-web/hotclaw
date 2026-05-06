@@ -100,13 +100,13 @@ async def run_e2e_test():
     # Create workspace
     workspace = Workspace(task_id="test-task", input_data=test_input)
 
-    # Workflow nodes definition (same as DEFAULT_WORKFLOW_NODES)
+    # Workflow nodes definition (approximates DEFAULT_WORKFLOW_NODES; first node is ContextBuilder)
     workflow_nodes = [
         {
-            "node_id": "profile_parsing",
-            "agent_id": "profile_agent",
-            "output_key": "profile",
-            "input_mapping": {"positioning": "input.positioning"},
+            "node_id": "context_building",
+            "agent_id": "context_builder_agent",
+            "output_key": "run_context",
+            "input_mapping": {"positioning": "input.positioning", "account_id": "input.account_id"},
         },
         {
             "node_id": "hot_topic_analysis",
@@ -118,13 +118,23 @@ async def run_e2e_test():
             "node_id": "topic_planning",
             "agent_id": "topic_planner_agent",
             "output_key": "topics",
-            "input_mapping": {"profile": "profile", "hot_topics": "hot_topics"},
+            "input_mapping": {
+                "profile": "profile",
+                "hot_topics": "hot_topics",
+                "account_context": "account_context",
+                "ops_context": "ops_context",
+            },
         },
         {
             "node_id": "title_generation",
             "agent_id": "title_generator_agent",
             "output_key": "titles",
-            "input_mapping": {"profile": "profile", "topics": "topics"},
+            "input_mapping": {
+                "profile": "profile",
+                "topics": "topics",
+                "account_context": "account_context",
+                "ops_context": "ops_context",
+            },
         },
         {
             "node_id": "content_writing",
@@ -135,6 +145,8 @@ async def run_e2e_test():
                 "topics": "topics",
                 "titles": "titles",
                 "hot_topics": "hot_topics",
+                "account_context": "account_context",
+                "ops_context": "ops_context",
             },
         },
         {
@@ -178,6 +190,13 @@ async def run_e2e_test():
 
                 # Store output in workspace
                 workspace.set(output_key, result.data)
+                if node_id == "context_building":
+                    payload = result.data or {}
+                    workspace.set("profile", payload.get("effective_profile") or {})
+                    if payload.get("account_context") is not None:
+                        workspace.set("account_context", payload["account_context"])
+                    if isinstance(payload.get("ops_context"), dict):
+                        workspace.set("ops_context", payload["ops_context"])
                 results[output_key] = result.data
 
                 # Verify expected output keys
@@ -220,6 +239,7 @@ async def run_e2e_test():
 def get_expected_keys(agent_id: str) -> list:
     """Return expected output keys for each agent."""
     expectations = {
+        "context_builder_agent": ["effective_profile", "ops_context", "positioning"],
         "profile_agent": ["domain", "subdomain", "tone", "keywords"],
         "hot_topic_agent": ["hot_topics"],
         "topic_planner_agent": ["topics"],

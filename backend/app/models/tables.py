@@ -55,6 +55,14 @@ class AccountModel(Base):
     publish_paused: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     max_posts_per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
     min_interval_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Legacy structured profile (pre–PR2); migrated to base_profile_json at startup
+    profile_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Three-layer profile
+    base_profile_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    evolved_profile_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    style_profile_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    profile_version: Mapped[int] = mapped_column(Integer, default=1)
+    last_evolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()

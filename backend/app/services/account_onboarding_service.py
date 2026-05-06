@@ -11,14 +11,18 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from app.agents.profile_agent import ProfileAgent
+from app.core.llm_gateway import llm_gateway
 from app.core.logger import get_logger
 from app.llm.base import LLMCallOptions
+from app.models.tables import AccountModel
 from app.llm.exceptions import LLMCallError, LLMConfigurationError
 from app.llm.gateway import get_llm_gateway
 from app.schemas.account_onboarding import (
     ExistingAccountAnalysisRequest,
     ExistingAccountAnalysisResponse,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 
@@ -47,6 +51,55 @@ _EXISTING_ACCOUNT_SYSTEM_PROMPT = """\
 
 class AccountOnboardingService:
     """Onboarding analysis logic for new and existing accounts."""
+
+    async def build_structured_profile_from_positioning(
+        self,
+        positioning: str,
+        *,
+        agent_id: str = "onboarding_profile_parser",
+    ) -> dict:
+        """LLM-parse positioning into structured profile (no DB writes)."""
+        positioning = (positioning or "").strip()
+        if not positioning:
+            return {
+                "domain": "泛资讯",
+                "subdomain": "综合",
+                "target_audience": {"age_range": "18-45", "occupation": "通用", "interests": []},
+                "tone": "中性",
+                "content_style": "信息型",
+                "keywords": [],
+                "positioning_raw": "",
+            }
+        try:
+            response = await llm_gateway.complete(
+                agent_id=agent_id,
+                messages=[
+                    {"role": "system", "content": ProfileAgent.default_system_prompt},
+                    {"role": "user", "content": f"解析以下账号定位：{positioning}"},
+                ],
+                response_format="json",
+            )
+            data = dict(response.parsed or {})
+            data["positioning_raw"] = positioning
+            return data
+        except Exception:
+            return {
+                "domain": "泛资讯",
+                "subdomain": "综合",
+                "target_audience": {"age_range": "18-45", "occupation": "通用", "interests": []},
+                "tone": "中性",
+                "content_style": "信息型",
+                "keywords": [],
+                "positioning_raw": positioning,
+            }
+
+    async def parse_positioning(self, account: AccountModel, db: AsyncSession) -> dict:
+        """Call LLM to parse account.positioning, write base_profile_json; flush only."""
+        parsed = await self.build_structured_profile_from_positioning(account.positioning or "")
+        account.base_profile_json = parsed
+        account.profile_version = 1
+        await db.flush()
+        return parsed
 
     async def analyze_existing_account(
         self, payload: ExistingAccountAnalysisRequest
