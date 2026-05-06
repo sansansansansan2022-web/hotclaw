@@ -131,6 +131,14 @@ async def lifespan(app: FastAPI):
         await init_default_configs(db)
     logger.info("system_configs_initialized")
 
+    # Initialize LLM Gateway (load DB providers + select default)
+    # 【LLM 网关启动钩子】
+    # 在 system_configs_initialized 之后初始化，这样 DB 已可用，
+    # 网关能从 llm_providers 表读取 default provider 并重建 provider 列表。
+    from app.core.llm_gateway import llm_gateway
+    async with async_session_factory() as db:
+        await llm_gateway.initialize(db)
+
     # Start Account Scheduler
     from app.scheduler.account_scheduler import account_scheduler
     await account_scheduler.start()

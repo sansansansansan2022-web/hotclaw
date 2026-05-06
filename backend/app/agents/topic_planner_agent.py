@@ -7,10 +7,8 @@ Calls LLM to create topic proposals based on account profile and hot topics.
 不负责：写正文、决定是否发布
 """
 
-import json
-import litellm
 from app.agents.base import BaseAgent, AgentResult
-from app.core.config import settings
+from app.core.llm_gateway import llm_gateway
 
 
 class TopicPlannerAgent(BaseAgent):
@@ -107,29 +105,16 @@ class TopicPlannerAgent(BaseAgent):
         user_prompt = self._build_user_prompt(profile, hot_topics)
 
         try:
-            model = settings.llm_model_name
-            if not model.startswith("dashscope/"):
-                model = f"dashscope/{model}"
-
-            response = await litellm.acompletion(
-                model=model,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_api_base_url,
+            response = await llm_gateway.complete(
+                agent_id=self.agent_id,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                timeout=settings.llm_timeout,
-                custom_llm_provider="dashscope",
+                response_format="json",
             )
-            content = response.choices[0].message.content
+            return self._success(response.parsed or {})
 
-            # 解析 JSON
-            data = self._parse_json(content)
-            return self._success(data)
-
-        except json.JSONDecodeError as e:
-            return self._failure(code="JSON_PARSE_ERROR", message=f"JSON 解析失败: {str(e)}")
         except Exception as e:
             return self._failure(code="LLM_ERROR", message=str(e))
 
@@ -170,18 +155,6 @@ class TopicPlannerAgent(BaseAgent):
         prompt_parts.append("请输出选题策划方案。")
 
         return "\n".join(prompt_parts)
-
-    def _parse_json(self, content: str) -> dict:
-        """解析 LLM 返回的 JSON，处理 markdown 代码块"""
-        content = content.strip()
-        if content.startswith("```"):
-            parts = content.split("```")
-            if len(parts) >= 2:
-                content = parts[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
-        return json.loads(content)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
         # Use hot topics directly as topics

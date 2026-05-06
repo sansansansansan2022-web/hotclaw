@@ -36,6 +36,14 @@ class LLMResponse:
     raw_response: Any = None
     """原始响应（可选）"""
 
+    parsed: dict | None = None
+    """当 response_format='json' 时由网关自动解析得到的结构化输出"""
+
+    @property
+    def raw(self) -> Any:
+        """`raw_response` 的稳定别名，新代码使用 .raw 即可。"""
+        return self.raw_response
+
 
 @dataclass
 class LLMCallOptions:

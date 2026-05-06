@@ -10,11 +10,10 @@ Hot topic agent: analyzes hot topics relevant to the account profile.
 - Skill 负责：抓取、解析、归一化、去重（hot_topic_fetch_skill）
 """
 
-import json
 from typing import Any
-import litellm
+
 from app.agents.base import BaseAgent, AgentResult
-from app.core.config import settings
+from app.core.llm_gateway import llm_gateway
 from app.core.logger import get_logger
 from app.skills.registry import skill_registry
 
@@ -191,30 +190,17 @@ class HotTopicAgent(BaseAgent):
         user_prompt = self._build_analysis_prompt(search_results, profile)
 
         try:
-            model = settings.llm_model_name
-            if not model.startswith("dashscope/"):
-                model = f"dashscope/{model}"
-
-            response = await litellm.acompletion(
-                model=model,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_api_base_url,
+            response = await llm_gateway.complete(
+                agent_id=self.agent_id,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                timeout=settings.llm_timeout,
-                custom_llm_provider="dashscope",
+                response_format="json",
             )
-            content = response.choices[0].message.content
-
-            # 解析 JSON（处理 markdown 代码块）
-            data = self._parse_json(content)
+            data = response.parsed or {}
             return data.get("hot_topics", [])
 
-        except json.JSONDecodeError as e:
-            logger.warning("llm_json_parse_error", error=str(e))
-            return self._fallback_topics(search_results)
         except Exception as e:
             logger.warning("llm_analysis_error", error=str(e))
             return self._fallback_topics(search_results)
@@ -266,18 +252,6 @@ class HotTopicAgent(BaseAgent):
             }
             for topic in search_results[:8]
         ]
-
-    def _parse_json(self, content: str) -> dict:
-        """解析 LLM 返回的 JSON。"""
-        content = content.strip()
-        if content.startswith("```"):
-            parts = content.split("```")
-            if len(parts) >= 2:
-                content = parts[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
-        return json.loads(content)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
         """

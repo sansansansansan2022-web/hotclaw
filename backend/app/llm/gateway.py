@@ -2,28 +2,36 @@
 LLM Gateway - 统一 LLM 调用入口。
 
 【LLM 网关】
-提供统一的 LLM 调用接口，是整个系统的"大模型入口"。
-采用 Facade 门面模式，对外隐藏多 Provider 的复杂性。
+所有 Agent 的 LLM 调用都必须经过此网关，负责：
+- Provider 路由：从数据库 / .env 加载默认 Provider
+- 请求统一：JSON 解析、重试、结构化日志、异常转换
+- 后续扩展位：fallback chain（PR 1 不实现）
 
-核心功能：
-- Provider 路由：根据 agent_id 选择合适的 LLM Provider
-- 配置优先级：数据库自定义配置 > .env 环境变量
-- 请求日志：每次调用记录完整的调用元信息
-- 错误转换：将 Provider 异常转换为统一的 LLMCallError
+新代码应使用 ``llm_gateway.complete(messages=[...], agent_id=...)`` 形式调用，
+返回的 ``LLMResponse.parsed`` 自动包含 JSON 解析结果。
 
-面试点：
-- Facade 门面模式
-- 配置优先级设计
-- LLM 调用最佳实践（超时、重试、JSON 输出解析）
-- 多 Provider 架构
+老代码兼容签名 ``complete(agent_id=..., prompt=..., options=...)`` 继续可用，
+方便 ``app/services`` 层不动也能跑（保留至 PR 1 之后再清理）。
 """
 
+from __future__ import annotations
+
+import asyncio
+import json
+import re
 from typing import Any
 
 from app.core.logger import get_logger
 from app.llm.base import LLMProvider, LLMResponse, LLMCallOptions, LLMCallMeta
 from app.llm.config import LLMConfig, get_llm_config
-from app.llm.exceptions import LLMCallError, LLMConfigurationError
+from app.llm.exceptions import (
+    LLMCallError,
+    LLMConfigurationError,
+    LLMParseError,
+    LLMRateLimitError,
+    LLMAPIError,
+    LLMTimeoutError,
+)
 from app.llm.providers.dashscope import DashScopeProvider
 from app.llm.providers.openai import OpenAIProvider
 from app.llm.providers.compatible import OpenAICompatibleProvider
@@ -32,122 +40,122 @@ from app.llm.providers.deepseek import DeepSeekProvider
 logger = get_logger(__name__)
 
 
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
 class LLMGateway:
     """
-    统一 LLM 网关门面
+    统一 LLM 网关门面。
 
-    支持两种配置来源：
-    1. 数据库（优先级高）：用户在前端配置的 API Key
-    2. .env 文件（备用）：传统的环境变量配置
+    支持配置来源：
+    1. 数据库（高优先级）
+    2. .env 环境变量
 
-    使用示例:
-        gateway = LLMGateway()
-        response = await gateway.complete(
-            agent_id="profile_agent",
-            prompt="解析以下账号定位：职场成长号",
-            options=LLMCallOptions(system_prompt="你是一位专业的..."),
-        )
-        print(response.content)
+    主入口：``complete(messages, agent_id, response_format="json")``。
     """
 
-    def __init__(self, config: LLMConfig | None = None, use_db_config: bool = True):
-        """
-        初始化 LLM Gateway
+    # PR 1 暂不实现，仅保留接口位
+    fallback_chain: list[str] = []
 
-        Args:
-            config: 可选的配置对象，默认使用全局 .env 配置
-            use_db_config: 是否从数据库加载用户配置（默认 True）
-        """
+    def __init__(self, config: LLMConfig | None = None, use_db_config: bool = True):
         self.config = config or get_llm_config()
         self._providers: dict[str, LLMProvider] = {}
         self._db_config: dict[str, dict] = {}
         self._default_provider: str = self.config.default_provider
+        self._initialized: bool = False
 
         if use_db_config:
             self._load_db_config()
 
         self._init_providers()
 
-    def _load_db_config(self) -> None:
-        """
-        从数据库加载用户配置的 Provider。
+    # ------------------------------------------------------------------ init
 
-        【配置优先级】
-        数据库配置 > .env 配置
-        这样用户可以在前端动态配置 API Key，
-        而无需重启服务器或修改环境变量。
+    async def initialize(self, db: Any | None = None) -> None:
         """
+        生命周期钩子：在 FastAPI startup 阶段重新加载 DB 配置。
+
+        ``db`` 参数当前未使用（gateway 内部自行开 session），保留方便后续注入。
+        """
+        # 在事件循环里直接调用 async 加载，避免 _load_db_config 用 ThreadPoolExecutor
+        await self._load_db_config_async()
+        self._init_providers()
+        self._initialized = True
+        logger.info(
+            "llm_gateway_initialized",
+            providers=list(self._providers.keys()),
+            default_provider=self._default_provider,
+        )
+
+    async def _load_db_config_async(self) -> None:
         try:
-            import asyncio
             from sqlalchemy import select
             from app.db.session import async_session_factory
             from app.models.tables import LLMProviderModel
 
-            async def _load():
-                async with async_session_factory() as session:
-                    result = await session.execute(
-                        select(LLMProviderModel).where(
-                            LLMProviderModel.is_enabled == True
-                        )
-                    )
-                    providers = result.scalars().all()
-
-                    db_config = {}
-                    default_provider = None
-
-                    for p in providers:
-                        db_config[p.provider_id] = {
-                            "api_key": p.api_key,
-                            "base_url": p.base_url,
-                            "default_model": p.default_model,
-                            "supported_models": p.supported_models or [],
-                            "timeout": p.timeout,
-                            "is_default": p.is_default,
-                        }
-                        if p.is_default:
-                            default_provider = p.provider_id
-
-                    return db_config, default_provider
-
-            # 处理异步加载（可能在事件循环中或外调用）
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                self._db_config, default_from_db = pool.submit(asyncio.run, _load()).result()
-
-            # 覆盖默认 Provider
-            if default_from_db:
-                self._default_provider = default_from_db
-
-            if self._db_config:
-                logger.info(
-                    "llm_db_config_loaded",
-                    providers=list(self._db_config.keys()),
-                    default_provider=self._default_provider,
+            async with async_session_factory() as session:
+                result = await session.execute(
+                    select(LLMProviderModel).where(LLMProviderModel.is_enabled == True)
                 )
+                providers = result.scalars().all()
 
-        except Exception as e:
+                db_config: dict[str, dict] = {}
+                default_provider: str | None = None
+
+                for p in providers:
+                    db_config[p.provider_id] = {
+                        "api_key": p.api_key,
+                        "base_url": p.base_url,
+                        "default_model": p.default_model,
+                        "supported_models": p.supported_models or [],
+                        "timeout": p.timeout,
+                        "is_default": p.is_default,
+                    }
+                    if p.is_default:
+                        default_provider = p.provider_id
+
+                self._db_config = db_config
+                if default_provider:
+                    self._default_provider = default_provider
+
+                if db_config:
+                    logger.info(
+                        "llm_db_config_loaded",
+                        providers=list(db_config.keys()),
+                        default_provider=self._default_provider,
+                    )
+        except Exception as exc:
             logger.warning(
                 "llm_db_config_load_failed",
-                error=str(e),
+                error=str(exc),
+                message="Will use .env config instead",
+            )
+            self._db_config = {}
+
+    def _load_db_config(self) -> None:
+        """同步 + 线程池加载（兼容首次构造时不在 event loop 内的场景）。"""
+        try:
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                pool.submit(asyncio.run, self._load_db_config_async()).result()
+        except Exception as exc:
+            logger.warning(
+                "llm_db_config_load_failed",
+                error=str(exc),
                 message="Will use .env config instead",
             )
             self._db_config = {}
 
     def _init_providers(self) -> None:
-        """
-        根据配置初始化所有可用的 Provider。
-
-        【Provider 初始化策略】
-        只初始化有有效 API Key 的 Provider。
-        如果某个 Provider 没有配置，优雅地跳过并记录警告。
-        """
         def get_provider_config(provider_id: str) -> dict | None:
-            # 优先数据库配置，回退到 .env
             if provider_id in self._db_config:
                 return self._db_config[provider_id]
             return self.config.get_provider_config(provider_id)
 
-        # 初始化 DashScope（阿里云通义千问）
+        # 重置后重建（initialize 后 default_provider 可能变化）
+        self._providers = {}
+
         dashscope_config = get_provider_config("dashscope")
         if dashscope_config and dashscope_config.get("api_key"):
             try:
@@ -160,7 +168,6 @@ class LLMGateway:
             except LLMConfigurationError as e:
                 logger.warning("llm_provider_init_skipped", provider="dashscope", reason=str(e))
 
-        # 初始化 OpenAI
         openai_config = get_provider_config("openai")
         if openai_config and openai_config.get("api_key"):
             try:
@@ -173,7 +180,6 @@ class LLMGateway:
             except LLMConfigurationError as e:
                 logger.warning("llm_provider_init_skipped", provider="openai", reason=str(e))
 
-        # 初始化 DeepSeek
         deepseek_config = get_provider_config("deepseek")
         if deepseek_config and deepseek_config.get("api_key"):
             try:
@@ -186,7 +192,6 @@ class LLMGateway:
             except LLMConfigurationError as e:
                 logger.warning("llm_provider_init_skipped", provider="deepseek", reason=str(e))
 
-        # 初始化 OpenAI Compatible（兼容接口）
         compatible_config = get_provider_config("compatible")
         if compatible_config and compatible_config.get("base_url"):
             try:
@@ -199,7 +204,6 @@ class LLMGateway:
             except LLMConfigurationError as e:
                 logger.warning("llm_provider_init_skipped", provider="compatible", reason=str(e))
 
-        # 初始化 Zhipu（智谱）
         zhipu_config = get_provider_config("zhipu")
         if zhipu_config and zhipu_config.get("api_key"):
             try:
@@ -224,48 +228,68 @@ class LLMGateway:
                 default_provider=self._default_provider,
             )
 
-    async def complete(
+    # ----------------------------------------------------------------- main
+
+    async def complete(  # noqa: C901 - kept on purpose; routing branches are flat
         self,
+        *,
         agent_id: str,
-        prompt: str,
-        options: LLMCallOptions,
+        messages: list[dict] | None = None,
+        prompt: str | None = None,
+        system_prompt: str | None = None,
+        options: LLMCallOptions | None = None,
+        response_format: str | None = "json",
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        model: str | None = None,
         provider: str | None = None,
+        retry: bool = True,
+        max_retries: int | None = None,
         trace_id: str = "",
+        **_unused: Any,
     ) -> LLMResponse:
         """
-        执行 LLM 补全调用
+        统一 LLM 调用入口。
 
-        【核心方法】智能体调用 LLM 的入口
+        推荐用法（PR 1 起所有 agent 都走这个）::
 
-        Args:
-            agent_id: 调用方 agent ID（用于日志和追踪）
-            prompt: 用户输入提示词
-            options: 调用选项（system_prompt, temperature, max_tokens 等）
-            provider: 可选，指定 provider（默认使用配置的 default_provider）
-            trace_id: 可选，追踪 ID（用于日志关联）
+            response = await llm_gateway.complete(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                agent_id="profile_agent",
+                response_format="json",
+            )
+            data = response.parsed  # markdown 围栏已被处理
+
+        兼容用法（早期代码继续可用）::
+
+            response = await llm_gateway.complete(
+                agent_id="account_ops_agent",
+                prompt="...",
+                options=LLMCallOptions(system_prompt=..., temperature=0.2),
+            )
 
         Returns:
-            LLMResponse: 包含 content, model, latency_ms, token 使用量
+            LLMResponse，含 content / parsed / token / latency / provider / model / raw
 
         Raises:
-            LLMCallError: 调用失败
-            LLMConfigurationError: Provider 未配置
+            LLMCallError 系列（``LLMGatewayError`` 是其别名），让调用方自己降级。
         """
-        # 选择 Provider（优先参数，次优先数据库配置，最后用默认）
+        # 1) 构建 LLMCallOptions
+        call_options = self._build_call_options(
+            messages=messages,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            options=options,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            model=model,
+        )
+
+        # 2) 选择 provider 与模型
         selected_provider = provider or self._default_provider
-
-        # 选择模型（优先 options，次优先数据库配置，最后用默认）
-        model = options.model
-        if not model:
-            if selected_provider in self._db_config:
-                model = self._db_config[selected_provider].get("default_model")
-            if not model:
-                model = self.config.get_default_model(selected_provider)
-
-        # 构建调用元信息
-        meta = LLMCallMeta(agent_id=agent_id, trace_id=trace_id)
-
-        # 获取 Provider 实例
         provider_instance = self._providers.get(selected_provider)
         if not provider_instance:
             available = list(self._providers.keys())
@@ -274,39 +298,109 @@ class LLMGateway:
                 f"Available providers: {available}"
             )
             logger.error(
-                "llm_call_failed",
-                agent_id=agent_id, provider=selected_provider,
-                error_type="LLMConfigurationError", error_message=error_msg,
+                "llm_call",
+                agent_id=agent_id,
+                provider=selected_provider,
+                model=call_options.model or "auto",
+                error="LLMConfigurationError",
+                error_message=error_msg,
             )
             raise LLMConfigurationError(provider=selected_provider, message=error_msg)
 
-        try:
-            # 执行调用
-            response = await provider_instance.complete(prompt=prompt, options=options, meta=meta)
+        if not call_options.model:
+            db_default = self._db_config.get(selected_provider, {}).get("default_model")
+            call_options.model = db_default or self.config.get_default_model(selected_provider)
 
-            # 记录成功日志
-            logger.info(
-                "llm_call_success",
-                agent_id=agent_id, provider=selected_provider, model=response.model,
-                latency_ms=round(response.latency_ms, 2),
-                prompt_tokens=response.prompt_tokens,
-                completion_tokens=response.completion_tokens,
-                total_tokens=response.total_tokens,
-            )
-            return response
+        meta = LLMCallMeta(agent_id=agent_id, trace_id=trace_id)
 
-        except LLMCallError:
-            raise  # Provider 异常已记录日志，直接重新抛出
-        except Exception as e:
-            logger.error(
-                "llm_call_failed",
-                agent_id=agent_id, provider=selected_provider, model=model or "auto",
-                error_type=type(e).__name__, error_message=str(e), exc_info=True,
-            )
-            raise LLMCallError(
-                message=f"Unexpected error during LLM call: {str(e)}",
-                details={"agent_id": agent_id, "provider": selected_provider, "model": model},
-            ) from e
+        # 3) 执行（带重试）
+        prompt_for_provider = "" if call_options.messages else (prompt or "")
+        attempts = 1 if not retry else (max_retries if max_retries is not None else 2) + 1
+
+        last_exc: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                response = await provider_instance.complete(
+                    prompt=prompt_for_provider,
+                    options=call_options,
+                    meta=meta,
+                )
+                break
+            except (LLMRateLimitError, LLMAPIError, LLMTimeoutError) as exc:
+                last_exc = exc
+                if not retry or attempt >= attempts or not self._is_retryable(exc):
+                    self._log_failure(agent_id, selected_provider, call_options.model, exc, attempt)
+                    raise
+                backoff = self._compute_backoff(attempt)
+                logger.warning(
+                    "llm_call_retry",
+                    agent_id=agent_id,
+                    provider=selected_provider,
+                    model=call_options.model,
+                    attempt=attempt,
+                    next_attempt=attempt + 1,
+                    backoff_s=backoff,
+                    error=type(exc).__name__,
+                    error_message=str(exc),
+                )
+                await asyncio.sleep(backoff)
+            except LLMCallError as exc:
+                self._log_failure(agent_id, selected_provider, call_options.model, exc, attempt)
+                raise
+            except Exception as exc:  # 兜底：未分类异常
+                self._log_failure(agent_id, selected_provider, call_options.model, exc, attempt)
+                raise LLMCallError(
+                    message=f"Unexpected error during LLM call: {exc}",
+                    details={
+                        "agent_id": agent_id,
+                        "provider": selected_provider,
+                        "model": call_options.model,
+                    },
+                ) from exc
+        else:  # pragma: no cover - 进入这里说明 break 没触发，理论上 raise 已抛
+            assert last_exc is not None
+            raise last_exc
+
+        # 4) JSON 解析（如要求）
+        parsed: dict | None = None
+        if response_format == "json":
+            try:
+                parsed = self._parse_json(response.content)
+            except (json.JSONDecodeError, ValueError) as exc:
+                logger.warning(
+                    "llm_call",
+                    agent_id=agent_id,
+                    provider=selected_provider,
+                    model=response.model,
+                    prompt_tokens=response.prompt_tokens,
+                    completion_tokens=response.completion_tokens,
+                    total_tokens=response.total_tokens,
+                    latency_ms=round(response.latency_ms, 2),
+                    error="LLMParseError",
+                    error_message=str(exc),
+                )
+                raise LLMParseError(
+                    provider=selected_provider,
+                    model=response.model,
+                    raw_response=response.content,
+                    parse_error=str(exc),
+                ) from exc
+
+        response.parsed = parsed
+
+        # 5) 成功结构化日志
+        logger.info(
+            "llm_call",
+            agent_id=agent_id,
+            provider=response.provider or selected_provider,
+            model=response.model,
+            prompt_tokens=response.prompt_tokens,
+            completion_tokens=response.completion_tokens,
+            total_tokens=response.total_tokens,
+            latency_ms=round(response.latency_ms, 2),
+            response_format=response_format,
+        )
+        return response
 
     async def complete_with_messages(
         self,
@@ -316,52 +410,142 @@ class LLMGateway:
         provider: str | None = None,
         trace_id: str = "",
     ) -> LLMResponse:
-        """
-        使用预构建的消息列表执行 LLM 调用
-
-        【多轮对话方法】
-        与 complete() 的区别：messages 是完整的对话历史，
-        包含 system/user/assistant 消息，适合复杂对话场景。
-        """
-        call_options = LLMCallOptions(
-            system_prompt="",  # 忽略，使用 messages 中的内容
+        """兼容方法：旧 API。"""
+        return await self.complete(
+            agent_id=agent_id,
             messages=messages,
+            response_format=None,
             temperature=options.temperature,
             max_tokens=options.max_tokens,
             model=options.model,
-        )
-        return await self.complete(
-            agent_id=agent_id, prompt="",  # messages 已包含所有内容
-            options=call_options, provider=provider, trace_id=trace_id,
+            provider=provider,
+            trace_id=trace_id,
         )
 
+    # ------------------------------------------------------------- helpers
+
+    def _build_call_options(
+        self,
+        *,
+        messages: list[dict] | None,
+        prompt: str | None,
+        system_prompt: str | None,
+        options: LLMCallOptions | None,
+        temperature: float | None,
+        max_tokens: int | None,
+        model: str | None,
+    ) -> LLMCallOptions:
+        if options is not None:
+            # 兼容旧调用：拷贝并按需覆盖
+            return LLMCallOptions(
+                system_prompt=options.system_prompt,
+                messages=options.messages or messages,
+                temperature=temperature if temperature is not None else options.temperature,
+                max_tokens=max_tokens if max_tokens is not None else options.max_tokens,
+                model=model or options.model,
+            )
+
+        if messages is not None:
+            return LLMCallOptions(
+                system_prompt="",
+                messages=messages,
+                temperature=temperature if temperature is not None else 0.7,
+                max_tokens=max_tokens,
+                model=model,
+            )
+
+        # prompt + 可选 system_prompt 路径
+        return LLMCallOptions(
+            system_prompt=system_prompt or "",
+            messages=None,
+            temperature=temperature if temperature is not None else 0.7,
+            max_tokens=max_tokens,
+            model=model,
+        )
+
+    def _is_retryable(self, exc: Exception) -> bool:
+        if isinstance(exc, LLMRateLimitError):
+            return True
+        if isinstance(exc, LLMTimeoutError):
+            return True
+        if isinstance(exc, LLMAPIError):
+            status = (exc.details or {}).get("status_code")
+            return isinstance(status, int) and status in _RETRYABLE_STATUS
+        return False
+
+    def _compute_backoff(self, attempt: int) -> float:
+        # 1s, 2s, 4s 上限 8s
+        return min(8.0, float(2 ** (attempt - 1)))
+
+    def _log_failure(
+        self,
+        agent_id: str,
+        provider: str,
+        model: str | None,
+        exc: Exception,
+        attempt: int,
+    ) -> None:
+        logger.error(
+            "llm_call",
+            agent_id=agent_id,
+            provider=provider,
+            model=model or "auto",
+            attempt=attempt,
+            error=type(exc).__name__,
+            error_message=str(exc),
+        )
+
+    @staticmethod
+    def _parse_json(content: str) -> dict:
+        """
+        从 LLM 文本里抠出 JSON。
+
+        兼容三种常见输出：
+        1. 纯 JSON
+        2. ```json ... ``` 围栏
+        3. 任意围栏 ``` ... ```
+        4. 头尾混入说明文字时退化到正则抽取首个 {...} 或 [...]
+        """
+        if content is None:
+            raise ValueError("Empty content from LLM")
+        text = content.strip()
+        if not text:
+            raise ValueError("Empty content from LLM")
+
+        if text.startswith("```"):
+            parts = text.split("```")
+            if len(parts) >= 2:
+                text = parts[1]
+                if text.startswith("json"):
+                    text = text[4:]
+                text = text.strip()
+
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            match = re.search(r"(\{.*\}|\[.*\])", text, re.DOTALL)
+            if match:
+                return json.loads(match.group(1))
+            raise
+
+    # ----------------------------------------------------------- accessors
+
     def get_available_providers(self) -> list[str]:
-        """获取已初始化的 Provider 列表。"""
         return list(self._providers.keys())
 
     def is_provider_available(self, provider: str) -> bool:
-        """检查 Provider 是否可用。"""
         return provider in self._providers
 
     def get_default_provider(self) -> str:
-        """获取默认 Provider。"""
         return self._default_provider
 
     def get_config(self) -> LLMConfig:
-        """获取 .env 配置对象。"""
         return self.config
 
     def get_db_config(self) -> dict[str, dict]:
-        """获取数据库配置。"""
         return self._db_config.copy()
 
     def reload_config(self) -> None:
-        """
-        重新加载配置。
-
-        管理员在数据库修改 LLM 配置后调用，
-        重新初始化所有 Provider。
-        """
         self._load_db_config()
         self._init_providers()
 

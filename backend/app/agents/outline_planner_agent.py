@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-import litellm
-
 from app.agents.base import BaseAgent, AgentResult
-from app.core.config import settings
+from app.core.llm_gateway import llm_gateway
 from app.services.article_assembler_service import article_assembler_service
 
 
@@ -88,24 +85,15 @@ Non-negotiable requirements:
         )
 
         try:
-            model = settings.llm_model_name
-            if not model.startswith("dashscope/"):
-                model = f"dashscope/{model}"
-
-            response = await litellm.acompletion(
-                model=model,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_api_base_url,
+            response = await llm_gateway.complete(
+                agent_id=self.agent_id,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                timeout=settings.llm_timeout,
-                custom_llm_provider="dashscope",
+                response_format="json",
             )
-            content = response.choices[0].message.content
-            data = self._parse_json(content)
-            normalized = self._normalize_outline(data)
+            normalized = self._normalize_outline(response.parsed or {})
             if not self._outline_matches_topic(normalized, selected_topic, selected_title):
                 fallback_result = await self.fallback(
                     RuntimeError("outline topic drift detected"),
@@ -114,8 +102,6 @@ Non-negotiable requirements:
                 if fallback_result and fallback_result.is_success:
                     return fallback_result
             return self._success(normalized)
-        except json.JSONDecodeError as exc:
-            return self._failure("JSON_PARSE_ERROR", f"Failed to parse outline JSON: {exc}")
         except Exception as exc:
             return self._failure("LLM_ERROR", str(exc))
 
@@ -279,17 +265,6 @@ Non-negotiable requirements:
                 "Return JSON with article_goal, target_reader_takeaway, opening_hook, emotional_arc, sections, ending_cta, estimated_word_count, summary.",
             ]
         )
-
-    def _parse_json(self, content: str) -> dict[str, Any]:
-        text = content.strip()
-        if text.startswith("```"):
-            parts = text.split("```")
-            if len(parts) >= 2:
-                text = parts[1]
-                if text.startswith("json"):
-                    text = text[4:]
-                text = text.strip()
-        return json.loads(text)
 
     def _normalize_outline(self, data: dict[str, Any]) -> dict[str, Any]:
         sections = data.get("sections")

@@ -7,10 +7,8 @@ Calls LLM to analyze account positioning and return structured JSON.
 不负责：抓热点、写标题、写正文
 """
 
-import json
-import litellm
 from app.agents.base import BaseAgent, AgentResult
-from app.core.config import settings
+from app.core.llm_gateway import llm_gateway
 
 
 class ProfileAgent(BaseAgent):
@@ -97,47 +95,20 @@ class ProfileAgent(BaseAgent):
         user_prompt = f"解析以下账号定位：{positioning}"
 
         try:
-            model = settings.llm_model_name
-            if not model.startswith("dashscope/"):
-                model = f"dashscope/{model}"
-
-            response = await litellm.acompletion(
-                model=model,
-                api_key=settings.llm_api_key,
-                base_url=settings.llm_api_base_url,
+            response = await llm_gateway.complete(
+                agent_id=self.agent_id,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                timeout=settings.llm_timeout,
-                custom_llm_provider="dashscope",
+                response_format="json",
             )
-            content = response.choices[0].message.content
-
-            # 解析 JSON，处理 markdown 代码块
-            data = self._parse_json(content)
-            # 确保原始输入被保留
+            data = dict(response.parsed or {})
             data["positioning_raw"] = positioning
-
             return self._success(data)
 
-        except json.JSONDecodeError as e:
-            return self._failure(code="JSON_PARSE_ERROR", message=f"JSON 解析失败: {str(e)}")
         except Exception as e:
             return self._failure(code="LLM_ERROR", message=str(e))
-
-    def _parse_json(self, content: str) -> dict:
-        """解析 LLM 返回的 JSON，处理 markdown 代码块"""
-        content = content.strip()
-        # 移除 markdown 代码块
-        if content.startswith("```"):
-            parts = content.split("```")
-            if len(parts) >= 2:
-                content = parts[1]
-                if content.startswith("json"):
-                    content = content[4:]
-                content = content.strip()
-        return json.loads(content)
 
     async def fallback(self, error: Exception, input_data: dict) -> AgentResult | None:
         return self._success({

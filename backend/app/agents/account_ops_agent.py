@@ -6,8 +6,7 @@ import json
 from typing import Any
 
 from app.agents.base import BaseAgent, AgentResult
-from app.llm.base import LLMCallOptions
-from app.llm.gateway import LLMGateway
+from app.core.llm_gateway import llm_gateway
 
 
 class AccountOpsAgent(BaseAgent):
@@ -103,22 +102,19 @@ Rules:
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
-        gateway = LLMGateway()
-        prompt = self._build_prompt(input_data)
-
         try:
-            response = await gateway.complete(
+            response = await llm_gateway.complete(
                 agent_id=self.agent_id,
-                prompt=prompt,
-                options=LLMCallOptions(
-                    system_prompt=self.get_system_prompt(context),
-                    temperature=0.2,
-                    max_tokens=900,
-                ),
+                messages=[
+                    {"role": "system", "content": self.get_system_prompt(context)},
+                    {"role": "user", "content": self._build_prompt(input_data)},
+                ],
+                response_format="json",
+                temperature=0.2,
+                max_tokens=900,
                 trace_id=str(context.get("trace_id") or ""),
             )
-            data = self._parse_json(response.content)
-            return self._success(self._normalize_output(data))
+            return self._success(self._normalize_output(response.parsed or {}))
         except Exception as exc:
             return self._failure("OPS_AGENT_ERROR", str(exc))
 
@@ -131,16 +127,6 @@ Rules:
             "single-run operations decision as strict JSON.\n\n"
             f"{json.dumps(input_data, ensure_ascii=False, indent=2)}"
         )
-
-    def _parse_json(self, content: str) -> dict[str, Any]:
-        cleaned = content.strip()
-        if cleaned.startswith("```"):
-            parts = cleaned.split("```")
-            if len(parts) >= 2:
-                cleaned = parts[1]
-                if cleaned.startswith("json"):
-                    cleaned = cleaned[4:]
-        return json.loads(cleaned.strip())
 
     def _normalize_output(self, data: dict[str, Any]) -> dict[str, Any]:
         run_strategy = data.get("run_strategy") if isinstance(data.get("run_strategy"), dict) else {}
