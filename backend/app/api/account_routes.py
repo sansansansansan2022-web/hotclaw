@@ -26,9 +26,11 @@ API 端点：
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
+from app.models.tables import AccountModel
 from app.core.exceptions import (
     AccountNotFoundError,
     AccountInactiveError,
@@ -46,6 +48,7 @@ from app.schemas.account import (
     AccountRunData,
     AccountListResponse,
 )
+from app.schemas.common import ApiResponse
 from app.services.account_service import account_service
 
 logger = get_logger(__name__)
@@ -416,10 +419,6 @@ async def disable_account(
 # Read / rebuild the account's style_profile_json (written by MemoryCuratorAgent)
 # ---------------------------------------------------------------------------
 
-from sqlalchemy import select as _sa_select
-from app.models.tables import AccountModel as _AccountModel
-from app.schemas.common import ApiResponse
-
 
 @router.get("/{account_id}/style-profile")
 async def get_account_style_profile(
@@ -434,7 +433,7 @@ async def get_account_style_profile(
     The `style_profile_json` column is written by `MemoryCuratorAgent` after
     each task and merged incrementally. If not yet generated, returns null.
     """
-    result = await db.execute(_sa_select(_AccountModel).where(_AccountModel.id == account_id))
+    result = await db.execute(select(AccountModel).where(AccountModel.id == account_id))
     account = result.scalar_one_or_none()
     if account is None:
         raise HTTPException(status_code=404, detail=f"account {account_id} not found")
@@ -464,7 +463,7 @@ async def rebuild_account_style_profile(
     Matches frontend `AccountStyleProfileActionResponse`:
         { account_id, status, message?, generated_at? }
     """
-    result = await db.execute(_sa_select(_AccountModel).where(_AccountModel.id == account_id))
+    result = await db.execute(select(AccountModel).where(AccountModel.id == account_id))
     account = result.scalar_one_or_none()
     if account is None:
         raise HTTPException(status_code=404, detail=f"account {account_id} not found")
