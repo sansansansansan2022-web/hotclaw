@@ -66,6 +66,17 @@ class EditorialReviewAgent(BaseAgent):
         "quality",
     }
 
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "editorial_passed": {"type": "boolean"},
+            "style": {"type": "object"},
+            "structure": {"type": "object"},
+            "audit": {"type": "object"},
+            "combined_rewrite_suggestions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+
     default_system_prompt = """\
 你是资深微信公众号内容编辑，负责对文章进行三维一体审核并输出 JSON。
 

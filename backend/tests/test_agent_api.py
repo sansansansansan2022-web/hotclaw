@@ -15,10 +15,16 @@ async def test_list_agents_success(client: AsyncClient):
     agent_ids = [a["agent_id"] for a in agents]
     assert "profile_agent" in agent_ids
     assert "editorial_review_agent" in agent_ids
-    # style/structure/audit agents merged into editorial_review_agent in PR 3
+    assert "topic_selection_agent" in agent_ids
+    assert "content_drafter_agent" in agent_ids
+    # merged agents no longer registered
     assert "audit_agent" not in agent_ids
     assert "style_reviewer_agent" not in agent_ids
     assert "structure_reviewer_agent" not in agent_ids
+    assert "topic_planner_agent" not in agent_ids
+    assert "title_generator_agent" not in agent_ids
+    assert "outline_planner_agent" not in agent_ids
+    assert "section_writer_agent" not in agent_ids
 
 
 @pytest.mark.asyncio

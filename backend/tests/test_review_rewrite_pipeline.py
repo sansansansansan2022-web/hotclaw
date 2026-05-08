@@ -254,28 +254,25 @@ async def test_editorial_review_failure_does_not_block_pipeline(db_session, monk
             )
         if node_id == "hot_topic_analysis":
             return AgentResult("success", node_def["agent_id"], data={"hot_topics": [{"title": "Confidence"}]})
-        if node_id == "topic_planning":
-            return AgentResult("success", node_def["agent_id"], data={"topics": [{"title": "Confidence reset"}]})
-        if node_id == "title_generation":
-            return AgentResult(
-                "success",
-                node_def["agent_id"],
-                data={"selected_topic": "Confidence reset", "titles": [{"text": "How to reset confidence"}]},
-            )
-        if node_id == "outline_planner":
+        if node_id == "topic_selection":
             return AgentResult(
                 "success",
                 node_def["agent_id"],
                 data={
-                    "article_goal": "Help readers rebuild confidence.",
-                    "sections": [{"section_id": "s1", "heading": "Opening", "summary": "Open the article."}],
+                    "topics": [{"title": "Confidence reset", "estimated_appeal": 0.8}],
+                    "selected_topic": "Confidence reset",
+                    "titles": [{"text": "How to reset confidence", "score": 8.0}],
                 },
             )
-        if node_id == "section_writer":
+        if node_id == "content_drafting":
             return AgentResult(
                 "success",
                 node_def["agent_id"],
                 data={
+                    "outline_plan": {
+                        "article_goal": "Help readers rebuild confidence.",
+                        "sections": [{"section_id": "s1", "heading": "Opening", "summary": "Open the article."}],
+                    },
                     "section_drafts": [
                         {
                             "section_id": "s1",
@@ -283,7 +280,7 @@ async def test_editorial_review_failure_does_not_block_pipeline(db_session, monk
                             "summary": "Open the article.",
                             "content_markdown": "Body copy.",
                         }
-                    ]
+                    ],
                 },
             )
         if node_id == "article_assembler":

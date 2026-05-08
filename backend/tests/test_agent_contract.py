@@ -14,28 +14,28 @@ from unittest.mock import patch, AsyncMock
 
 from app.agents.profile_agent import ProfileAgent
 from app.agents.hot_topic_agent import HotTopicAgent
-from app.agents.topic_planner_agent import TopicPlannerAgent
-from app.agents.title_generator_agent import TitleGeneratorAgent
+from app.agents.topic_selection_agent import TopicSelectionAgent
+from app.agents.content_drafter_agent import ContentDrafterAgent
 from app.agents.content_writer_agent import ContentWriterAgent
-from app.agents.audit_agent import AuditAgent
+from app.agents.editorial_review_agent import EditorialReviewAgent
 from app.skills.hot_topic_fetch_skill import HotTopicFetchSkill
 from app.skills.registry import skill_registry
 
 
 # =============================================================================
-# Test 1: 6 个 Agent 都有 Contract
+# Test 1: Active agents have valid contracts
 # =============================================================================
 
 class TestAgentContracts:
-    """Test that all 6 agents have valid contracts."""
+    """Test that active agents have valid contracts."""
 
     @pytest.mark.parametrize("agent_class,expected_id,expected_skills", [
         (ProfileAgent, "profile_agent", []),
         (HotTopicAgent, "hot_topic_agent", ["hot_topic_fetch_skill"]),
-        (TopicPlannerAgent, "topic_planner_agent", []),
-        (TitleGeneratorAgent, "title_generator_agent", []),
+        (TopicSelectionAgent, "topic_selection_agent", []),
+        (ContentDrafterAgent, "content_drafter_agent", []),
         (ContentWriterAgent, "content_writer_agent", []),
-        (AuditAgent, "audit_agent", []),
+        (EditorialReviewAgent, "editorial_review_agent", []),
     ])
     def test_agent_has_contract(self, agent_class, expected_id, expected_skills):
         """Test that each agent has valid input/output schema."""
@@ -299,10 +299,10 @@ class TestBackwardCompatibility:
         agents = [
             ProfileAgent(),
             HotTopicAgent(),
-            TopicPlannerAgent(),
-            TitleGeneratorAgent(),
+            TopicSelectionAgent(),
+            ContentDrafterAgent(),
             ContentWriterAgent(),
-            AuditAgent(),
+            EditorialReviewAgent(),
         ]
 
         for agent in agents:
@@ -316,10 +316,10 @@ class TestBackwardCompatibility:
         agents = [
             ProfileAgent(),
             HotTopicAgent(),
-            TopicPlannerAgent(),
-            TitleGeneratorAgent(),
+            TopicSelectionAgent(),
+            ContentDrafterAgent(),
             ContentWriterAgent(),
-            AuditAgent(),
+            EditorialReviewAgent(),
         ]
 
         for agent in agents:

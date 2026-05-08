@@ -23,9 +23,12 @@ from app.services.article_assembler_service import article_assembler_service
 logger = get_logger(__name__)
 
 STRUCTURED_CONTENT_NODE_IDS = {
-    "outline_planner",
-    "section_writer",
+    "content_drafting",
     "article_assembler",
+}
+
+TOPIC_SELECTION_NODE_IDS = {
+    "topic_selection",
 }
 
 REVIEWER_NODE_IDS = {
@@ -73,52 +76,23 @@ DEFAULT_WORKFLOW_NODES = [
         "required": True,
     },
     {
-        "node_id": "topic_planning",
-        "agent_id": "topic_planner_agent",
-        "name": "Topic Planning",
+        "node_id": "topic_selection",
+        "agent_id": "topic_selection_agent",
+        "name": "选题与标题",
         "input_mapping": {
             "profile": "profile",
             "hot_topics": "hot_topics",
             "account_context": "account_context",
             "ops_context": "ops_context",
         },
-        "output_key": "topics",
+        "output_key": "topic_selection",
         "required": True,
     },
     {
-        "node_id": "title_generation",
-        "agent_id": "title_generator_agent",
-        "name": "Title Generation",
+        "node_id": "content_drafting",
+        "agent_id": "content_drafter_agent",
+        "name": "内容起草",
         "input_mapping": {
-            "profile": "profile",
-            "topics": "topics",
-            "account_context": "account_context",
-            "ops_context": "ops_context",
-        },
-        "output_key": "titles",
-        "required": True,
-    },
-    {
-        "node_id": "outline_planner",
-        "agent_id": "outline_planner_agent",
-        "name": "Outline Planner",
-        "input_mapping": {
-            "profile": "profile",
-            "hot_topics": "hot_topics",
-            "topics": "topics",
-            "titles": "titles",
-            "account_context": "account_context",
-            "ops_context": "ops_context",
-        },
-        "output_key": "outline_plan",
-        "required": True,
-    },
-    {
-        "node_id": "section_writer",
-        "agent_id": "section_writer_agent",
-        "name": "Section Writer",
-        "input_mapping": {
-            "outline_plan": "outline_plan",
             "profile": "profile",
             "topics": "topics",
             "titles": "titles",
@@ -126,7 +100,7 @@ DEFAULT_WORKFLOW_NODES = [
             "account_context": "account_context",
             "ops_context": "ops_context",
         },
-        "output_key": "section_drafts",
+        "output_key": "content_draft",
         "required": True,
     },
     {
@@ -604,6 +578,23 @@ class OrchestratorEngine:
                 workspace.set("ops_context", oc)
             if data.get("retrieved_memories") is not None:
                 workspace.set("retrieved_memories", data.get("retrieved_memories"))
+            return
+        if node_id in TOPIC_SELECTION_NODE_IDS:
+            # Expand topics and titles into separate workspace keys.
+            workspace.set(node_def["output_key"], data)
+            workspace.set("topics", {"topics": data.get("topics") or []})
+            workspace.set("titles", {
+                "selected_topic": data.get("selected_topic") or "",
+                "titles": data.get("titles") or [],
+            })
+            return
+        if node_id in STRUCTURED_CONTENT_NODE_IDS and node_id == "content_drafting":
+            # Expand outline_plan and section_drafts into separate workspace keys.
+            workspace.set(node_def["output_key"], data)
+            if data.get("outline_plan") is not None:
+                workspace.set("outline_plan", data["outline_plan"])
+            if data.get("section_drafts") is not None:
+                workspace.set("section_drafts", {"section_drafts": data["section_drafts"]})
             return
         if node_id == "article_assembler":
             workspace.set(node_def["output_key"], data)

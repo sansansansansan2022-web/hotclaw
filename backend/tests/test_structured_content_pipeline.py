@@ -348,26 +348,21 @@ async def test_structured_pipeline_falls_back_to_legacy_writer(db_session, monke
             )
         if node_id == "hot_topic_analysis":
             return AgentResult("success", node_def["agent_id"], data={"hot_topics": [{"title": "Emotional resilience"}]})
-        if node_id == "topic_planning":
-            return AgentResult(
-                "success",
-                node_def["agent_id"],
-                data={"topics": [{"title": "How to stop self-doubt", "estimated_appeal": 0.92}]},
-            )
-        if node_id == "title_generation":
+        if node_id == "topic_selection":
             return AgentResult(
                 "success",
                 node_def["agent_id"],
                 data={
+                    "topics": [{"title": "How to stop self-doubt", "estimated_appeal": 0.92}],
                     "selected_topic": "How to stop self-doubt",
                     "titles": [{"text": "When self-doubt takes over", "score": 9.4}],
                 },
             )
-        if node_id == "outline_planner":
+        if node_id == "content_drafting":
             return AgentResult(
                 "failed",
                 node_def["agent_id"],
-                error={"code": "OUTLINE_FAIL", "message": "outline generation failed"},
+                error={"code": "DRAFTING_FAIL", "message": "content drafting failed"},
             )
         if node_id == "content_writing_fallback":
             return AgentResult(
@@ -380,11 +375,11 @@ async def test_structured_pipeline_falls_back_to_legacy_writer(db_session, monke
                     "tags": ["growth"],
                 },
             )
-        if node_id == "audit":
+        if node_id == "editorial_review":
             return AgentResult(
                 "success",
                 node_def["agent_id"],
-                data={"passed": True, "risk_level": "low", "overall_comment": "ok", "issues": []},
+                data={"editorial_passed": True, "style": {}, "structure": {}, "audit": {}, "combined_rewrite_suggestions": []},
             )
         raise AssertionError(f"Unexpected node: {node_id}")
 
@@ -403,9 +398,8 @@ async def test_structured_pipeline_falls_back_to_legacy_writer(db_session, monke
         select(TaskNodeRunModel).where(TaskNodeRunModel.task_id == task.id).order_by(TaskNodeRunModel.id)
     )
     statuses = {row.node_id: row.status for row in rows.scalars().all()}
-    assert statuses["outline_planner"] == "failed"
+    assert statuses["content_drafting"] == "failed"
     assert statuses["content_writing_fallback"] == "completed"
-    assert statuses["section_writer"] == "skipped"
     assert statuses["article_assembler"] == "skipped"
 
 
