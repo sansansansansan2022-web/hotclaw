@@ -626,14 +626,24 @@ class OrchestratorEngine:
             return
         if node_id in REVIEWER_NODE_IDS:
             # editorial_review contains style + structure + audit sub-results.
+            # When the agent's fallback path returns success with failed/degraded=True,
+            # ensure the decomposed sub-results also carry the degraded flag explicitly.
+            is_degraded = bool(data.get("failed") or data.get("degraded"))
             workspace.set(node_def["output_key"], data)
-            style_result = self._normalize_review_result("style_reviewer", data.get("style") or {})
-            structure_result = self._normalize_review_result("structure_reviewer", data.get("structure") or {})
+            style_src = data.get("style") or {}
+            structure_src = data.get("structure") or {}
+            if is_degraded:
+                style_src = {**style_src, "degraded": True, "failed": True}
+                structure_src = {**structure_src, "degraded": True, "failed": True}
+            style_result = self._normalize_review_result("style_reviewer", style_src)
+            structure_result = self._normalize_review_result("structure_reviewer", structure_src)
             workspace.set("style_review", style_result)
             workspace.set("structure_review", structure_result)
             self._upsert_review_result(workspace, style_result)
             self._upsert_review_result(workspace, structure_result)
             audit_data = data.get("audit") or {}
+            if is_degraded:
+                audit_data = {**audit_data, "degraded": True}
             workspace.set("audit_result", audit_data)
             pipeline = workspace.get("content_pipeline")
             if not isinstance(pipeline, dict):
