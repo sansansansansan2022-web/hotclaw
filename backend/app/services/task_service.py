@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 from app.core.exceptions import TaskNotFoundError, TaskAlreadyRunningError, HotClawError
 from app.core.logger import get_logger
 from app.core.tracer import generate_task_id, set_task_id
-from app.models.tables import TaskModel, TaskNodeRunModel
+from app.models.tables import AccountModel, AccountNoteModel, ArticleMemoryModel, TaskModel, TaskNodeRunModel
 from app.orchestrator.engine import orchestrator_engine
 from app.orchestrator.broadcaster import broadcaster
 from app.services.account_harness_service import account_harness_service
@@ -65,7 +65,21 @@ class TaskService:
             # Draft creation failure should not fail the task
             await self._create_draft_from_task_result(task, result_data, db)
 
-            # Commit task result and draft together
+            # Persist memory curation (article_memory, profile evolution, notes)
+            # Failure is non-fatal and logged — does not roll back task result
+            if task.account_id and isinstance(result_data.get("memory_curation"), dict):
+                try:
+                    await self._persist_memory_curation(
+                        task.account_id, task.id, result_data["memory_curation"], db
+                    )
+                except Exception as mc_err:
+                    logger.warning(
+                        "memory_curation_persist_failed",
+                        task_id=task_id,
+                        error=str(mc_err),
+                    )
+
+            # Commit task result, draft, and memory together
             await db.commit()
             logger.info("task_completed", task_id=task_id)
 
@@ -228,6 +242,97 @@ class TaskService:
             logger.info("account_run_status_updated", account_id=account_id, status=status)
         except Exception as e:
             logger.warning("failed_to_update_account_run_status", account_id=account_id, error=str(e))
+
+    async def _persist_memory_curation(
+        self,
+        account_id: str,
+        task_id: str,
+        curation: dict,
+        db: AsyncSession,
+    ) -> None:
+        """Persist MemoryCuratorAgent output to the database.
+
+        Writes:
+        - ArticleMemoryModel (new row)
+        - Merges evolved_profile_updates into account.evolved_profile_json
+        - Merges style_profile_updates into account.style_profile_json
+        - Creates AccountNoteModel rows for new_notes
+        """
+        from datetime import datetime, timezone
+
+        # 1. article_memory
+        mem = curation.get("article_memory") or {}
+        title = str(mem.get("title") or "").strip()
+        if title:
+            article_memory = ArticleMemoryModel(
+                account_id=account_id,
+                source_task_id=task_id,
+                title=title,
+                summary=str(mem.get("summary") or "").strip() or None,
+                content_excerpt=str(mem.get("content_excerpt") or "").strip()[:500] or None,
+                tags=mem.get("tags") or [],
+                keywords=mem.get("keywords") or [],
+                metadata_json=mem.get("metadata_json") or {},
+            )
+            db.add(article_memory)
+
+        # 2. evolved_profile_updates + style_profile_updates → update AccountModel
+        evolved_updates = curation.get("evolved_profile_updates") or {}
+        style_updates = curation.get("style_profile_updates") or {}
+        if evolved_updates or style_updates:
+            stmt = select(AccountModel).where(AccountModel.id == account_id)
+            result = await db.execute(stmt)
+            account = result.scalar_one_or_none()
+            if account is not None:
+                if evolved_updates:
+                    current_evolved = dict(account.evolved_profile_json or {})
+                    for key, val in evolved_updates.items():
+                        if isinstance(val, list) and isinstance(current_evolved.get(key), list):
+                            # Merge lists, keep most recent 8 items, deduplicate
+                            merged = list(dict.fromkeys(val + current_evolved[key]))[:8]
+                            current_evolved[key] = merged
+                        else:
+                            current_evolved[key] = val
+                    account.evolved_profile_json = current_evolved
+                if style_updates:
+                    current_style = dict(account.style_profile_json or {})
+                    for key, val in style_updates.items():
+                        if isinstance(val, list) and isinstance(current_style.get(key), list):
+                            merged = list(dict.fromkeys(val + current_style[key]))[:6]
+                            current_style[key] = merged
+                        else:
+                            current_style[key] = val
+                    account.style_profile_json = current_style
+                account.last_evolved_at = datetime.now(timezone.utc)
+                db.add(account)
+
+        # 3. new_notes
+        new_notes = curation.get("new_notes") or []
+        for note_item in new_notes:
+            if not isinstance(note_item, dict):
+                continue
+            content = str(note_item.get("content") or "").strip()
+            if not content:
+                continue
+            note = AccountNoteModel(
+                account_id=account_id,
+                content=content,
+                char_count=len(content),
+                source=str(note_item.get("source") or "memory_curator"),
+                source_task_id=task_id,
+            )
+            db.add(note)
+
+        await db.flush()
+        logger.info(
+            "memory_curation_persisted",
+            account_id=account_id,
+            task_id=task_id,
+            has_article_memory=bool(title),
+            evolved_keys=list(evolved_updates.keys()),
+            style_keys=list(style_updates.keys()),
+            new_notes_count=len(new_notes),
+        )
 
     async def _create_draft_from_task_result(
         self, task: TaskModel, result_data: dict, db: AsyncSession
