@@ -66,6 +66,17 @@ class EditorialReviewAgent(BaseAgent):
         "quality",
     }
 
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "editorial_passed": {"type": "boolean"},
+            "style": {"type": "object"},
+            "structure": {"type": "object"},
+            "audit": {"type": "object"},
+            "combined_rewrite_suggestions": {"type": "array", "items": {"type": "string"}},
+        },
+    }
+
     default_system_prompt = """\
 你是资深微信公众号内容编辑，负责对文章进行三维一体审核并输出 JSON。
 
@@ -233,7 +244,7 @@ class EditorialReviewAgent(BaseAgent):
 
         combined_suggestions_raw = data.get("combined_rewrite_suggestions")
         combined_suggestions = (
-            [str(s).strip() for s in combined_suggestions_raw if str(s).strip()]
+            [str(s).strip() for s in combined_suggestions_raw if str(s).strip()][:4]
             if isinstance(combined_suggestions_raw, list)
             else []
         )
@@ -408,7 +419,7 @@ class EditorialReviewAgent(BaseAgent):
         }
         audit_fallback = {
             "passed": False,
-            "risk_level": "unknown",
+            "risk_level": "medium",
             "issues": [{"type": "system", "description": "审核服务异常，请人工复核", "severity": "medium", "location": None}],
             "overall_comment": "审核服务降级，建议人工复核后发布。",
         }

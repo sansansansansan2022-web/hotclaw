@@ -48,10 +48,8 @@ from app.api.memory_routes import router as memory_router
 from app.agents.context_builder_agent import ContextBuilderAgent
 from app.agents.profile_agent import ProfileAgent
 from app.agents.hot_topic_agent import HotTopicAgent
-from app.agents.topic_planner_agent import TopicPlannerAgent
-from app.agents.title_generator_agent import TitleGeneratorAgent
-from app.agents.outline_planner_agent import OutlinePlannerAgent
-from app.agents.section_writer_agent import SectionWriterAgent
+from app.agents.topic_selection_agent import TopicSelectionAgent
+from app.agents.content_drafter_agent import ContentDrafterAgent
 from app.agents.editorial_review_agent import EditorialReviewAgent
 from app.agents.rewrite_agent import RewriteAgent
 from app.agents.content_writer_agent import ContentWriterAgent
@@ -72,10 +70,8 @@ def _register_agents() -> None:
     agent_registry.register(ContextBuilderAgent())
     agent_registry.register(ProfileAgent())
     agent_registry.register(HotTopicAgent())
-    agent_registry.register(TopicPlannerAgent())
-    agent_registry.register(TitleGeneratorAgent())
-    agent_registry.register(OutlinePlannerAgent())
-    agent_registry.register(SectionWriterAgent())
+    agent_registry.register(TopicSelectionAgent())
+    agent_registry.register(ContentDrafterAgent())
     agent_registry.register(EditorialReviewAgent())
     agent_registry.register(RewriteAgent())
     agent_registry.register(ContentWriterAgent())
