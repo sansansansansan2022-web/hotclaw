@@ -52,11 +52,9 @@ from app.agents.topic_planner_agent import TopicPlannerAgent
 from app.agents.title_generator_agent import TitleGeneratorAgent
 from app.agents.outline_planner_agent import OutlinePlannerAgent
 from app.agents.section_writer_agent import SectionWriterAgent
-from app.agents.style_reviewer_agent import StyleReviewerAgent
-from app.agents.structure_reviewer_agent import StructureReviewerAgent
+from app.agents.editorial_review_agent import EditorialReviewAgent
 from app.agents.rewrite_agent import RewriteAgent
 from app.agents.content_writer_agent import ContentWriterAgent
-from app.agents.audit_agent import AuditAgent
 from app.agents.account_ops_agent import AccountOpsAgent
 from app.agents.registry import agent_registry
 
@@ -78,11 +76,9 @@ def _register_agents() -> None:
     agent_registry.register(TitleGeneratorAgent())
     agent_registry.register(OutlinePlannerAgent())
     agent_registry.register(SectionWriterAgent())
-    agent_registry.register(StyleReviewerAgent())
-    agent_registry.register(StructureReviewerAgent())
+    agent_registry.register(EditorialReviewAgent())
     agent_registry.register(RewriteAgent())
     agent_registry.register(ContentWriterAgent())
-    agent_registry.register(AuditAgent())
     agent_registry.register(AccountOpsAgent())
 
 
@@ -110,18 +106,24 @@ async def lifespan(app: FastAPI):
             await conn.run_sync(Base.metadata.create_all)
         logger.warning("database_tables_auto_created")
 
+        # Add any new columns to existing tables (ALTER TABLE for SQLite).
+        from app.db.migrations import ensure_accounts_columns
+        await ensure_accounts_columns(engine)
+
         # FTS5 must be created AFTER the base tables exist (the virtual table
         # references `article_memories(id)`). Failures are logged but do not
         # block startup — memory search degrades to LIKE.
         await ensure_memory_fts5(engine)
     else:
         logger.info("database_table_auto_create_skipped")
-        # Even when auto-create is off, attempt FTS5 setup so existing DBs
-        # (with article_memories already created) get the virtual table.
+        # Even when auto-create is off, attempt column additions and FTS5
+        # setup so existing DBs pick up schema changes on restart.
         try:
             from app.db.session import engine
             from app.db.fts import ensure_memory_fts5
+            from app.db.migrations import ensure_accounts_columns
 
+            await ensure_accounts_columns(engine)
             await ensure_memory_fts5(engine)
         except Exception as fts_exc:
             logger.warning("memory_fts5_lazy_setup_failed", error=str(fts_exc))

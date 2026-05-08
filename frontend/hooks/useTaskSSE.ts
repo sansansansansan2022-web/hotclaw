@@ -51,12 +51,12 @@ export interface NodeState {
  * 所有节点初始状态为 pending
  */
 const INITIAL_NODES: Omit<NodeState, "status" | "elapsed_seconds" | "error" | "output_summary" | "degraded">[] = [
-  { node_id: "context_building", agent_id: "context_builder_agent", name: "上下文装配" },
-  { node_id: "hot_topic_analysis",   agent_id: "hot_topic_agent",     name: "热点分析" },
-  { node_id: "topic_planning",      agent_id: "topic_planner_agent", name: "选题策划" },
-  { node_id: "title_generation",     agent_id: "title_generator_agent", name: "标题生成" },
-  { node_id: "content_writing",      agent_id: "content_writer_agent", name: "正文生成" },
-  { node_id: "audit",               agent_id: "audit_agent",          name: "审核评估" },
+  { node_id: "context_building",  agent_id: "context_builder_agent",    name: "上下文装配" },
+  { node_id: "hot_topic_analysis", agent_id: "hot_topic_agent",         name: "热点分析" },
+  { node_id: "topic_planning",     agent_id: "topic_planner_agent",     name: "选题策划" },
+  { node_id: "title_generation",   agent_id: "title_generator_agent",   name: "标题生成" },
+  { node_id: "content_writing",    agent_id: "content_writer_agent",    name: "正文生成" },
+  { node_id: "editorial_review",   agent_id: "editorial_review_agent",  name: "编辑审核" },
 ];
 
 /**
