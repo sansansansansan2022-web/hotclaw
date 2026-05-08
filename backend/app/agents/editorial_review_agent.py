@@ -233,7 +233,7 @@ class EditorialReviewAgent(BaseAgent):
 
         combined_suggestions_raw = data.get("combined_rewrite_suggestions")
         combined_suggestions = (
-            [str(s).strip() for s in combined_suggestions_raw if str(s).strip()]
+            [str(s).strip() for s in combined_suggestions_raw if str(s).strip()][:4]
             if isinstance(combined_suggestions_raw, list)
             else []
         )
@@ -408,7 +408,7 @@ class EditorialReviewAgent(BaseAgent):
         }
         audit_fallback = {
             "passed": False,
-            "risk_level": "unknown",
+            "risk_level": "medium",
             "issues": [{"type": "system", "description": "审核服务异常，请人工复核", "severity": "medium", "location": None}],
             "overall_comment": "审核服务降级，建议人工复核后发布。",
         }
