@@ -17,6 +17,7 @@ async def test_list_agents_success(client: AsyncClient):
     assert "editorial_review_agent" in agent_ids
     assert "topic_selection_agent" in agent_ids
     assert "content_drafter_agent" in agent_ids
+    assert "memory_curator_agent" in agent_ids
     # merged agents no longer registered
     assert "audit_agent" not in agent_ids
     assert "style_reviewer_agent" not in agent_ids

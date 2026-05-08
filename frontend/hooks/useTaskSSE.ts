@@ -57,6 +57,7 @@ const INITIAL_NODES: Omit<NodeState, "status" | "elapsed_seconds" | "error" | "o
   { node_id: "content_drafting",  agent_id: "content_drafter_agent",   name: "内容起草" },
   { node_id: "editorial_review",  agent_id: "editorial_review_agent",  name: "编辑审核" },
   { node_id: "rewrite_agent",     agent_id: "rewrite_agent",           name: "润色改写" },
+  { node_id: "memory_curation",   agent_id: "memory_curator_agent",    name: "记忆整理" },
 ];
 
 /**

@@ -52,6 +52,7 @@ from app.agents.topic_selection_agent import TopicSelectionAgent
 from app.agents.content_drafter_agent import ContentDrafterAgent
 from app.agents.editorial_review_agent import EditorialReviewAgent
 from app.agents.rewrite_agent import RewriteAgent
+from app.agents.memory_curator_agent import MemoryCuratorAgent
 from app.agents.content_writer_agent import ContentWriterAgent
 from app.agents.account_ops_agent import AccountOpsAgent
 from app.agents.registry import agent_registry
@@ -74,6 +75,7 @@ def _register_agents() -> None:
     agent_registry.register(ContentDrafterAgent())
     agent_registry.register(EditorialReviewAgent())
     agent_registry.register(RewriteAgent())
+    agent_registry.register(MemoryCuratorAgent())
     agent_registry.register(ContentWriterAgent())
     agent_registry.register(AccountOpsAgent())
 

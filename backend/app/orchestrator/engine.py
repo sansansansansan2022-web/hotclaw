@@ -156,6 +156,21 @@ DEFAULT_WORKFLOW_NODES = [
         "output_key": "rewrite_result",
         "required": False,
     },
+    {
+        "node_id": "memory_curation",
+        "agent_id": "memory_curator_agent",
+        "name": "记忆整理",
+        "input_mapping": {
+            "assembled_article": "assembled_article",
+            "content": "content",
+            "profile": "profile",
+            "account_context": "account_context",
+            "ops_context": "ops_context",
+            "editorial_review": "editorial_review",
+        },
+        "output_key": "memory_curation",
+        "required": False,
+    },
 ]
 
 
