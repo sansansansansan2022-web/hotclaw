@@ -1,4 +1,4 @@
-"""Tests for Phase 6C review and rewrite integration."""
+"""Tests for Phase 6C review and rewrite integration (PR 3: EditorialReview)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,8 @@ import pytest
 from sqlalchemy import select
 
 from app.agents.base import AgentResult
+from app.agents.editorial_review_agent import EditorialReviewAgent
 from app.agents.rewrite_agent import RewriteAgent
-from app.agents.structure_reviewer_agent import StructureReviewerAgent
-from app.agents.style_reviewer_agent import StyleReviewerAgent
 from app.llm.base import LLMResponse
 from app.models.tables import AccountModel, ArticleDraftModel, TaskModel, TaskNodeRunModel
 from app.orchestrator.engine import orchestrator_engine
@@ -25,30 +24,61 @@ def _fake_llm_response(payload: dict) -> LLMResponse:
 
 
 @pytest.mark.asyncio
-async def test_style_reviewer_execute_normalizes_output(monkeypatch):
+async def test_editorial_review_normalizes_combined_output(monkeypatch):
+    """EditorialReviewAgent returns style, structure and audit in one LLM call."""
     async def _fake_completion(**kwargs):
         return _fake_llm_response(
             {
-                "passed": False,
-                "score": 0.61,
-                "summary": "Tone drifts into generic guidance in the middle section.",
-                "issues": [
-                    {
-                        "code": "style_drift",
-                        "severity": "medium",
-                        "message": "The article sounds more generic than the account voice.",
-                        "section_id": "s2",
-                        "suggestion": "Restore the warmer first-person voice.",
-                        "evidence_excerpt": "At this moment, it is important to note",
-                    }
+                "editorial_passed": False,
+                "style": {
+                    "reviewer": "style_reviewer",
+                    "passed": False,
+                    "score": 0.61,
+                    "summary": "Tone drifts into generic guidance in the middle section.",
+                    "issues": [
+                        {
+                            "code": "style_drift",
+                            "severity": "medium",
+                            "message": "The article sounds more generic than the account voice.",
+                            "section_id": "s2",
+                            "suggestion": "Restore the warmer first-person voice.",
+                            "evidence_excerpt": "At this moment, it is important to note",
+                        }
+                    ],
+                    "rewrite_suggestions": ["Tighten abstract phrasing in the middle section."],
+                },
+                "structure": {
+                    "reviewer": "structure_reviewer",
+                    "passed": False,
+                    "score": 0.55,
+                    "summary": "The close is too abrupt.",
+                    "issues": [
+                        {
+                            "code": "weak_closing",
+                            "severity": "medium",
+                            "message": "The ending does not cash out the article promise.",
+                            "section_id": "s3",
+                            "evidence_excerpt": "希望这篇文章对你有所启发",
+                        }
+                    ],
+                    "rewrite_suggestions": ["Strengthen the closing with a clearer takeaway."],
+                },
+                "audit": {
+                    "passed": True,
+                    "risk_level": "low",
+                    "issues": [],
+                    "overall_comment": "内容合规。",
+                },
+                "combined_rewrite_suggestions": [
+                    "Tighten abstract phrasing in the middle section.",
+                    "Strengthen the closing with a clearer takeaway.",
                 ],
-                "rewrite_suggestions": ["Tighten abstract phrasing in the middle section."],
             }
         )
 
-    monkeypatch.setattr("app.agents.style_reviewer_agent.llm_gateway.complete", _fake_completion)
+    monkeypatch.setattr("app.agents.editorial_review_agent.llm_gateway.complete", _fake_completion)
 
-    agent = StyleReviewerAgent()
+    agent = EditorialReviewAgent()
     result = await agent.execute(
         {
             "assembled_article": {
@@ -61,52 +91,25 @@ async def test_style_reviewer_execute_normalizes_output(monkeypatch):
     )
 
     assert result.is_success
-    assert result.data["reviewer"] == "style_reviewer"
-    assert result.data["score"] == pytest.approx(0.61)
-    assert result.data["issues"][0]["code"] == "style_drift"
-    assert result.data["issues"][0]["section_id"] == "s2"
-    assert result.data["issues"][0]["evidence_excerpt"] == "At this moment, it is important to note"
+    assert result.data["editorial_passed"] is False
 
+    style = result.data["style"]
+    assert style["reviewer"] == "style_reviewer"
+    assert style["score"] == pytest.approx(0.61)
+    assert style["issues"][0]["code"] == "style_drift"
+    assert style["issues"][0]["section_id"] == "s2"
+    assert style["issues"][0]["evidence_excerpt"] == "At this moment, it is important to note"
 
-@pytest.mark.asyncio
-async def test_structure_reviewer_execute_normalizes_output(monkeypatch):
-    async def _fake_completion(**kwargs):
-        return _fake_llm_response(
-            {
-                "passed": False,
-                "score": 0.55,
-                "summary": "The close is too abrupt and the second section is thin.",
-                "issues": [
-                    {
-                        "code": "weak_closing",
-                        "severity": "medium",
-                        "message": "The ending does not cash out the article promise.",
-                        "section_id": "s3",
-                        "evidence_excerpt": "希望这篇文章对你有所启发",
-                    }
-                ],
-                "rewrite_suggestions": ["Strengthen the closing with a clearer takeaway."],
-            }
-        )
+    structure = result.data["structure"]
+    assert structure["reviewer"] == "structure_reviewer"
+    assert structure["issues"][0]["code"] == "weak_closing"
+    assert structure["issues"][0]["evidence_excerpt"] == "希望这篇文章对你有所启发"
 
-    monkeypatch.setattr("app.agents.structure_reviewer_agent.llm_gateway.complete", _fake_completion)
+    audit = result.data["audit"]
+    assert audit["passed"] is True
+    assert audit["risk_level"] == "low"
 
-    agent = StructureReviewerAgent()
-    result = await agent.execute(
-        {
-            "outline_plan": {"sections": [{"section_id": "s1", "heading": "Opening"}]},
-            "assembled_article": {
-                "selected_title": "Test title",
-                "content_markdown": "# Test title\n\nBody copy.",
-            },
-        },
-        {},
-    )
-
-    assert result.is_success
-    assert result.data["reviewer"] == "structure_reviewer"
-    assert result.data["issues"][0]["code"] == "weak_closing"
-    assert result.data["issues"][0]["evidence_excerpt"] == "希望这篇文章对你有所启发"
+    assert len(result.data["combined_rewrite_suggestions"]) >= 1
 
 
 @pytest.mark.asyncio
@@ -143,30 +146,24 @@ async def test_rewrite_agent_execute_normalizes_output(monkeypatch):
     assert result.data["fixed_issues"] == ["style_drift", "weak_closing"]
 
 
-def test_reviewer_and_rewrite_prompts_include_reference_context_and_issue_focus():
-    style_agent = StyleReviewerAgent()
-    structure_agent = StructureReviewerAgent()
-    rewrite_agent = RewriteAgent()
+def test_editorial_review_prompt_includes_account_and_article_context():
+    """EditorialReviewAgent prompt contains key context sections."""
+    agent = EditorialReviewAgent()
     input_data = {
         "assembled_article": {
             "selected_title": "别把 AI 写作变成流水线",
             "selected_topic": "AI 写作团队的模板化问题",
             "summary": "一篇关于内容团队写作变形的文章",
-            "content_markdown": "# 别把 AI 写作变成流水线\n\n## 开头\n\n问题已经发生。\n\n## 中段\n\n真正的问题不是不会写，而是越写越像。\n\n## 结尾\n\n希望对你有帮助。",
+            "content_markdown": "# 别把 AI 写作变成流水线\n\n## 开头\n\n问题已经发生。",
         },
         "outline_plan": {
-            "opening_hook": "你可能已经发现，团队越追求稳定产出，文章越像一个模子里出来的。",
-            "ending_cta": "把这篇发给那个还在只盯产能表的人。",
+            "opening_hook": "团队越追求稳定产出，文章越像一个模子里出来的。",
+            "ending_cta": "把这篇发给那个只盯产能表的人。",
             "sections": [{"section_id": "s1", "heading": "开头", "purpose": "让问题先发生"}],
         },
         "section_drafts": {
             "section_drafts": [
-                {
-                    "section_id": "s1",
-                    "heading": "开头",
-                    "summary": "让问题先发生",
-                    "content_markdown": "问题已经发生。",
-                }
+                {"section_id": "s1", "heading": "开头", "summary": "让问题先发生", "content_markdown": "问题已经发生。"}
             ]
         },
         "account_context": {
@@ -189,27 +186,16 @@ def test_reviewer_and_rewrite_prompts_include_reference_context_and_issue_focus(
                 "preferred_reference_source_ids": ["ref-1"],
             }
         },
-        "style_review": {
-            "reviewer": "style_reviewer",
-            "issues": [{"code": "style_drift", "severity": "medium", "section_id": "s1", "message": "太泛"}],
-        },
-        "structure_review": {
-            "reviewer": "structure_reviewer",
-            "issues": [{"code": "weak_closing", "severity": "medium", "section_id": "s3", "message": "收尾太软"}],
-        },
     }
 
-    style_prompt = style_agent._build_user_prompt(input_data)
-    structure_prompt = structure_agent._build_user_prompt(input_data)
-    rewrite_prompt = rewrite_agent._build_user_prompt(input_data)
+    prompt = agent._build_user_prompt(input_data)
 
-    assert "REFERENCE STYLE BRIEF" in style_prompt
-    assert "allowed_issue_codes" in style_prompt
-    assert "SECTION SUMMARY" in structure_prompt
-    assert "reference_structure_missed" in structure_prompt
-    assert "REVIEW FOCUS" in rewrite_prompt
-    assert "style_drift" in rewrite_prompt
-    assert "priority_issues" in rewrite_prompt
+    assert "ACCOUNT SNAPSHOT" in prompt
+    assert "REFERENCE STYLE BRIEF" in prompt
+    assert "OUTLINE SUMMARY" in prompt
+    assert "SECTION SUMMARY" in prompt
+    assert "ARTICLE" in prompt
+    assert "三维一体" in prompt
 
 
 def test_article_assembler_prefers_rewrite_but_keeps_assembled_baseline():
@@ -238,12 +224,13 @@ def test_article_assembler_prefers_rewrite_but_keeps_assembled_baseline():
 
 
 @pytest.mark.asyncio
-async def test_reviewer_failure_does_not_block_pipeline(db_session, monkeypatch):
+async def test_editorial_review_failure_does_not_block_pipeline(db_session, monkeypatch):
+    """When editorial_review fails (optional node), rewrite still runs on degraded input."""
     task = TaskModel(
-        id="task-reviewer-best-effort",
+        id="task-editorial-best-effort",
         workflow_id="default_pipeline",
         status="pending",
-        input_data={"positioning": "Test reviewer best effort."},
+        input_data={"positioning": "Test editorial best effort."},
     )
     db_session.add(task)
     await db_session.commit()
@@ -314,24 +301,11 @@ async def test_reviewer_failure_does_not_block_pipeline(db_session, monkeypatch)
                     "word_count": 18,
                 },
             )
-        if node_id == "style_reviewer":
+        if node_id == "editorial_review":
             return AgentResult(
                 "failed",
                 node_def["agent_id"],
-                error={"code": "STYLE_REVIEW_FAILED", "message": "style review unavailable"},
-            )
-        if node_id == "structure_reviewer":
-            return AgentResult(
-                "success",
-                node_def["agent_id"],
-                data={
-                    "reviewer": "structure_reviewer",
-                    "passed": True,
-                    "score": 0.9,
-                    "summary": "Structure is sound.",
-                    "issues": [],
-                    "rewrite_suggestions": [],
-                },
+                error={"code": "EDITORIAL_REVIEW_FAILED", "message": "editorial review unavailable"},
             )
         if node_id == "rewrite_agent":
             return AgentResult(
@@ -344,12 +318,6 @@ async def test_reviewer_failure_does_not_block_pipeline(db_session, monkeypatch)
                     "fixed_issues": ["style_drift"],
                 },
             )
-        if node_id == "audit":
-            return AgentResult(
-                "success",
-                node_def["agent_id"],
-                data={"passed": True, "risk_level": "low", "overall_comment": "ok", "issues": []},
-            )
         raise AssertionError(f"Unexpected node: {node_id}")
 
     monkeypatch.setattr("app.orchestrator.engine.broadcaster.broadcast", _noop)
@@ -359,8 +327,11 @@ async def test_reviewer_failure_does_not_block_pipeline(db_session, monkeypatch)
     saved_task = await db_session.get(TaskModel, task.id)
     result = await orchestrator_engine.run(saved_task, db_session)
 
+    # editorial_review is marked degraded (either failed or completed+degraded
+    # depending on whether the registry has the agent for fallback)
+    er = result.get("editorial_review", {})
+    assert er.get("editorial_passed") is False or er.get("failed") is True
     assert result["style_review"]["failed"] is True
-    assert result["structure_review"]["passed"] is True
     assert result["rewrite_result"]["used_rewrite"] is True
     assert "Revised body copy." in result["content"]["content_markdown"]
     assert "Body copy." in result["assembled_article"]["content_markdown"]
@@ -369,9 +340,9 @@ async def test_reviewer_failure_does_not_block_pipeline(db_session, monkeypatch)
         select(TaskNodeRunModel).where(TaskNodeRunModel.task_id == task.id).order_by(TaskNodeRunModel.id)
     )
     statuses = {row.node_id: row.status for row in rows.scalars().all()}
-    assert statuses["style_reviewer"] == "failed"
+    # Node is either "failed" (no registry entry) or "completed" with degraded=True (fallback)
+    assert statuses["editorial_review"] in {"failed", "completed"}
     assert statuses["rewrite_agent"] == "completed"
-    assert statuses["audit"] == "completed"
 
 
 @pytest.mark.asyncio

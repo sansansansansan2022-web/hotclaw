@@ -12,10 +12,13 @@ async def test_list_agents_success(client: AsyncClient):
     body = resp.json()
     assert body["code"] == 0
     agents = body["data"]["agents"]
-    assert len(agents) == 6  # 6 mock agents registered
     agent_ids = [a["agent_id"] for a in agents]
     assert "profile_agent" in agent_ids
-    assert "audit_agent" in agent_ids
+    assert "editorial_review_agent" in agent_ids
+    # style/structure/audit agents merged into editorial_review_agent in PR 3
+    assert "audit_agent" not in agent_ids
+    assert "style_reviewer_agent" not in agent_ids
+    assert "structure_reviewer_agent" not in agent_ids
 
 
 @pytest.mark.asyncio

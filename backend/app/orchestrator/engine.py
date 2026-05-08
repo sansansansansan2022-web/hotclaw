@@ -29,8 +29,7 @@ STRUCTURED_CONTENT_NODE_IDS = {
 }
 
 REVIEWER_NODE_IDS = {
-    "style_reviewer",
-    "structure_reviewer",
+    "editorial_review",
 }
 
 REWRITE_NODE_IDS = {
@@ -147,9 +146,9 @@ DEFAULT_WORKFLOW_NODES = [
         "required": True,
     },
     {
-        "node_id": "style_reviewer",
-        "agent_id": "style_reviewer_agent",
-        "name": "Style Reviewer",
+        "node_id": "editorial_review",
+        "agent_id": "editorial_review_agent",
+        "name": "编辑审核",
         "input_mapping": {
             "assembled_article": "assembled_article",
             "content": "content",
@@ -161,24 +160,7 @@ DEFAULT_WORKFLOW_NODES = [
             "outline_plan": "outline_plan",
             "section_drafts": "section_drafts",
         },
-        "output_key": "style_review",
-        "required": False,
-    },
-    {
-        "node_id": "structure_reviewer",
-        "agent_id": "structure_reviewer_agent",
-        "name": "Structure Reviewer",
-        "input_mapping": {
-            "outline_plan": "outline_plan",
-            "section_drafts": "section_drafts",
-            "assembled_article": "assembled_article",
-            "content": "content",
-            "titles": "titles",
-            "topics": "topics",
-            "account_context": "account_context",
-            "ops_context": "ops_context",
-        },
-        "output_key": "structure_review",
+        "output_key": "editorial_review",
         "required": False,
     },
     {
@@ -198,18 +180,6 @@ DEFAULT_WORKFLOW_NODES = [
             "ops_context": "ops_context",
         },
         "output_key": "rewrite_result",
-        "required": False,
-    },
-    {
-        "node_id": "audit",
-        "agent_id": "audit_agent",
-        "name": "Audit",
-        "input_mapping": {
-            "titles": "titles",
-            "content": "content",
-            "profile": "profile",
-        },
-        "output_key": "audit_result",
         "required": False,
     },
 ]
@@ -649,9 +619,16 @@ class OrchestratorEngine:
             )
             return
         if node_id in REVIEWER_NODE_IDS:
-            review_result = self._normalize_review_result(node_id, data)
-            workspace.set(node_def["output_key"], review_result)
-            self._upsert_review_result(workspace, review_result)
+            # editorial_review contains style + structure + audit sub-results.
+            workspace.set(node_def["output_key"], data)
+            style_result = self._normalize_review_result("style_reviewer", data.get("style") or {})
+            structure_result = self._normalize_review_result("structure_reviewer", data.get("structure") or {})
+            workspace.set("style_review", style_result)
+            workspace.set("structure_review", structure_result)
+            self._upsert_review_result(workspace, style_result)
+            self._upsert_review_result(workspace, structure_result)
+            audit_data = data.get("audit") or {}
+            workspace.set("audit_result", audit_data)
             pipeline = workspace.get("content_pipeline")
             if not isinstance(pipeline, dict):
                 pipeline = {}
@@ -696,19 +673,38 @@ class OrchestratorEngine:
     ) -> None:
         node_id = node_def["node_id"]
         if node_id in REVIEWER_NODE_IDS:
-            review_result = {
-                "reviewer": node_id,
+            _degraded_review = {
                 "passed": False,
                 "score": None,
-                "summary": f"{node_def['name']} failed. Keeping the assembled article without reviewer guidance.",
                 "issues": [],
                 "rewrite_suggestions": [],
                 "failed": True,
                 "degraded": True,
                 "error_message": error_message,
             }
-            workspace.set(node_def["output_key"], review_result)
-            self._upsert_review_result(workspace, review_result)
+            style_degraded = {**_degraded_review, "reviewer": "style_reviewer", "summary": f"{node_def['name']} failed."}
+            structure_degraded = {**_degraded_review, "reviewer": "structure_reviewer", "summary": f"{node_def['name']} failed."}
+            audit_degraded = {
+                "passed": False,
+                "risk_level": "unknown",
+                "issues": [],
+                "overall_comment": f"{node_def['name']} failed. Manual review recommended.",
+            }
+            workspace.set(node_def["output_key"], {
+                "editorial_passed": False,
+                "style": style_degraded,
+                "structure": structure_degraded,
+                "audit": audit_degraded,
+                "combined_rewrite_suggestions": [],
+                "failed": True,
+                "degraded": True,
+                "error_message": error_message,
+            })
+            workspace.set("style_review", style_degraded)
+            workspace.set("structure_review", structure_degraded)
+            workspace.set("audit_result", audit_degraded)
+            self._upsert_review_result(workspace, style_degraded)
+            self._upsert_review_result(workspace, structure_degraded)
             pipeline = workspace.get("content_pipeline")
             if not isinstance(pipeline, dict):
                 pipeline = {}
