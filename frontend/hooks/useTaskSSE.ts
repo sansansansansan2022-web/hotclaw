@@ -47,7 +47,7 @@ export interface NodeState {
 
 /**
  * 初始节点状态
- * 6 个节点对应流水线中的 6 个智能体
+ * 7 个节点对应流水线中的 7 个智能体阶段（PR 4/5 后）
  * 所有节点初始状态为 pending
  */
 const INITIAL_NODES: Omit<NodeState, "status" | "elapsed_seconds" | "error" | "output_summary" | "degraded">[] = [

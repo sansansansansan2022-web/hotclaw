@@ -409,3 +409,77 @@ async def disable_account(
     except Exception as e:
         logger.error("account_disable_error", account_id=account_id, error=str(e))
         raise HTTPException(status_code=500, detail="failed to disable account")
+
+
+# ---------------------------------------------------------------------------
+# Style profile endpoints
+# Read / rebuild the account's style_profile_json (written by MemoryCuratorAgent)
+# ---------------------------------------------------------------------------
+
+from sqlalchemy import select as _sa_select
+from app.models.tables import AccountModel as _AccountModel
+from app.schemas.common import ApiResponse
+
+
+@router.get("/{account_id}/style-profile")
+async def get_account_style_profile(
+    account_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    """Return the account's style profile.
+
+    Matches frontend `AccountStyleProfileResponse`:
+        { account_id, generated_at?, style_profile: StyleProfile | null }
+
+    The `style_profile_json` column is written by `MemoryCuratorAgent` after
+    each task and merged incrementally. If not yet generated, returns null.
+    """
+    result = await db.execute(_sa_select(_AccountModel).where(_AccountModel.id == account_id))
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=404, detail=f"account {account_id} not found")
+
+    style_profile = account.style_profile_json or None
+    generated_at = account.last_evolved_at.isoformat() if account.last_evolved_at else None
+
+    return ApiResponse(
+        data={
+            "account_id": account_id,
+            "generated_at": generated_at,
+            "style_profile": style_profile,
+        }
+    )
+
+
+@router.post("/{account_id}/style-profile/rebuild")
+async def rebuild_account_style_profile(
+    account_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    """Reset the style profile so it will be re-accumulated from future tasks.
+
+    This does NOT trigger a rebuild from scratch — it clears `style_profile_json`
+    so the next task's MemoryCuratorAgent starts fresh.
+
+    Matches frontend `AccountStyleProfileActionResponse`:
+        { account_id, status, message?, generated_at? }
+    """
+    result = await db.execute(_sa_select(_AccountModel).where(_AccountModel.id == account_id))
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=404, detail=f"account {account_id} not found")
+
+    account.style_profile_json = None
+    account.last_evolved_at = None
+    db.add(account)
+    await db.commit()
+    logger.info("style_profile_reset", account_id=account_id)
+
+    return ApiResponse(
+        data={
+            "account_id": account_id,
+            "status": "ok",
+            "message": "风格档案已重置，将在下次任务完成后自动重建。",
+            "generated_at": None,
+        }
+    )

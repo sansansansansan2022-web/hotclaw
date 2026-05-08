@@ -80,6 +80,30 @@ export interface TaskStatusResponse {
   elapsed_seconds?: number | null;
 }
 
+export interface EditorialReview {
+  editorial_passed?: boolean | null;
+  style?: ReviewResult | Record<string, unknown> | null;
+  structure?: ReviewResult | Record<string, unknown> | null;
+  audit?: AuditResult | Record<string, unknown> | null;
+  combined_rewrite_suggestions?: string[] | null;
+  failed?: boolean | null;
+  degraded?: boolean | null;
+}
+
+export interface MemoryCurationResult {
+  article_memory?: {
+    title?: string | null;
+    summary?: string | null;
+    content_excerpt?: string | null;
+    tags?: string[] | null;
+    keywords?: string[] | null;
+    metadata_json?: Record<string, unknown> | null;
+  } | null;
+  evolved_profile_updates?: Record<string, unknown> | null;
+  style_profile_updates?: Record<string, unknown> | null;
+  new_notes?: Array<{ content: string; source: string }> | null;
+}
+
 export interface TaskResultData {
   input?: { positioning: string };
   profile?: AccountProfile;
@@ -87,9 +111,12 @@ export interface TaskResultData {
   retrieved_memories?: ContentMemory[] | Record<string, unknown> | null;
   outline_plan?: OutlinePlan | Record<string, unknown> | null;
   section_drafts?: SectionDraft[] | Record<string, unknown> | null;
+  /** Style/structure/audit decomposed from editorial_review for backward compat */
   style_review?: ReviewResult | Record<string, unknown> | null;
   structure_review?: ReviewResult | Record<string, unknown> | null;
   review_results?: ReviewResult[] | Record<string, unknown> | null;
+  /** Combined editorial review result (PR 3+) */
+  editorial_review?: EditorialReview | Record<string, unknown> | null;
   rewrite_result?: RewriteResult | Record<string, unknown> | null;
   evaluation?: EvaluationSummary | Record<string, unknown> | null;
   content_pipeline?: {
@@ -102,8 +129,12 @@ export interface TaskResultData {
   hot_topics?: { hot_topics: HotTopic[] };
   topics?: { topics: TopicCandidate[] };
   titles?: { selected_topic: string; titles: TitleCandidate[] };
+  /** Raw combined output from TopicSelectionAgent (PR 4+) */
+  topic_selection?: { topics: TopicCandidate[]; selected_topic: string; titles: TitleCandidate[] } | null;
   content?: ArticleContent;
   audit_result?: AuditResult;
+  /** Memory curation output (PR 5+) — persisted to DB by task_service */
+  memory_curation?: MemoryCurationResult | null;
   [key: string]: unknown;
 }
 
