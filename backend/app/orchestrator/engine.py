@@ -246,6 +246,7 @@ class OrchestratorEngine:
         total_tokens = 0
         structured_pipeline_degraded = False
         quality_gate_blocked = False
+        stage_envelopes: list[dict[str, Any]] = []
 
         account_context = await account_service.get_account_context(task.account_id, db)
         if account_context:
@@ -305,6 +306,7 @@ class OrchestratorEngine:
                 quality_gate_blocked
                 and node_id in POST_PROCESS_NODE_IDS
                 and not self._allow_manual_post_process_after_quality_gate(ops_context)
+                and not self._allow_review_only_post_process(workspace)
             ):
                 await self._record_skipped_node(task.id, node_def, db, "draft_quality_gate_blocked")
                 continue
@@ -384,24 +386,8 @@ class OrchestratorEngine:
                         gate_result = workspace.get("audit_result")
                         quality_gate_blocked = isinstance(gate_result, dict) and gate_result.get("passed") is False
                     if node_id == "audit" and self._is_audit_blocker(workspace.get("audit_result")):
-                        error_message = "single audit gate blocked publish due to blocker-level issues"
-                        blocker_trace = self._extract_runtime_trace(
-                            result,
-                            error_class="audit_blocker",
-                            error_message=error_message,
-                        )
-                        await self._mark_node_failed(
-                            node_run,
-                            error_message,
-                            db,
-                            runtime_trace=blocker_trace,
-                        )
-                        await broadcaster.broadcast(
-                            task.id,
-                            "node_error",
-                            {"node_id": node_id, "error": error_message},
-                        )
-                        raise AgentExecutionError(node_def["agent_id"], error_message)
+                        structured_pipeline_degraded = True
+                        workspace.set("review_only_mode", True)
                     node_run.status = "completed"
                     node_run.output_data = self._merge_runtime_output(result.data, runtime_trace)
 
@@ -663,6 +649,9 @@ class OrchestratorEngine:
                 )
 
             await self._finalize_node(node_run, db)
+            node_stage = self._extract_node_stage_envelope(node_run)
+            if node_stage:
+                stage_envelopes.append(node_stage)
             logger.info(
                 "node_execution_finished",
                 task_id=task.id,
@@ -696,6 +685,13 @@ class OrchestratorEngine:
                 total_tokens += node_run.completion_tokens
 
         result_data = article_assembler_service.normalize_result_data(workspace.snapshot())
+        result_data = self._inject_execution_meta(
+            result_data=result_data,
+            stage_envelopes=stage_envelopes,
+            degraded=structured_pipeline_degraded,
+            review_only=bool(workspace.get("review_only_mode")),
+            task_id=task.id,
+        )
         task.status = "completed"
         task.completed_at = datetime.now(timezone.utc)
         task.result_data = result_data
@@ -1399,6 +1395,10 @@ class OrchestratorEngine:
                 return True
         effective_mode = str(run_strategy.get("effective_mode") or "").strip().lower()
         return effective_mode == "manual"
+
+    def _allow_review_only_post_process(self, workspace: Workspace) -> bool:
+        return bool(workspace.get("review_only_mode"))
+
     def _strategy_skip_reason(self, node_id: str, run_strategy: dict[str, Any]) -> str | None:
         if not run_strategy:
             return None
@@ -1416,12 +1416,14 @@ class OrchestratorEngine:
         audit_result = workspace.get("audit_result")
         if not isinstance(audit_result, dict):
             return False
+        if self._is_audit_blocker(audit_result):
+            return False
+        if str(audit_result.get("risk_level") or "").strip().lower() == "medium":
+            return True
         rewrite_required = audit_result.get("rewrite_required")
         if isinstance(rewrite_required, bool):
             return rewrite_required
         if bool(audit_result.get("passed")):
-            return False
-        if self._is_audit_blocker(audit_result):
             return False
         return True
 
@@ -1677,6 +1679,46 @@ class OrchestratorEngine:
             },
             "next_action": next_action,
         }
+
+    def _extract_node_stage_envelope(self, node_run: TaskNodeRunModel) -> dict[str, Any] | None:
+        if not isinstance(node_run.output_data, dict):
+            return None
+        envelope = node_run.output_data.get("stage_envelope")
+        return dict(envelope) if isinstance(envelope, dict) else None
+
+    def _inject_execution_meta(
+        self,
+        *,
+        result_data: dict[str, Any],
+        stage_envelopes: list[dict[str, Any]],
+        degraded: bool,
+        review_only: bool,
+        task_id: str | None = None,
+    ) -> dict[str, Any]:
+        payload = dict(result_data or {})
+        execution_meta = payload.get("execution_meta")
+        execution_meta = dict(execution_meta) if isinstance(execution_meta, dict) else {}
+        stages = [dict(item) for item in stage_envelopes]
+        stages.append(
+            {
+                "trace_id": get_trace_id(),
+                "task_id": task_id,
+                "stage": "terminal_publishability",
+                "status": "degraded" if review_only else "ok",
+                "severity": "major" if review_only else "none",
+                "attempt": 1,
+                "max_attempts": 1,
+                "model_route": {"provider": None, "model": None, "fallback_used": False},
+                "error": {"code": None, "message": None, "retry_after_ms": 0},
+                "next_action": "stop" if review_only else "continue",
+            }
+        )
+        execution_meta["stages"] = stages
+        execution_meta["single_gate_mode"] = True
+        execution_meta["degraded"] = degraded
+        execution_meta["publishability"] = "review_only" if review_only else "publishable"
+        payload["execution_meta"] = execution_meta
+        return payload
 
     def _result_error_message(self, result: AgentResult) -> str:
         if not result.error:
