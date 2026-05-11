@@ -45,22 +45,17 @@ def _safe_print(*args: object, sep: str = " ", end: str = "\n") -> None:
 print = _safe_print
 
 STRUCTURED_CONTENT_NODE_IDS = {
-    "outline_planner",
-    "section_writer",
-    "article_assembler",
+    "content_writing",
 }
 
-REVIEWER_NODE_IDS = {
-    "style_reviewer",
-    "structure_reviewer",
-}
+REVIEWER_NODE_IDS = set()
 
 REWRITE_NODE_IDS = {
     "rewrite_agent",
 }
 
 QUALITY_GATE_NODE_IDS = {
-    "draft_quality_gate",
+    "audit",
 }
 
 POST_PROCESS_NODE_IDS = {
@@ -133,57 +128,15 @@ DEFAULT_WORKFLOW_NODES = [
             "citation_guardrails": "citation_guardrails",
             "outline_seed": "outline_seed",
         },
-        "output_key": "topics",
+        "output_key": "topic_bundle",
         "required": True,
     },
     {
-        "node_id": "title_generation",
-        "agent_id": "title_generator_agent",
-        "name": "Title Generation",
+        "node_id": "content_writing",
+        "agent_id": "content_writer_agent",
+        "name": "Content Writing",
+        "timeout_seconds": 420,
         "input_mapping": {
-            "profile": "profile",
-            "topics": "topics",
-            "account_context": "account_context",
-            "ops_context": "ops_context",
-            "query_plan": "query_plan",
-            "reference_digest": "reference_digest",
-            "source_candidates": "source_candidates",
-            "selected_evidence": "selected_evidence",
-            "evidence_summaries": "evidence_summaries",
-            "citation_guardrails": "citation_guardrails",
-        },
-        "output_key": "titles",
-        "required": True,
-    },
-    {
-        "node_id": "outline_planner",
-        "agent_id": "outline_planner_agent",
-        "name": "Outline Planner",
-        "timeout_seconds": 300,
-        "input_mapping": {
-            "profile": "profile",
-            "hot_topics": "hot_topics",
-            "topics": "topics",
-            "titles": "titles",
-            "account_context": "account_context",
-            "ops_context": "ops_context",
-            "query_plan": "query_plan",
-            "reference_digest": "reference_digest",
-            "source_candidates": "source_candidates",
-            "selected_evidence": "selected_evidence",
-            "evidence_summaries": "evidence_summaries",
-            "citation_guardrails": "citation_guardrails",
-        },
-        "output_key": "outline_plan",
-        "required": True,
-    },
-    {
-        "node_id": "section_writer",
-        "agent_id": "section_writer_agent",
-        "name": "Section Writer",
-        "timeout_seconds": 300,
-        "input_mapping": {
-            "outline_plan": "outline_plan",
             "profile": "profile",
             "topics": "topics",
             "titles": "titles",
@@ -197,71 +150,23 @@ DEFAULT_WORKFLOW_NODES = [
             "evidence_summaries": "evidence_summaries",
             "citation_guardrails": "citation_guardrails",
         },
-        "output_key": "section_drafts",
+        "output_key": "content",
         "required": True,
     },
     {
-        "node_id": "article_assembler",
-        "agent_id": "article_assembler_service",
-        "name": "Article Assembler",
-        "executor": "service",
-        "service": "article_assembler",
+        "node_id": "audit",
+        "agent_id": "audit_agent",
+        "name": "Audit (Single Gate)",
         "input_mapping": {
-            "outline_plan": "outline_plan",
-            "section_drafts": "section_drafts",
             "titles": "titles",
-            "topics": "topics",
             "content": "content",
-        },
-        "output_key": "assembled_article",
-        "required": True,
-    },
-    {
-        "node_id": "style_reviewer",
-        "agent_id": "style_reviewer_agent",
-        "name": "Style Reviewer",
-        "input_mapping": {
-            "assembled_article": "assembled_article",
-            "content": "content",
-            "titles": "titles",
-            "topics": "topics",
             "profile": "profile",
             "account_context": "account_context",
-            "ops_context": "ops_context",
-            "outline_plan": "outline_plan",
-            "section_drafts": "section_drafts",
-            "query_plan": "query_plan",
-            "reference_digest": "reference_digest",
-            "source_candidates": "source_candidates",
             "selected_evidence": "selected_evidence",
-            "evidence_summaries": "evidence_summaries",
             "citation_guardrails": "citation_guardrails",
         },
-        "output_key": "style_review",
-        "required": False,
-    },
-    {
-        "node_id": "structure_reviewer",
-        "agent_id": "structure_reviewer_agent",
-        "name": "Structure Reviewer",
-        "input_mapping": {
-            "outline_plan": "outline_plan",
-            "section_drafts": "section_drafts",
-            "assembled_article": "assembled_article",
-            "content": "content",
-            "titles": "titles",
-            "topics": "topics",
-            "account_context": "account_context",
-            "ops_context": "ops_context",
-            "query_plan": "query_plan",
-            "reference_digest": "reference_digest",
-            "source_candidates": "source_candidates",
-            "selected_evidence": "selected_evidence",
-            "evidence_summaries": "evidence_summaries",
-            "citation_guardrails": "citation_guardrails",
-        },
-        "output_key": "structure_review",
-        "required": False,
+        "output_key": "audit_result",
+        "required": True,
     },
     {
         "node_id": "rewrite_agent",
@@ -271,12 +176,9 @@ DEFAULT_WORKFLOW_NODES = [
         "input_mapping": {
             "titles": "titles",
             "topics": "topics",
-            "outline_plan": "outline_plan",
-            "section_drafts": "section_drafts",
             "assembled_article": "assembled_article",
-            "style_review": "style_review",
-            "structure_review": "structure_review",
-            "review_results": "review_results",
+            "content": "content",
+            "audit_result": "audit_result",
             "account_context": "account_context",
             "ops_context": "ops_context",
             "query_plan": "query_plan",
@@ -290,43 +192,6 @@ DEFAULT_WORKFLOW_NODES = [
         "required": False,
     },
     {
-        "node_id": "audit",
-        "agent_id": "audit_agent",
-        "name": "Audit",
-        "input_mapping": {
-            "titles": "titles",
-            "content": "content",
-            "profile": "profile",
-            "selected_evidence": "selected_evidence",
-            "citation_guardrails": "citation_guardrails",
-        },
-        "output_key": "audit_result",
-        "required": False,
-    },
-    {
-        "node_id": "draft_quality_gate",
-        "agent_id": "draft_quality_gate_service",
-        "name": "Draft Quality Gate",
-        "executor": "service",
-        "service": "draft_quality_gate",
-        "input_mapping": {
-            "assembled_article": "assembled_article",
-            "content": "content",
-            "titles": "titles",
-            "topics": "topics",
-            "profile": "profile",
-            "account_context": "account_context",
-            "ops_context": "ops_context",
-            "selected_evidence": "selected_evidence",
-            "citation_guardrails": "citation_guardrails",
-            "audit_result": "audit_result",
-            "review_results": "review_results",
-            "rewrite_result": "rewrite_result",
-        },
-        "output_key": "draft_quality_gate",
-        "required": True,
-    },
-    {
         "node_id": "post_process_agent",
         "agent_id": "post_process_agent",
         "name": "Post-process Agent",
@@ -334,9 +199,8 @@ DEFAULT_WORKFLOW_NODES = [
             "content": "content",
             "assembled_article": "assembled_article",
             "rewrite_result": "rewrite_result",
+            "audit_result": "audit_result",
             "draft_quality_gate": "draft_quality_gate",
-            "outline_plan": "outline_plan",
-            "section_drafts": "section_drafts",
             "titles": "titles",
             "topics": "topics",
             "account_context": "account_context",
@@ -344,6 +208,21 @@ DEFAULT_WORKFLOW_NODES = [
             "reference_digest": "reference_digest",
         },
         "output_key": "post_process_result",
+        "required": False,
+    },
+    {
+        "node_id": "account_ops_finalize",
+        "agent_id": "account_ops_finalize_service",
+        "name": "Account Ops Finalize",
+        "executor": "service",
+        "service": "account_ops_finalize",
+        "input_mapping": {
+            "ops_context": "ops_context",
+            "audit_result": "audit_result",
+            "post_process_result": "post_process_result",
+            "content_pipeline": "content_pipeline",
+        },
+        "output_key": "account_ops_result",
         "required": False,
     },
 ]
@@ -434,6 +313,9 @@ class OrchestratorEngine:
             if strategy_skip_reason:
                 await self._record_skipped_node(task.id, node_def, db, strategy_skip_reason)
                 continue
+            if node_id in REWRITE_NODE_IDS and not self._should_run_rewrite(workspace):
+                await self._record_skipped_node(task.id, node_def, db, "audit_skip_rewrite")
+                continue
             if node_def.get("executor") != "service":
                 agent = agent_registry.get(node_def["agent_id"])
                 agent_runtime = await self._resolve_agent_runtime(
@@ -499,8 +381,27 @@ class OrchestratorEngine:
                     self._store_node_result(workspace, node_def, result.data or {})
                     self._apply_runtime_trace_to_node_run(node_run, runtime_trace)
                     if node_id in QUALITY_GATE_NODE_IDS:
-                        gate_result = workspace.get("draft_quality_gate")
+                        gate_result = workspace.get("audit_result")
                         quality_gate_blocked = isinstance(gate_result, dict) and gate_result.get("passed") is False
+                    if node_id == "audit" and self._is_audit_blocker(workspace.get("audit_result")):
+                        error_message = "single audit gate blocked publish due to blocker-level issues"
+                        blocker_trace = self._extract_runtime_trace(
+                            result,
+                            error_class="audit_blocker",
+                            error_message=error_message,
+                        )
+                        await self._mark_node_failed(
+                            node_run,
+                            error_message,
+                            db,
+                            runtime_trace=blocker_trace,
+                        )
+                        await broadcaster.broadcast(
+                            task.id,
+                            "node_error",
+                            {"node_id": node_id, "error": error_message},
+                        )
+                        raise AgentExecutionError(node_def["agent_id"], error_message)
                     node_run.status = "completed"
                     node_run.output_data = self._merge_runtime_output(result.data, runtime_trace)
 
@@ -907,6 +808,28 @@ class OrchestratorEngine:
         task_id: str | None = None,
         account_id: str | None = None,
     ) -> AgentResult:
+        if node_def.get("service") == "account_ops_finalize":
+            audit_result = input_data.get("audit_result") if isinstance(input_data.get("audit_result"), dict) else {}
+            post_process_result = (
+                input_data.get("post_process_result")
+                if isinstance(input_data.get("post_process_result"), dict)
+                else {}
+            )
+            ops_context = input_data.get("ops_context") if isinstance(input_data.get("ops_context"), dict) else {}
+            pipeline = input_data.get("content_pipeline") if isinstance(input_data.get("content_pipeline"), dict) else {}
+            result_payload = {
+                "final_status": "ready_for_review" if bool(post_process_result) else "content_generated",
+                "audit_passed": bool(audit_result.get("passed")),
+                "audit_risk_level": audit_result.get("risk_level"),
+                "ops_notes": (ops_context.get("ops_notes") if isinstance(ops_context, dict) else []) or [],
+                "degraded": bool(pipeline.get("degraded")),
+            }
+            return AgentResult(
+                status="success",
+                agent_name=node_def["agent_id"],
+                data=result_payload,
+            )
+
         if node_def.get("service") == "draft_quality_gate":
             from app.services.draft_quality_gate_service import draft_quality_gate_service
 
@@ -1112,6 +1035,87 @@ class OrchestratorEngine:
                 if key in data:
                     workspace.set(key, data.get(key))
             return
+        if node_id == "topic_planning":
+            topic_payload = data if isinstance(data, dict) else {}
+            workspace.set(node_def["output_key"], topic_payload)
+            if "topics" in topic_payload:
+                workspace.set("topics", {"topics": topic_payload.get("topics") or []})
+            if "titles" in topic_payload:
+                workspace.set("titles", topic_payload.get("titles") or {})
+            elif isinstance(topic_payload.get("topics"), list):
+                generated_titles = []
+                for item in topic_payload.get("topics", []):
+                    if not isinstance(item, dict):
+                        continue
+                    title = str(item.get("title") or "").strip()
+                    if title:
+                        generated_titles.append({"title": title, "confidence": item.get("estimated_appeal", 0.6)})
+                selected_title = generated_titles[0]["title"] if generated_titles else ""
+                workspace.set(
+                    "titles",
+                    {
+                        "selected_title": selected_title,
+                        "titles": generated_titles,
+                        "candidates": generated_titles,
+                    },
+                )
+            return
+        if node_id == "content_writing":
+            content_payload = data if isinstance(data, dict) else {}
+            workspace.set(node_def["output_key"], content_payload)
+            workspace.set(
+                "assembled_article",
+                article_assembler_service.extract_assembled_article_payload(
+                    {
+                        "content": content_payload,
+                        "titles": workspace.get("titles"),
+                        "topics": workspace.get("topics"),
+                    }
+                ),
+            )
+            workspace.set(
+                "content",
+                article_assembler_service.extract_article_payload(
+                    {
+                        "content": content_payload,
+                        "titles": workspace.get("titles"),
+                        "topics": workspace.get("topics"),
+                    }
+                ),
+            )
+            workspace.set(
+                "content_pipeline",
+                {
+                    "version": "phase7-unified-v1",
+                    "used_structured_pipeline": True,
+                    "fallback_to_content_writer": False,
+                    "degraded": False,
+                },
+            )
+            return
+        if node_id == "audit":
+            audit_result = dict(data or {})
+            workspace.set(node_def["output_key"], audit_result)
+            workspace.set(
+                "draft_quality_gate",
+                {
+                    "passed": bool(audit_result.get("passed")),
+                    "status": "passed" if bool(audit_result.get("passed")) else "blocked",
+                    "source": "single_audit_gate",
+                    "risk_level": audit_result.get("risk_level"),
+                },
+            )
+            pipeline = workspace.get("content_pipeline")
+            if not isinstance(pipeline, dict):
+                pipeline = {}
+            pipeline["quality_gate_checked"] = True
+            pipeline["quality_gate_passed"] = bool(audit_result.get("passed"))
+            pipeline["quality_gate_status"] = "passed" if bool(audit_result.get("passed")) else "blocked"
+            pipeline["single_gate_mode"] = True
+            if audit_result.get("passed") is False:
+                pipeline["degraded"] = True
+            workspace.set("content_pipeline", pipeline)
+            return
         if node_id == "article_assembler":
             workspace.set(node_def["output_key"], data)
             workspace.set("content", data)
@@ -1212,6 +1216,9 @@ class OrchestratorEngine:
                     final_content["content_html"] = final_html
                 final_content["word_count"] = article_assembler_service.count_words(final_markdown)
                 workspace.set("content", final_content)
+            return
+        if node_id == "account_ops_finalize":
+            workspace.set(node_def["output_key"], data if isinstance(data, dict) else {})
             return
         workspace.set(node_def["output_key"], data)
 
@@ -1396,20 +1403,43 @@ class OrchestratorEngine:
         if not run_strategy:
             return None
 
-        allow_reviewers = run_strategy.get("allow_reviewers")
-        reviewer_mode = str(run_strategy.get("reviewer_mode") or "dual").strip().lower()
         allow_rewrite = run_strategy.get("allow_rewrite")
         allow_post_process = run_strategy.get("allow_post_process")
 
-        if node_id in REVIEWER_NODE_IDS and allow_reviewers is False:
-            return "run_strategy_disabled_reviewers"
-        if node_id == "structure_reviewer" and reviewer_mode == "single":
-            return "run_strategy_single_reviewer"
         if node_id in REWRITE_NODE_IDS and allow_rewrite is False:
             return "run_strategy_disabled_rewrite"
         if node_id in POST_PROCESS_NODE_IDS and allow_post_process is False:
             return "run_strategy_disabled_post_process"
         return None
+
+    def _should_run_rewrite(self, workspace: Workspace) -> bool:
+        audit_result = workspace.get("audit_result")
+        if not isinstance(audit_result, dict):
+            return False
+        rewrite_required = audit_result.get("rewrite_required")
+        if isinstance(rewrite_required, bool):
+            return rewrite_required
+        if bool(audit_result.get("passed")):
+            return False
+        if self._is_audit_blocker(audit_result):
+            return False
+        return True
+
+    def _is_audit_blocker(self, audit_result: Any) -> bool:
+        if not isinstance(audit_result, dict):
+            return False
+        if audit_result.get("publish_decision") == "blocker":
+            return True
+        if str(audit_result.get("risk_level") or "").strip().lower() == "high":
+            return True
+        issues = audit_result.get("issues")
+        if isinstance(issues, list):
+            for issue in issues:
+                if not isinstance(issue, dict):
+                    continue
+                if str(issue.get("severity") or "").strip().lower() == "high":
+                    return True
+        return False
 
     def _extract_runtime_trace(
         self,
@@ -1576,6 +1606,10 @@ class OrchestratorEngine:
             started_at=node_run.started_at,
             completed_at=node_run.completed_at,
         )
+        envelope = self._build_stage_envelope(node_run)
+        payload = dict(node_run.output_data) if isinstance(node_run.output_data, dict) else {}
+        payload["stage_envelope"] = envelope
+        node_run.output_data = payload
         db.add(node_run)
         await db.flush()
 
@@ -1604,6 +1638,45 @@ class OrchestratorEngine:
 
         completed = self._ensure_utc(completed_at) or datetime.now(timezone.utc)
         return max((completed - started).total_seconds(), 0.0)
+
+    def _build_stage_envelope(self, node_run: TaskNodeRunModel) -> dict[str, Any]:
+        runtime = {}
+        if isinstance(node_run.output_data, dict) and isinstance(node_run.output_data.get("_runtime"), dict):
+            runtime = dict(node_run.output_data.get("_runtime") or {})
+        status = node_run.status or "failed"
+        severity = "none"
+        if status in {"failed", "cancelled"}:
+            severity = "blocker"
+        elif node_run.degraded:
+            severity = "major"
+        elif status == "skipped":
+            severity = "minor"
+        next_action = "continue"
+        if status in {"failed", "cancelled"}:
+            next_action = "stop"
+        elif status == "skipped" or node_run.degraded:
+            next_action = "degrade"
+        return {
+            "trace_id": get_trace_id(),
+            "task_id": node_run.task_id,
+            "stage": node_run.node_id,
+            "status": status,
+            "severity": severity,
+            "attempt": int(runtime.get("retry_count") or 0) + 1,
+            "max_attempts": int(getattr(settings, "llm_max_retries", 1) or 1) + 1,
+            "latency_ms": int((node_run.elapsed_seconds or 0) * 1000),
+            "model_route": {
+                "provider": runtime.get("provider"),
+                "model": runtime.get("model") or node_run.model_used,
+                "fallback_used": bool(runtime.get("fallback_used")),
+            },
+            "error": {
+                "code": runtime.get("error_class"),
+                "message": runtime.get("error_message") or node_run.error_message,
+                "retry_after_ms": 0,
+            },
+            "next_action": next_action,
+        }
 
     def _result_error_message(self, result: AgentResult) -> str:
         if not result.error:

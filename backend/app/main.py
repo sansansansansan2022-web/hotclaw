@@ -38,6 +38,7 @@ from app.api.agent_routes import router as agent_router
 from app.api.skill_routes import router as skill_router
 from app.api.llm_provider_routes import router as llm_provider_router
 from app.api.system_config_routes import router as system_config_router
+from app.api.settings_routes import router as settings_router
 from app.api.account_routes import router as account_router
 from app.api.account_insight_routes import router as account_insight_router
 from app.api.account_onboarding_routes import router as account_onboarding_router
@@ -55,11 +56,6 @@ from app.api.config_routes import router as config_router
 from app.agents.profile_agent import ProfileAgent
 from app.agents.hot_topic_agent import HotTopicAgent
 from app.agents.topic_planner_agent import TopicPlannerAgent
-from app.agents.title_generator_agent import TitleGeneratorAgent
-from app.agents.outline_planner_agent import OutlinePlannerAgent
-from app.agents.section_writer_agent import SectionWriterAgent
-from app.agents.style_reviewer_agent import StyleReviewerAgent
-from app.agents.structure_reviewer_agent import StructureReviewerAgent
 from app.agents.rewrite_agent import RewriteAgent
 from app.agents.post_process_agent import PostProcessAgent
 from app.agents.content_writer_agent import ContentWriterAgent
@@ -99,14 +95,9 @@ def _register_agents() -> None:
     agent_registry.register(ProfileAgent())
     agent_registry.register(HotTopicAgent())
     agent_registry.register(TopicPlannerAgent())
-    agent_registry.register(TitleGeneratorAgent())
-    agent_registry.register(OutlinePlannerAgent())
-    agent_registry.register(SectionWriterAgent())
-    agent_registry.register(StyleReviewerAgent())
-    agent_registry.register(StructureReviewerAgent())
+    agent_registry.register(ContentWriterAgent())
     agent_registry.register(RewriteAgent())
     agent_registry.register(PostProcessAgent())
-    agent_registry.register(ContentWriterAgent())
     agent_registry.register(AuditAgent())
     agent_registry.register(AccountOpsAgent())
 
@@ -317,6 +308,7 @@ app.include_router(agent_router)
 app.include_router(skill_router)
 app.include_router(llm_provider_router)
 app.include_router(system_config_router)
+app.include_router(settings_router)
 app.include_router(account_router)
 app.include_router(account_insight_router)
 app.include_router(account_onboarding_router)

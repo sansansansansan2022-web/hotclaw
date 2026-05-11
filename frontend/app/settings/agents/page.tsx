@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AppShell } from "@/components/console/layout";
 import { Icon } from "@/components/console/icons";
 import {
   Badge,
@@ -16,7 +15,7 @@ import {
   Textarea,
 } from "@/components/console/ui";
 import { cn } from "@/lib/utils";
-import { ApiError, deleteAgentConfig, getAgent, listAgents, updateAgentConfig, type AgentInfo } from "@/lib/api";
+import { ApiError, deleteAgentConfig, getAgent, listSettingsAgents, updateAgentConfig, type AgentInfo } from "@/lib/api";
 
 type NoticeTone = "success" | "danger" | "info";
 
@@ -70,7 +69,7 @@ export default function AgentsPage() {
   async function loadAgents(preferredAgentId?: string) {
     setLoading(true);
     try {
-      const response = await listAgents();
+      const response = await listSettingsAgents();
       setAgents(response.agents);
 
       const nextAgentId = preferredAgentId || selected?.agent_id || response.agents[0]?.agent_id || null;
@@ -150,7 +149,7 @@ export default function AgentsPage() {
   }
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-8">
         <PageHeader
           eyebrow="Agent Runtime"
@@ -368,6 +367,6 @@ export default function AgentsPage() {
         onConfirm={() => void handleDeleteCustomConfig()}
         onCancel={() => setDeleteOpen(false)}
       />
-    </AppShell>
+    </>
   );
 }

@@ -72,6 +72,8 @@ class AuditAgent(BaseAgent):
     # 输出数据结构定义
     # passed: 是否通过审核
     # risk_level: 风险等级（low/medium/high）
+    # rewrite_required: 是否需要重写
+    # publish_decision: pass/rewrite/blocker
     # issues: 问题列表
     # overall_comment: 整体评语
     output_schema = {
@@ -79,6 +81,8 @@ class AuditAgent(BaseAgent):
         "properties": {
             "passed": {"type": "boolean"},
             "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+            "rewrite_required": {"type": "boolean"},
+            "publish_decision": {"type": "string", "enum": ["pass", "rewrite", "blocker"]},
             "issues": {
                 "type": "array",
                 "items": {
@@ -178,6 +182,12 @@ Rules:
 
             # 步骤5: 确定通过状态（高严重度问题导致不通过）
             data["passed"] = not any(issue.get("severity") == "high" for issue in issues)
+            data["rewrite_required"] = (not data["passed"]) and data["risk_level"] != "high"
+            data["publish_decision"] = (
+                "pass"
+                if data["passed"]
+                else ("blocker" if data["risk_level"] == "high" else "rewrite")
+            )
 
             # 如果有启发式检查发现的问题，在评语中说明
             if heuristic_issues:
@@ -421,6 +431,8 @@ Rules:
         return {
             "passed": not any(issue.get("severity") == "high" for issue in issues),
             "risk_level": risk_level,
+            "rewrite_required": risk_level != "high" and bool(issues),
+            "publish_decision": "blocker" if risk_level == "high" else ("rewrite" if issues else "pass"),
             "issues": issues,
             "overall_comment": "Audit fell back to deterministic grounding checks.",
         }

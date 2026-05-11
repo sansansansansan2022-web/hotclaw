@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AppShell } from "@/components/console/layout";
 import { Icon } from "@/components/console/icons";
 import { Badge, Card, EmptyState, ErrorState, PageHeader, SkeletonRows, StatCard } from "@/components/console/ui";
-import { listSkills, type SkillInfo } from "@/lib/api";
+import { listSettingsSkills, type SkillInfo } from "@/lib/api";
 
 export default function SkillsPage() {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
@@ -16,7 +15,7 @@ export default function SkillsPage() {
   async function loadSkills() {
     setLoading(true);
     try {
-      const response = await listSkills();
+      const response = await listSettingsSkills();
       setSkills(response.skills);
       setError(null);
     } catch (loadError) {
@@ -31,8 +30,7 @@ export default function SkillsPage() {
   }, []);
 
   return (
-    <AppShell>
-      <div className="space-y-8">
+    <div className="space-y-8">
         <PageHeader
           eyebrow="Capability Inventory"
           title="Skills"
@@ -103,7 +101,6 @@ export default function SkillsPage() {
             </Card>
           </>
         )}
-      </div>
-    </AppShell>
+    </div>
   );
 }

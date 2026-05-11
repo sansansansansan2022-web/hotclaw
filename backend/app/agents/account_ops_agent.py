@@ -100,7 +100,7 @@ Return strict JSON only with this shape:
     "reviewer_mode": "single | dual",
     "allow_rewrite": true,
     "allow_post_process": true,
-    "high_cost_model_nodes": ["outline_planner"],
+    "high_cost_model_nodes": ["content_writing"],
     "preferred_reference_source_ids": ["1", "2"],
     "avoid_recent_topics": ["..."],
     "preferred_content_lane": "..."
@@ -258,7 +258,7 @@ Rules:
             allow_post_process = False
             high_cost_model_nodes = []
         elif effective_mode in {"semi_auto", "full_auto"} and operation_stage == "steady_state":
-            high_cost_model_nodes = ["outline_planner", "rewrite_agent"]
+            high_cost_model_nodes = ["content_writing", "rewrite_agent", "audit"]
 
         if not allow_reviewers:
             reviewer_mode = "single"

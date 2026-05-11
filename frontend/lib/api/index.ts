@@ -935,6 +935,10 @@ export async function listLLMProviders(): Promise<LLMProviderInfo[]> {
   return request<LLMProviderInfo[]>("/llm-providers");
 }
 
+export async function listSettingsLLMProviders(): Promise<LLMProviderInfo[]> {
+  return request<LLMProviderInfo[]>("/settings/providers", undefined, "raw");
+}
+
 export async function createLLMProvider(data: LLMProviderCreateRequest): Promise<LLMProviderInfo> {
   return request<LLMProviderInfo>("/llm-providers", {
     method: "POST",
@@ -986,6 +990,10 @@ export async function setDefaultLLMProvider(providerId: string): Promise<{ provi
 
 export async function listAgents(): Promise<{ agents: AgentInfo[] }> {
   return request<{ agents: AgentInfo[] }>("/agents");
+}
+
+export async function listSettingsAgents(): Promise<{ agents: AgentInfo[] }> {
+  return request<{ agents: AgentInfo[] }>("/settings/agents", undefined, "raw");
 }
 
 export async function getAgent(agentId: string): Promise<AgentInfo> {
@@ -1046,8 +1054,16 @@ export async function listSkills(): Promise<{ skills: SkillInfo[] }> {
   return request<{ skills: SkillInfo[] }>("/skills");
 }
 
+export async function listSettingsSkills(): Promise<{ skills: SkillInfo[] }> {
+  return request<{ skills: SkillInfo[] }>("/settings/skills", undefined, "raw");
+}
+
 export async function getAllSystemConfigs(): Promise<SystemConfigMap> {
   return request<SystemConfigMap>("/system-configs/all", undefined, "raw");
+}
+
+export async function getSettingsSystemConfigs(): Promise<SystemConfigMap> {
+  return request<SystemConfigMap>("/settings/system-configs/all", undefined, "raw");
 }
 
 export async function getSystemConfigValue(key: string, defaultValue?: string): Promise<SystemConfigValue> {

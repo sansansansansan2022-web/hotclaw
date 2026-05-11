@@ -79,6 +79,7 @@ class TopicPlannerAgent(BaseAgent):
 
     # 输出数据结构定义
     # topics: 话题候选列表
+    # titles: 标题候选列表（合并 title 节点后由本阶段直接产出）
     # 每个话题包含：标题、角度、钩子、情感定位、吸引力评分、推理过程、
     # 时效性理由、引用基础、目标读者、内容赛道、话题类型、证据引用
     output_schema = {
@@ -103,7 +104,15 @@ class TopicPlannerAgent(BaseAgent):
                         "evidence_refs": {"type": "array", "items": {"type": "string"}},
                     },
                 },
-            }
+            },
+            "titles": {
+                "type": "object",
+                "properties": {
+                    "selected_title": {"type": "string"},
+                    "titles": {"type": "array", "items": {"type": "object"}},
+                    "candidates": {"type": "array", "items": {"type": "object"}},
+                },
+            },
         },
     }
 
@@ -242,7 +251,7 @@ Rules:
             if len(topics) >= 3:
                 break
 
-        return self._success({"topics": topics})
+            return self._success(self._normalize_topics({"topics": topics}))
 
     def _build_user_prompt(self, input_data: dict[str, Any]) -> str:
         """构建 LLM 用户提示词。
@@ -376,7 +385,27 @@ Rules:
                         ] if isinstance(item.get("evidence_refs"), list) else [],
                     }
                 )
-        return {"topics": normalized}
+        title_candidates: list[dict[str, Any]] = []
+        for item in normalized:
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            title_candidates.append(
+                {
+                    "title": title,
+                    "reasoning": str(item.get("reasoning") or "").strip(),
+                    "confidence": float(item.get("estimated_appeal") or 0.6),
+                }
+            )
+        selected_title = title_candidates[0]["title"] if title_candidates else ""
+        return {
+            "topics": normalized,
+            "titles": {
+                "selected_title": selected_title,
+                "titles": title_candidates,
+                "candidates": title_candidates,
+            },
+        }
 
     def _parse_json(self, content: str) -> dict[str, Any]:
         """解析 LLM 返回的 JSON 内容。

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AppShell } from "@/components/console/layout";
 import { Icon } from "@/components/console/icons";
 import {
   Badge,
@@ -18,12 +17,16 @@ import {
 } from "@/components/console/ui";
 import { cn } from "@/lib/utils";
 import {
+  IMAGE_GENERATION_PROVIDER_PRESETS,
   LLM_PROVIDER_TEMPLATES,
   createLLMProvider,
   deleteLLMProvider,
-  listLLMProviders,
+  getSettingsSystemConfigs,
+  listSettingsLLMProviders,
   setDefaultLLMProvider,
+  testImageGenerationConnection,
   testLLMProvider,
+  upsertSystemConfig,
   updateLLMProvider,
   type LLMProviderInfo,
 } from "@/lib/api";
@@ -108,10 +111,25 @@ export default function LLMProvidersPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<NoticeState | null>(null);
   const [testResult, setTestResult] = useState<TestResultState | null>(null);
+  const [imageGenerationProvider, setImageGenerationProvider] = useState("dashscope");
+  const [imageGenerationModel, setImageGenerationModel] = useState("wan2.7-image");
+  const [imageGenerationApiKey, setImageGenerationApiKey] = useState("");
+  const [imageGenerationApiKeyHint, setImageGenerationApiKeyHint] = useState("");
+  const [imageGenerationEnabled, setImageGenerationEnabled] = useState(false);
+  const [imageGenerationBaseUrl, setImageGenerationBaseUrl] = useState(
+    "https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation",
+  );
+  const [imageConfigSaving, setImageConfigSaving] = useState(false);
+  const [imageConfigNotice, setImageConfigNotice] = useState<string | null>(null);
+  const [imageTestRunning, setImageTestRunning] = useState(false);
+  const [imageTestResult, setImageTestResult] = useState<TestResultState | null>(null);
 
   const enabledCount = providers.filter((provider) => provider.is_enabled).length;
   const defaultProvider = providers.find((provider) => provider.is_default) || null;
   const isEditing = mode === "edit" || mode === "create";
+  const selectedImageProvider =
+    IMAGE_GENERATION_PROVIDER_PRESETS.find((preset) => preset.provider_id === imageGenerationProvider) ??
+    IMAGE_GENERATION_PROVIDER_PRESETS[0];
 
   function setField<K extends keyof ProviderFormState>(key: K, value: ProviderFormState[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -120,7 +138,7 @@ export default function LLMProvidersPage() {
   async function loadProviders(preferredProviderId?: string) {
     setLoading(true);
     try {
-      const response = await listLLMProviders();
+      const response = await listSettingsLLMProviders();
       setProviders(response);
 
       const nextSelected =
@@ -147,9 +165,128 @@ export default function LLMProvidersPage() {
     }
   }
 
+  async function loadImageConfig() {
+    try {
+      const configs = await getSettingsSystemConfigs();
+      setImageGenerationProvider(String(configs.image_generation_provider ?? "dashscope"));
+      setImageGenerationModel(String(configs.image_generation_model ?? "wan2.7-image"));
+      setImageGenerationEnabled(String(configs.image_generation_enabled ?? "false").toLowerCase() === "true");
+      const apiKeyValue = String(configs.image_generation_api_key ?? "");
+      setImageGenerationApiKey(apiKeyValue.startsWith("***") || apiKeyValue === "****" ? "" : apiKeyValue);
+      setImageGenerationApiKeyHint(apiKeyValue.startsWith("***") || apiKeyValue === "****" ? apiKeyValue : "");
+      setImageGenerationBaseUrl(
+        String(
+          configs.image_generation_base_url ??
+            "https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation",
+        ),
+      );
+    } catch {
+      setImageConfigNotice("Unable to load image generation settings.");
+    }
+  }
+
   useEffect(() => {
-    void loadProviders();
+    void Promise.all([loadProviders(), loadImageConfig()]);
   }, []);
+
+  function handleImageProviderChange(providerId: string) {
+    const preset = IMAGE_GENERATION_PROVIDER_PRESETS.find((item) => item.provider_id === providerId);
+    setImageGenerationProvider(providerId);
+    if (preset?.default_model) {
+      setImageGenerationModel(preset.default_model);
+    }
+    setImageGenerationBaseUrl(preset?.default_base_url || "");
+    setImageConfigNotice(null);
+    setImageTestResult(null);
+  }
+
+  async function saveImageGenerationConfig() {
+    const provider = imageGenerationProvider.trim() || "dashscope";
+    const model = imageGenerationModel.trim();
+    const apiKey = imageGenerationApiKey.trim();
+    const baseUrl = imageGenerationBaseUrl.trim();
+    if (!model) {
+      setImageConfigNotice("Enter an image generation model before saving.");
+      return;
+    }
+
+    setImageConfigSaving(true);
+    setImageConfigNotice(null);
+    try {
+      const updates = [
+        upsertSystemConfig("image_generation_provider", provider, "string", {
+          category: "image_assets",
+          description: "Provider used for AI image generation.",
+        }),
+        upsertSystemConfig("image_generation_model", model, "string", {
+          category: "image_assets",
+          description: "Default AI image generation model.",
+        }),
+        upsertSystemConfig("image_generation_base_url", baseUrl, "string", {
+          category: "image_assets",
+          description: "Base URL or endpoint for the selected image generation provider.",
+        }),
+        upsertSystemConfig("image_generation_enabled", imageGenerationEnabled ? "true" : "false", "boolean", {
+          category: "image_assets",
+          description: "Enable AI image generation for draft preview image assets.",
+        }),
+      ];
+      if (apiKey) {
+        updates.push(
+          upsertSystemConfig("image_generation_api_key", apiKey, "string", {
+            category: "image_assets",
+            description: "API key for the selected image generation provider.",
+            isSensitive: true,
+          }),
+        );
+      }
+      await Promise.all(updates);
+      if (apiKey) {
+        setImageGenerationApiKey("");
+        setImageGenerationApiKeyHint(`***${apiKey.slice(-4)}`);
+      }
+      setImageConfigNotice("Image generation config saved.");
+    } catch (saveError) {
+      setImageConfigNotice(saveError instanceof Error ? saveError.message : "Unable to save image generation config.");
+    } finally {
+      setImageConfigSaving(false);
+    }
+  }
+
+  async function handleImageConnectionTest() {
+    setImageTestRunning(true);
+    setImageTestResult(null);
+    setImageConfigNotice(null);
+    try {
+      const result = await testImageGenerationConnection({
+        provider: imageGenerationProvider.trim() || "dashscope",
+        model: imageGenerationModel.trim(),
+        base_url: imageGenerationBaseUrl.trim() || undefined,
+        api_key: imageGenerationApiKey.trim() || undefined,
+      });
+
+      if (result.success) {
+        setImageTestResult({
+          success: true,
+          message: result.response_preview || "Connection test succeeded.",
+          latency: result.latency_ms,
+        });
+      } else {
+        setImageTestResult({
+          success: false,
+          message: result.error_message || "Connection test failed.",
+          latency: result.latency_ms,
+        });
+      }
+    } catch (testError) {
+      setImageTestResult({
+        success: false,
+        message: testError instanceof Error ? testError.message : "Unable to test image generation connection.",
+      });
+    } finally {
+      setImageTestRunning(false);
+    }
+  }
 
   function handleSelect(provider: LLMProviderInfo) {
     setSelected(provider);
@@ -318,15 +455,15 @@ export default function LLMProvidersPage() {
   }
 
   return (
-    <AppShell>
+    <>
       <div className="space-y-8">
         <PageHeader
-          eyebrow="Provider Setup"
-          title="LLM Providers"
-          description="Manage provider records, test connectivity, and control which model provider becomes the runtime default."
+          eyebrow="Model Setup"
+          title="Model Configuration"
+          description="Manage provider records and image generation model settings in one place."
           actions={
             <>
-              <Button variant="secondary" onClick={() => void loadProviders(selected?.provider_id)}>
+              <Button variant="secondary" onClick={() => void Promise.all([loadProviders(selected?.provider_id), loadImageConfig()])}>
                 <Icon name="refresh" className="h-4 w-4" />
                 Refresh
               </Button>
@@ -688,6 +825,125 @@ export default function LLMProvidersPage() {
                 )}
               </div>
             </div>
+
+            <Card title="Image Generation Configuration" description="Configure image generation provider, API key, base URL and model.">
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <p className="text-sm leading-6 text-slate-500">
+                    These values are saved as system config and used by draft image asset generation.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="secondary" onClick={() => void handleImageConnectionTest()} disabled={imageTestRunning} size="sm">
+                      {imageTestRunning ? "Testing..." : "Test Connection"}
+                    </Button>
+                    <Button onClick={() => void saveImageGenerationConfig()} disabled={imageConfigSaving} size="sm">
+                      {imageConfigSaving ? "Saving..." : "Save"}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid gap-4">
+                  <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={imageGenerationEnabled}
+                      onChange={(event) => {
+                        setImageGenerationEnabled(event.target.checked);
+                        setImageConfigNotice(null);
+                        setImageTestResult(null);
+                      }}
+                      className="mt-1 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-200"
+                    />
+                    <span>
+                      <span className="block font-semibold text-slate-900">Enable AI image generation during post-process</span>
+                      <span className="mt-1 block leading-5">
+                        When enabled and an API key is configured, draft previews can call the selected image model.
+                      </span>
+                    </span>
+                  </label>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">Image Generation Provider</label>
+                    <select
+                      value={imageGenerationProvider}
+                      onChange={(event) => handleImageProviderChange(event.target.value)}
+                      className="h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-900 shadow-sm outline-none transition focus:border-brand-300 focus:ring-4 focus:ring-brand-100"
+                    >
+                      {IMAGE_GENERATION_PROVIDER_PRESETS.map((preset) => (
+                        <option key={preset.provider_id} value={preset.provider_id}>
+                          {preset.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-2 text-xs leading-5 text-slate-500">
+                      Credential reminder: {selectedImageProvider?.api_key_hint || "Provider-specific API key"}
+                    </p>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">Image Generation API Key</label>
+                      <Input
+                        type="password"
+                        value={imageGenerationApiKey}
+                        onChange={(event) => {
+                          setImageGenerationApiKey(event.target.value);
+                          setImageConfigNotice(null);
+                          setImageTestResult(null);
+                        }}
+                        placeholder={imageGenerationApiKeyHint ? `Configured (${imageGenerationApiKeyHint})` : "Enter image provider API key"}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-700">Image Generation Model</label>
+                      <Input
+                        value={imageGenerationModel}
+                        onChange={(event) => {
+                          setImageGenerationModel(event.target.value);
+                          setImageConfigNotice(null);
+                          setImageTestResult(null);
+                        }}
+                        placeholder="wan2.7-image"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">Image Generation Base URL</label>
+                    <Input
+                      value={imageGenerationBaseUrl}
+                      onChange={(event) => {
+                        setImageGenerationBaseUrl(event.target.value);
+                        setImageConfigNotice(null);
+                        setImageTestResult(null);
+                      }}
+                      placeholder="https://api.example.com/v1/images/generations"
+                    />
+                  </div>
+                </div>
+
+                {imageConfigNotice ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    {imageConfigNotice}
+                  </div>
+                ) : null}
+                {imageTestResult ? (
+                  <div
+                    className={cn(
+                      "rounded-2xl border px-4 py-3 text-sm",
+                      imageTestResult.success
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-rose-200 bg-rose-50 text-rose-700",
+                    )}
+                  >
+                    <p>{imageTestResult.message}</p>
+                    {typeof imageTestResult.latency === "number" ? (
+                      <p className="mt-1 text-xs opacity-80">Latency: {imageTestResult.latency} ms</p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </Card>
           </>
         )}
       </div>
@@ -701,6 +957,6 @@ export default function LLMProvidersPage() {
         onConfirm={() => void handleDelete()}
         onCancel={() => setDeleteOpen(false)}
       />
-    </AppShell>
+    </>
   );
 }
