@@ -195,6 +195,8 @@ class TaskService:
                 simulated=simulated,
                 simulation_source=simulation_source,
                 provider=provider,
+                task_status="completed",
+                task_id=task_id,
             )
             # 更新任务状态为完成
             if task.status != "completed":
@@ -259,6 +261,8 @@ class TaskService:
                 simulation_source=None,
                 provider=self._detect_provider(),
                 timed_out=True,
+                task_status="failed",
+                task_id=task_id,
             )
             db.add(task)
             await db.commit()
@@ -321,6 +325,8 @@ class TaskService:
                 simulated=False,
                 simulation_source=None,
                 provider=self._detect_provider(),
+                task_status="failed",
+                task_id=task_id,
             )
             db.add(task)
             await db.commit()
@@ -748,6 +754,8 @@ class TaskService:
                     simulation_source=None,
                     provider=self._detect_provider(),
                     timed_out=True,
+                    task_status="failed",
+                    task_id=task.id,
                 )
                 db.add(task)
                 changed = True
@@ -807,6 +815,8 @@ class TaskService:
                 simulation_source=None,
                 provider=self._detect_provider(),
                 timed_out=False,
+                task_status="failed",
+                task_id=task.id,
             )
             db.add(task)
             recovered_count += 1
@@ -1048,6 +1058,8 @@ class TaskService:
         simulation_source: str | None,
         provider: str | None,
         timed_out: bool = False,
+        task_status: str | None = None,
+        task_id: str | None = None,
     ) -> dict:
         """
         为结果数据附加执行元信息。
@@ -1067,6 +1079,11 @@ class TaskService:
         payload = dict(result_data or {})
         existing = payload.get("execution_meta")
         execution_meta = dict(existing) if isinstance(existing, dict) else {}
+        existing_degraded = execution_meta.get("degraded")
+        if isinstance(existing_degraded, bool):
+            degraded_value = existing_degraded
+        else:
+            degraded_value = self._is_degraded_result(payload)
         execution_meta.update(
             {
                 "trace_id": trace_id,
@@ -1075,9 +1092,34 @@ class TaskService:
                 "simulation_source": simulation_source,
                 "provider": provider,
                 "timed_out": timed_out,
-                "degraded": self._is_degraded_result(payload),
+                "degraded": degraded_value,
             }
         )
+        execution_meta.setdefault("single_gate_mode", True)
+        if "publishability" not in execution_meta:
+            if task_status == "completed":
+                execution_meta["publishability"] = "publishable"
+            elif task_status in {"failed", "cancelled"}:
+                execution_meta["publishability"] = "blocked"
+            else:
+                execution_meta["publishability"] = "unknown"
+        if not isinstance(execution_meta.get("stages"), list):
+            execution_meta["stages"] = []
+        if task_status in {"failed", "cancelled"} and not execution_meta["stages"]:
+            execution_meta["stages"].append(
+                {
+                    "trace_id": trace_id,
+                    "task_id": task_id,
+                    "stage": "terminal_task_status",
+                    "status": "hard_fail",
+                    "severity": "blocker",
+                    "attempt": 1,
+                    "max_attempts": 1,
+                    "model_route": {"provider": provider, "model": None, "fallback_used": False},
+                    "error": {"code": "task_failed", "message": None, "retry_after_ms": 0},
+                    "next_action": "stop",
+                }
+            )
         payload["execution_meta"] = execution_meta
         return payload
 

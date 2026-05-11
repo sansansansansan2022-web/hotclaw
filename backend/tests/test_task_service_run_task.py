@@ -206,3 +206,23 @@ async def test_recover_interrupted_active_tasks_unblocks_account(db_session):
     assert refreshed_node.completed_at is not None
     assert refreshed_account is not None
     assert refreshed_account.last_run_status == "failed"
+
+
+def test_attach_execution_meta_keeps_stage_contract_on_failure():
+    payload = task_service._attach_execution_meta(
+        {"execution_meta": {"trace_id": "old-trace"}},
+        trace_id="trace-1",
+        timeout_seconds=600,
+        simulated=False,
+        simulation_source=None,
+        provider="dashscope",
+        task_status="failed",
+        task_id="task-meta-fail",
+    )
+
+    execution_meta = payload["execution_meta"]
+    assert execution_meta["publishability"] == "blocked"
+    assert execution_meta["single_gate_mode"] is True
+    assert isinstance(execution_meta["stages"], list)
+    assert len(execution_meta["stages"]) == 1
+    assert execution_meta["stages"][0]["stage"] == "terminal_task_status"
