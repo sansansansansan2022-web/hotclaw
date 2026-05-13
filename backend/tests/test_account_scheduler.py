@@ -12,9 +12,11 @@ Covers:
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import account_scheduler
 from app.services.account_service import account_service
 from app.core.exceptions import (
     AccountNotFoundError,
@@ -245,6 +247,20 @@ class TestAccountServiceRun:
 
 class TestSchedulerEligibility:
     """Test scheduler eligibility checks."""
+
+    def test_final_eligibility_accepts_naive_due_datetime(self):
+        """
+        SQLAlchemy DateTime columns can reload timezone-aware UTC values as
+        naive datetimes. The scheduler must not crash when comparing them.
+        """
+        account = SimpleNamespace(
+            is_active=True,
+            auto_run_enabled=True,
+            operation_mode="semi_auto",
+            next_run_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).replace(tzinfo=None),
+        )
+
+        assert account_scheduler._is_eligible_for_auto_run(account) is True
 
     @pytest.mark.asyncio
     async def test_get_due_accounts_excludes_manual_mode(self, db_session):
