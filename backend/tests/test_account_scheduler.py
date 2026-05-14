@@ -23,7 +23,7 @@ from app.core.exceptions import (
     AccountValidationError,
     TaskAlreadyExistsError,
 )
-from tests.conftest import test_session_factory
+from tests.conftest import test_session_factory as backend_test_session_factory
 
 
 @pytest.mark.asyncio
@@ -56,7 +56,7 @@ async def test_scheduler_preserves_failed_task_status(monkeypatch, db_session):
     async def _boom(*args, **kwargs):
         raise RuntimeError("critical scheduler failure")
 
-    monkeypatch.setattr("app.db.session.async_session_factory", test_session_factory)
+    monkeypatch.setattr("app.db.session.async_session_factory", backend_test_session_factory)
     monkeypatch.setattr(
         "app.services.account_service.account_harness_service.evaluate_account_run",
         _ops_context,
