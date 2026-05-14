@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import account_scheduler
 from app.services.account_service import account_service
 from app.core.exceptions import (
     AccountNotFoundError,
@@ -22,6 +23,56 @@ from app.core.exceptions import (
     AccountValidationError,
     TaskAlreadyExistsError,
 )
+from tests.conftest import test_session_factory
+
+
+@pytest.mark.asyncio
+async def test_scheduler_preserves_failed_task_status(monkeypatch, db_session):
+    """Scheduler must not overwrite a failed task run as account success."""
+
+    account = AccountModel(
+        id="acc-scheduler-failure",
+        name="Scheduler Failure",
+        positioning="A scheduled account whose run will fail.",
+        operation_mode="semi_auto",
+        auto_run_enabled=True,
+        is_active=True,
+        posting_frequency="daily",
+        next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        last_run_status="never_run",
+    )
+    db_session.add(account)
+    await db_session.commit()
+
+    async def _ops_context(*args, **kwargs):
+        return {
+            "run_strategy": {
+                "allow_run": True,
+                "effective_mode": "semi_auto",
+                "allow_auto_publish": False,
+            }
+        }
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("critical scheduler failure")
+
+    monkeypatch.setattr("app.db.session.async_session_factory", test_session_factory)
+    monkeypatch.setattr(
+        "app.services.account_service.account_harness_service.evaluate_account_run",
+        _ops_context,
+    )
+    monkeypatch.setattr("app.services.task_service.orchestrator_engine.run", _boom)
+
+    await account_scheduler._run_account_task(account.id)
+
+    await db_session.refresh(account)
+    assert account.last_run_status == "failed"
+    assert account.last_error_message == "critical scheduler failure"
+
+    task_result = await db_session.execute(select(TaskModel).where(TaskModel.account_id == account.id))
+    task = task_result.scalar_one()
+    assert task.status == "failed"
+    assert task.error_message == "critical scheduler failure"
 
 
 class TestAccountServiceRun:
