@@ -36,6 +36,7 @@ Account Scheduler - background task for auto-running accounts.
 
 import asyncio
 from datetime import datetime, timezone
+from typing import Any
 
 from app.core.logger import get_logger
 from app.core.tracer import set_trace_id, generate_trace_id, generate_task_id
@@ -164,13 +165,29 @@ class AccountScheduler:
         if account.operation_mode == "manual":
             return False
         # Must have next_run_at set
-        if not account.next_run_at:
+        next_run_at = self._normalize_next_run_at(account.next_run_at)
+        if not next_run_at:
             return False
         # Must be past next_run_at
         now = datetime.now(timezone.utc)
-        if account.next_run_at > now:
+        if next_run_at > now:
             return False
         return True
+
+    @staticmethod
+    def _normalize_next_run_at(value: Any) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value)
+            except ValueError:
+                return None
+        if not isinstance(value, datetime):
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     async def _run_account_task_limited(self, account_id: str) -> None:
         """Run account task with semaphore to limit concurrency."""
@@ -211,6 +228,23 @@ class AccountScheduler:
                 # Run the task
                 try:
                     await task_service.run_task(task.id, db)
+                    completed_task = await task_service.get_task(task.id, db)
+                    if completed_task.status == "failed":
+                        error_msg = completed_task.error_message or "Task failed"
+                        logger.error(
+                            "account_task_failed",
+                            account_id=account_id,
+                            task_id=task.id,
+                            error=error_msg
+                        )
+                        await account_service.update_account_run_status(
+                            account_id, db, "failed", error_msg
+                        )
+                        await db.commit()
+                        return
+                    if completed_task.status != "completed":
+                        raise RuntimeError(f"Task ended with unexpected status: {completed_task.status}")
+
                     # Task succeeded - update status
                     await account_service.update_account_run_status(account_id, db, "success")
                 except Exception as task_error:
