@@ -12,9 +12,11 @@ Covers:
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import account_scheduler
 from app.services.account_service import account_service
 from app.core.exceptions import (
     AccountNotFoundError,
@@ -245,6 +247,66 @@ class TestAccountServiceRun:
 
 class TestSchedulerEligibility:
     """Test scheduler eligibility checks."""
+
+    def test_final_eligibility_accepts_naive_due_datetime(self):
+        """
+        SQLAlchemy DateTime columns can reload timezone-aware UTC values as
+        naive datetimes. The scheduler must not crash when comparing them.
+        """
+        account = SimpleNamespace(
+            is_active=True,
+            auto_run_enabled=True,
+            operation_mode="semi_auto",
+            next_run_at=(datetime.now(timezone.utc) - timedelta(minutes=1)).replace(tzinfo=None),
+        )
+
+        assert account_scheduler._is_eligible_for_auto_run(account) is True
+
+    @pytest.mark.asyncio
+    async def test_scheduler_preserves_failed_task_status(self, db_session, monkeypatch):
+        """
+        TaskService.run_task records failed tasks without re-raising. The
+        scheduler must inspect the final task status before marking success.
+        """
+        account = AccountModel(
+            id="test-scheduler-failed-task",
+            name="Scheduler Failed Task Account",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            posting_frequency="daily",
+            last_run_status="never_run",
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        class _SessionContext:
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        async def _fake_failed_run(task_id, db):
+            task = await db.get(TaskModel, task_id)
+            task.status = "failed"
+            task.error_message = "boom"
+            task.completed_at = datetime.now(timezone.utc)
+            db.add(task)
+            await account_service.update_account_run_status(account.id, db, "failed", "boom")
+            await db.commit()
+
+        monkeypatch.setattr("app.db.session.async_session_factory", lambda: _SessionContext())
+        monkeypatch.setattr("app.services.task_service.task_service.run_task", _fake_failed_run)
+
+        await account_scheduler._run_account_task(account.id)
+
+        refreshed = await db_session.execute(select(AccountModel).where(AccountModel.id == account.id))
+        saved_account = refreshed.scalar_one()
+        assert saved_account.last_run_status == "failed"
+        assert saved_account.last_error_message == "boom"
 
     @pytest.mark.asyncio
     async def test_get_due_accounts_excludes_manual_mode(self, db_session):
