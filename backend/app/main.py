@@ -50,6 +50,8 @@ from app.api.recommendation_routes import router as recommendation_router
 from app.api.draft_routes import router as draft_router
 from app.api.wechat_routes import router as wechat_router
 from app.api.config_routes import router as config_router
+from app.api.mcp_routes import router as mcp_router
+from app.api.platform_capability_routes import router as platform_capability_router
 
 # Import agent implementations to register them
 # 【导入所有智能体】触发注册
@@ -127,7 +129,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("database_table_auto_create_skipped")
 
-    await schema_guard_service.assert_runtime_schema()
+    await schema_guard_service.assert_runtime_schema(allow_revision_mismatch=auto_create_tables)
 
     from app.db.session import async_session_factory
 
@@ -320,6 +322,8 @@ app.include_router(reference_source_router)
 app.include_router(draft_router)
 app.include_router(wechat_router)
 app.include_router(config_router)
+app.include_router(mcp_router)
+app.include_router(platform_capability_router)
 
 
 @app.get("/api/v1/health")

@@ -163,6 +163,12 @@ class Settings(BaseSettings):
         description="WeChat article search timeout in seconds",
     )
 
+    enable_xiaohongshu_mcp: bool = Field(default=False, description="Enable Xiaohongshu MCP publishing server")
+    xiaohongshu_phone_number: str = Field(default="", description="Phone number used by the Xiaohongshu MCP server")
+    xiaohongshu_mcp_command: str = Field(default="python", description="Command used to start the Xiaohongshu MCP server")
+    xiaohongshu_mcp_timeout_seconds: int = Field(default=120, description="Xiaohongshu MCP operation timeout")
+    xiaohongshu_chromedriver_path: str = Field(default="", description="Optional chromedriver path for Xiaohongshu MCP")
+
     draft_quality_gate_enabled: bool = Field(default=True, description="Enable draft quality gate before post-processing and auto-publish")
     draft_quality_gate_provider: str = Field(default="internal", description="Draft quality gate provider: internal or zhuque")
     draft_quality_gate_min_score: float = Field(default=0.75, description="Minimum quality score required by the draft gate")

@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 class LLMProviderBase(BaseModel):
     """LLM Provider 基础字段"""
-    provider_id: str = Field(..., description="Provider ID: openai, dashscope, deepseek, zhipu, ollama, custom")
+    provider_id: str = Field(..., description="Provider ID: openai, dashscope, deepseek, xiaomi, zhipu, ollama, custom")
     name: str = Field(..., description="显示名称")
     description: Optional[str] = Field(None, description="描述")
     api_key: Optional[str] = Field(None, description="API Key")
@@ -216,7 +216,17 @@ async def test_provider(data: LLMProviderTestRequest, db: AsyncSession = Depends
         from app.llm.providers.compatible import OpenAICompatibleProvider
         from app.llm.base import LLMCallOptions, LLMCallMeta
 
-        model = data.model or "gpt-4o-mini" if data.provider_id == "openai" else "qwen-turbo"
+        model = (
+            data.model
+            or (provider.default_model if provider else None)
+            or (
+                "gpt-4o-mini"
+                if data.provider_id == "openai"
+                else "mimo-v2.5"
+                if data.provider_id == "xiaomi"
+                else "qwen-turbo"
+            )
+        )
 
         if data.provider_id == "dashscope":
             test_provider = DashScopeProvider(
@@ -229,6 +239,13 @@ async def test_provider(data: LLMProviderTestRequest, db: AsyncSession = Depends
                 api_key=test_config["api_key"],
                 base_url=test_config["base_url"] or "https://api.openai.com/v1",
                 timeout=30,
+            )
+        elif data.provider_id == "xiaomi":
+            test_provider = OpenAICompatibleProvider(
+                api_key=test_config["api_key"],
+                base_url=test_config["base_url"] or "https://api.mimo-v2.com/v1",
+                timeout=30,
+                provider_id="xiaomi",
             )
         else:
             # 通用兼容模式

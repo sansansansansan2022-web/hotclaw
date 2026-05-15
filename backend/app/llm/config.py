@@ -73,6 +73,20 @@ class LLMConfig(BaseSettings):
         description="默认 DeepSeek 模型",
     )
 
+    # Xiaomi MiMo 配置（OpenAI Compatible）
+    xiaomi_api_key: str = Field(
+        default="",
+        description="Xiaomi MiMo API Key",
+    )
+    xiaomi_base_url: str = Field(
+        default="https://api.mimo-v2.com/v1",
+        description="Xiaomi MiMo API Base URL",
+    )
+    xiaomi_model: str = Field(
+        default="mimo-v2.5",
+        description="默认 Xiaomi MiMo 模型",
+    )
+
     # 通用配置
     timeout: int = Field(
         default=60,
@@ -93,7 +107,7 @@ class LLMConfig(BaseSettings):
     @field_validator("default_provider")
     @classmethod
     def validate_provider(cls, v: str) -> str:
-        valid = {"dashscope", "openai", "compatible", "deepseek"}
+        valid = {"dashscope", "openai", "compatible", "deepseek", "xiaomi"}
         if v and v not in valid:
             raise ValueError(f"default_provider must be one of {valid}")
         return v
@@ -113,6 +127,7 @@ class LLMConfig(BaseSettings):
             "openai": self.openai_model,
             "compatible": self.compatible_model,
             "deepseek": self.deepseek_model,
+            "xiaomi": self.xiaomi_model,
         }.get(provider, "")
 
     def get_provider_config(self, provider: str) -> dict:
@@ -145,6 +160,11 @@ class LLMConfig(BaseSettings):
                 "api_key": self.deepseek_api_key,
                 "base_url": self.deepseek_base_url,
                 "model": self.deepseek_model,
+            },
+            "xiaomi": {
+                "api_key": self.xiaomi_api_key,
+                "base_url": self.xiaomi_base_url,
+                "model": self.xiaomi_model,
             },
         }
         return configs.get(provider, {})

@@ -339,6 +339,8 @@ export function ConfirmDialog({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   tone = "brand",
+  confirmDisabled = false,
+  confirmLoading = false,
   onConfirm,
   onCancel,
 }: {
@@ -348,6 +350,8 @@ export function ConfirmDialog({
   confirmLabel?: string;
   cancelLabel?: string;
   tone?: "brand" | "danger";
+  confirmDisabled?: boolean;
+  confirmLoading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -370,16 +374,25 @@ export function ConfirmDialog({
             <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
             <p className="mt-2 text-sm leading-6 text-slate-500">{description}</p>
           </div>
-          <button type="button" onClick={onCancel} className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={confirmLoading}
+            className="rounded-full p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
             <Icon name="close" className="h-4 w-4" />
           </button>
         </div>
         <div className="mt-6 flex justify-end gap-3">
-          <Button variant="secondary" onClick={onCancel}>
+          <Button variant="secondary" onClick={onCancel} disabled={confirmLoading}>
             {cancelLabel}
           </Button>
-          <Button variant={tone === "danger" ? "destructive" : "primary"} onClick={onConfirm}>
-            {confirmLabel}
+          <Button
+            variant={tone === "danger" ? "destructive" : "primary"}
+            onClick={onConfirm}
+            disabled={confirmDisabled || confirmLoading}
+          >
+            {confirmLoading ? "处理中..." : confirmLabel}
           </Button>
         </div>
       </div>

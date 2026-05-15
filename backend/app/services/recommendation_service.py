@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logger import get_logger
 from app.core.tracer import generate_recommendation_id, generate_workspace_id
 from app.models.tables import RecommendedContentItemModel
+from app.platforms import resolve_content_platform
 from app.services.account_analysis_service import account_analysis_service
 from app.services.account_service import account_service
 from app.services.news_source_service import news_source_service
@@ -95,11 +96,15 @@ class RecommendationService:
                 }
             },
         )
+        content_platform = resolve_content_platform(account_context)
 
         recommendations: list[dict[str, Any]] = []
         source_diagnostics: list[dict[str, Any]] = []
 
-        hot_topic_rows, hot_topic_diagnostics = await self._collect_hot_topic_recommendations(query_plan)
+        hot_topic_rows, hot_topic_diagnostics = await self._collect_hot_topic_recommendations(
+            query_plan,
+            content_platform=content_platform,
+        )
         recommendations.extend(hot_topic_rows)
         source_diagnostics.extend(hot_topic_diagnostics)
 
@@ -124,6 +129,7 @@ class RecommendationService:
             recommendations,
             snapshot=snapshot,
             query_plan=query_plan,
+            content_platform=content_platform,
         )
 
         rows = await self._upsert_recommendations(account_id, recommendations, db)
@@ -283,6 +289,8 @@ class RecommendationService:
     async def _collect_hot_topic_recommendations(
         self,
         query_plan: dict[str, Any],
+        *,
+        content_platform: str = "wechat",
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         skill = skill_registry.get("hot_topic_fetch_skill")
         response = await skill.execute(
@@ -315,7 +323,9 @@ class RecommendationService:
 
         lane_label = ((query_plan.get("lane") or {}).get("label")) or "内容洞察"
         rows: list[dict[str, Any]] = []
-        for item in (response.get("data") or {}).get("results") or []:
+        payload = response.get("data") or {}
+        result_items = payload.get("results") or payload.get("topics") or []
+        for item in result_items:
             if not isinstance(item, dict):
                 continue
             title = str(item.get("title") or "").strip()
@@ -325,32 +335,37 @@ class RecommendationService:
                 {
                     "title": title,
                     "summary": str(item.get("snippet") or title).strip(),
-                    "source_type": "public_search",
+                    "source_type": "xiaohongshu_note_scout" if content_platform == "xiaohongshu" else "public_search",
                     "source_name": str(item.get("source") or "Public Search").strip(),
                     "source_url": str(item.get("url") or "").strip() or None,
                     "published_at": None,
-                    "relevance_score": 0.62,
+                    "relevance_score": 0.68 if content_platform == "xiaohongshu" else 0.62,
                     "authority_score": 0.45 if item.get("source_type") == "weixin" else 0.35,
                     "freshness_score": 0.78,
-                    "reason": f"Matches the current {lane_label} lane and source-scout queries.",
+                    "reason": (
+                        f"Can be turned into a Xiaohongshu note package for the {lane_label} lane: cover promise, card sequence, save value, and comment hook."
+                        if content_platform == "xiaohongshu"
+                        else f"Matches the current {lane_label} lane and source-scout queries."
+                    ),
                     "topic_tags_json": self._dedupe_strings(
                         [lane_label, *[str(term) for term in query_plan.get("search_terms") or []]]
                     )[:5],
                     "source_payload_json": {
                         **item,
                         "collector": {
-                            "source_key": "public_search_scout",
-                            "label": "Public Search Scout",
-                            "kind": "public_search",
+                            "source_key": "xiaohongshu_note_scout" if content_platform == "xiaohongshu" else "public_search_scout",
+                            "label": "Xiaohongshu Note Scout" if content_platform == "xiaohongshu" else "Public Search Scout",
+                            "kind": "xiaohongshu_note_scout" if content_platform == "xiaohongshu" else "public_search",
+                            "content_platform": content_platform,
                         },
                     },
                 }
             )
         return rows, [
             {
-                "source_key": "public_search_scout",
-                "label": "Public Search Scout",
-                "source_type": "public_search",
+                "source_key": "xiaohongshu_note_scout" if content_platform == "xiaohongshu" else "public_search_scout",
+                "label": "Xiaohongshu Note Scout" if content_platform == "xiaohongshu" else "Public Search Scout",
+                "source_type": "xiaohongshu_note_scout" if content_platform == "xiaohongshu" else "public_search",
                 "status": "success" if rows else "empty",
                 "query": None,
                 "candidate_count": len(rows),
@@ -359,7 +374,11 @@ class RecommendationService:
                 "filtered_out_count": 0,
                 "error_code": None,
                 "error_message": None,
-                "detail": None if rows else "Public search queries returned no usable scouting candidates.",
+                "detail": None if rows else (
+                    "No usable Xiaohongshu-style note candidates were found from the current scouting queries."
+                    if content_platform == "xiaohongshu"
+                    else "Public search queries returned no usable scouting candidates."
+                ),
             }
         ]
 
@@ -714,6 +733,7 @@ class RecommendationService:
         *,
         snapshot,
         query_plan: dict[str, Any],
+        content_platform: str = "wechat",
     ) -> list[dict[str, Any]]:
         lane = (query_plan.get("lane") or {}) if isinstance(query_plan.get("lane"), dict) else {}
         lane_label = str(lane.get("label") or "").strip()
@@ -754,8 +774,14 @@ class RecommendationService:
                 source_preferences=source_preferences,
             )
 
+            platform_bonus = self._platform_fit_score(
+                text_blob=text_blob,
+                source_type=str(item.get("source_type") or "").strip().lower(),
+                content_platform=content_platform,
+            )
+
             account_fit_score = round(
-                min(1.0, keyword_score * 0.45 + lane_score * 0.2 + audience_score * 0.15 + source_preference_score * 0.2),
+                min(1.0, keyword_score * 0.38 + lane_score * 0.18 + audience_score * 0.14 + source_preference_score * 0.16 + platform_bonus * 0.14),
                 4,
             )
             current_relevance = float(item.get("relevance_score") or 0.0)
@@ -767,6 +793,8 @@ class RecommendationService:
                     "score": account_fit_score,
                     "lane_label": lane_label or None,
                     "source_preferences": source_preferences,
+                    "content_platform": content_platform,
+                    "platform_fit": platform_bonus,
                 },
             }
             item["relevance_score"] = boosted_relevance
@@ -775,6 +803,7 @@ class RecommendationService:
                 lane_label=lane_label,
                 audience_summary=audience_summary,
                 account_fit_score=account_fit_score,
+                content_platform=content_platform,
             )
             ranked.append(item)
 
@@ -825,6 +854,15 @@ class RecommendationService:
             return 0.35
         return 0.0
 
+    def _platform_fit_score(self, *, text_blob: str, source_type: str, content_platform: str) -> float:
+        if content_platform != "xiaohongshu":
+            return 0.35
+        if source_type == "xiaohongshu_note_scout":
+            return 1.0
+        xhs_tokens = ["小红书", "笔记", "图文", "封面", "卡片", "种草", "避坑", "清单", "收藏", "评论"]
+        hits = sum(1 for token in xhs_tokens if token in text_blob)
+        return min(1.0, hits / 3)
+
     def _compose_ranked_reason(
         self,
         *,
@@ -832,6 +870,7 @@ class RecommendationService:
         lane_label: str,
         audience_summary: str,
         account_fit_score: float,
+        content_platform: str = "wechat",
     ) -> str:
         fragments = []
         if original_reason:
@@ -844,6 +883,8 @@ class RecommendationService:
             fragments.append("Strong account fit")
         elif account_fit_score >= 0.6:
             fragments.append("Solid account fit")
+        if content_platform == "xiaohongshu":
+            fragments.append("Review as a Xiaohongshu image-text note with cover, card order, save value, and comment hook")
         return ". ".join(self._dedupe_strings(fragments)).strip()
 
     def _overall_score(self, row: RecommendedContentItemModel) -> float:

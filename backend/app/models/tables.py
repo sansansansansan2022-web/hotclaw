@@ -31,6 +31,7 @@ class AccountModel(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    content_platform: Mapped[str] = mapped_column(String(32), nullable=False, default="wechat")
     category: Mapped[str | None] = mapped_column(String(50), nullable=True)
     positioning: Mapped[str] = mapped_column(Text, nullable=False)
     audience: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -437,6 +438,26 @@ class SkillModel(Base):
     output_schema: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     config_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PlatformCapabilityModel(Base):
+    """Plugin-like capability mounted on top of the generic content platform base."""
+    __tablename__ = "platform_capabilities"
+
+    capability_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    content_platform: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    capability_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    config_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    prompt_overrides_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()

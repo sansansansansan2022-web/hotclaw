@@ -48,6 +48,7 @@ CRITICAL_SCHEMA: dict[str, tuple[str, ...]] = {
         "quality_threshold_json",
     ),
     "system_configs": ("key", "value", "value_type"),
+    "platform_capabilities": ("capability_id", "content_platform", "capability_type", "status"),
     "wechat_configs": ("id", "account_id", "app_id", "is_enabled"),
     "wechat_publish_records": ("id", "draft_id", "account_id", "publish_status", "trigger_type"),
 }
@@ -76,6 +77,10 @@ class SchemaGuardReport:
     def is_ready(self) -> bool:
         return self.revision_aligned and not self.missing_tables and not self.missing_columns
 
+    @property
+    def structurally_ready(self) -> bool:
+        return not self.missing_tables and not self.missing_columns
+
     def failure_message(self) -> str:
         parts: list[str] = []
         if not self.revision_aligned:
@@ -103,7 +108,7 @@ class SchemaGuardService:
             )
         return report
 
-    async def assert_runtime_schema(self) -> SchemaGuardReport:
+    async def assert_runtime_schema(self, *, allow_revision_mismatch: bool = False) -> SchemaGuardReport:
         report = await self.inspect_runtime_schema()
         logger.info(
             "schema_version_checked",
@@ -113,6 +118,13 @@ class SchemaGuardService:
             missing_columns=report.missing_columns,
         )
         if not report.is_ready:
+            if allow_revision_mismatch and report.structurally_ready:
+                logger.warning(
+                    "schema_revision_mismatch_allowed",
+                    current_revision=report.revision_display,
+                    head_revision=report.head_display,
+                )
+                return report
             raise RuntimeError(
                 "Database schema check failed: "
                 f"{report.failure_message()}. Run `python -m alembic upgrade head` in `backend/` before starting the backend."

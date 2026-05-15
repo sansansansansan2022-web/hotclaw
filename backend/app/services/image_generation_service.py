@@ -90,6 +90,7 @@ class ImageGenerationService:
                 base_url = "https://ark.cn-beijing.volces.com/api/v3/images/generations"
             else:
                 base_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation"
+        base_url = self._normalize_openai_image_endpoint(base_url, provider)
         enabled = self._as_bool(data.get("enabled"))
         return {
             "provider": provider,
@@ -98,6 +99,12 @@ class ImageGenerationService:
             "base_url": base_url,
             "enabled": enabled and bool(model) and bool(api_key),
         }
+
+    def _normalize_openai_image_endpoint(self, base_url: str, provider: str) -> str:
+        normalized = str(base_url or "").strip().rstrip("/")
+        if provider in {"openai", "custom", "volcengine"} and normalized.endswith("/chat/completions"):
+            return f"{normalized.rsplit('/chat/completions', 1)[0]}/images/generations"
+        return normalized
 
     def _as_bool(self, value: Any) -> bool:
         if isinstance(value, bool):

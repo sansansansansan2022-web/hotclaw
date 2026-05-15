@@ -21,6 +21,9 @@ export type ToastTone = "brand" | "success" | "warning" | "danger" | "info";
 export type ReferenceSourceType = "wechat_account" | "article_url" | "pasted_article";
 export type ReferenceSourceSyncStatus = "pending" | "synced" | "failed" | "manual_only";
 export type AccountHealthStatus = "ready" | "attention" | "risk_recovery";
+export type ContentPlatform = "wechat" | "xiaohongshu";
+export type PlatformCapabilityStatus = "active" | "deleted" | string;
+export type PlatformCapabilitySource = "builtin" | "custom" | "overridden" | string;
 
 export interface ApiResponse<T = unknown> {
   code: number;
@@ -34,6 +37,58 @@ export interface PaginationMeta {
   page_size: number;
   total: number;
   total_pages?: number;
+}
+
+export interface PlatformCapability {
+  capability_id: string;
+  content_platform: ContentPlatform | string;
+  capability_type: string;
+  name: string;
+  description: string | null;
+  is_builtin: boolean;
+  is_enabled: boolean;
+  status: PlatformCapabilityStatus;
+  config_json: Record<string, unknown>;
+  prompt_overrides_json: Record<string, unknown>;
+  source: PlatformCapabilitySource;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface PlatformCapabilityListResponse {
+  capabilities: PlatformCapability[];
+  total: number;
+  enabled_count: number;
+  builtin_count: number;
+}
+
+export interface PlatformCapabilityCreateRequest {
+  capability_id?: string;
+  content_platform: ContentPlatform | string;
+  capability_type: string;
+  name: string;
+  description?: string | null;
+  is_enabled?: boolean;
+  config_json?: Record<string, unknown>;
+  prompt_overrides_json?: Record<string, unknown>;
+}
+
+export interface PlatformCapabilityUpdateRequest {
+  content_platform?: ContentPlatform | string;
+  capability_type?: string;
+  name?: string;
+  description?: string | null;
+  is_enabled?: boolean;
+  status?: PlatformCapabilityStatus;
+  config_json?: Record<string, unknown>;
+  prompt_overrides_json?: Record<string, unknown>;
+}
+
+export interface EffectivePlatformCapabilityResponse {
+  content_platform: ContentPlatform | string;
+  capabilities: PlatformCapability[];
+  by_type: Record<string, PlatformCapability[]>;
+  prompt_hints: Record<string, string[]>;
 }
 
 export interface TaskCreateRequest {
@@ -599,6 +654,7 @@ export interface UpdateAutomationPlanRequest extends Partial<CreateAutomationPla
 
 export interface AccountCreateRequest {
   name: string;
+  content_platform?: "wechat" | "xiaohongshu";
   category?: string;
   positioning: string;
   audience?: string;
@@ -624,6 +680,7 @@ export interface AccountUpdateRequest extends Partial<AccountCreateRequest> {}
 export interface AccountSummary {
   account_id: string;
   name: string;
+  content_platform: "wechat" | "xiaohongshu";
   category: string | null;
   positioning: string;
   // Compatibility mirror fields only. Prefer automation_plan_summary on detail.
@@ -687,12 +744,14 @@ export type AccountWeChatOnboardingMode = "connect_now" | "skip_for_now";
 
 export interface ExistingAccountAnalysisRequest {
   account_name: string;
+  content_platform?: "wechat" | "xiaohongshu";
   article_urls?: string[];
   article_texts?: string[];
 }
 
 export interface ExistingAccountAnalysisResponse {
   account_name: string;
+  content_platform: "wechat" | "xiaohongshu";
   inferred_positioning: string;
   inferred_audience: string;
   inferred_tone_style: string;

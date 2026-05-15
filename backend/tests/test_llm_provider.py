@@ -339,8 +339,19 @@ class TestOpenAICompatibleProvider:
     def test_get_model_name_empty(self, provider):
         """测试空模型名"""
         options = LLMCallOptions()
-        # 兼容模式允许空模型名
-        assert provider.get_model_name(options) == ""
+        # litellm 需要 provider 前缀
+        assert provider.get_model_name(options) == "openai/default"
+
+    def test_get_model_name_normalizes_compatible_model(self, provider):
+        """兼容模式模型名应补全 provider 前缀"""
+        options = LLMCallOptions(model="qwen-turbo")
+        assert provider.get_model_name(options) == "openai/qwen-turbo"
+
+        options = LLMCallOptions(model="compatible/qwen-plus")
+        assert provider.get_model_name(options) == "openai/qwen-plus"
+
+        options = LLMCallOptions(model="xiaomi/mimo-v2.5")
+        assert provider.get_model_name(options) == "openai/mimo-v2.5"
 
 
 # =============================================================================
@@ -591,10 +602,12 @@ class TestLLMConfig:
         config = LLMConfig(
             dashscope_model="qwen3.5-plus",
             openai_model="gpt-4o-mini",
+            xiaomi_model="mimo-v2.5",
         )
 
         assert config.get_default_model("dashscope") == "qwen3.5-plus"
         assert config.get_default_model("openai") == "gpt-4o-mini"
+        assert config.get_default_model("xiaomi") == "mimo-v2.5"
         assert config.get_default_model("unknown") == ""
 
     def test_is_provider_configured(self):
@@ -602,10 +615,12 @@ class TestLLMConfig:
         config = LLMConfig(
             dashscope_api_key="test-key",
             openai_api_key="",
+            xiaomi_api_key="sk-test",
         )
 
         assert config.is_provider_configured("dashscope")
         assert not config.is_provider_configured("openai")
+        assert config.is_provider_configured("xiaomi")
         assert not config.is_provider_configured("compatible")
 
     def test_get_provider_config(self):
@@ -620,6 +635,21 @@ class TestLLMConfig:
         assert ds_config["api_key"] == "ds-key"
         assert ds_config["base_url"] == "https://ds.example.com"
         assert ds_config["model"] == "qwen-max"
+
+    def test_xiaomi_provider_config(self):
+        """Xiaomi MiMo 使用 OpenAI-compatible 默认配置"""
+        config = LLMConfig(
+            default_provider="xiaomi",
+            xiaomi_api_key="sk-test",
+            xiaomi_base_url="https://api.mimo-v2.com/v1",
+            xiaomi_model="mimo-v2.5",
+        )
+
+        xiaomi_config = config.get_provider_config("xiaomi")
+        assert xiaomi_config["api_key"] == "sk-test"
+        assert xiaomi_config["base_url"] == "https://api.mimo-v2.com/v1"
+        assert xiaomi_config["model"] == "mimo-v2.5"
+        assert config.get_default_model("xiaomi") == "mimo-v2.5"
 
 
 # =============================================================================

@@ -15,6 +15,7 @@ from app.core.logger import get_logger
 from app.llm.base import LLMCallOptions
 from app.llm.exceptions import LLMCallError, LLMConfigurationError
 from app.llm.gateway import get_llm_gateway
+from app.platforms import normalize_content_platform, platform_label
 from app.schemas.account_onboarding import (
     ExistingAccountAnalysisRequest,
     ExistingAccountAnalysisResponse,
@@ -23,7 +24,7 @@ from app.schemas.account_onboarding import (
 logger = get_logger(__name__)
 
 _EXISTING_ACCOUNT_SYSTEM_PROMPT = """\
-你是一位公众号账号接入顾问。你的任务不是直接创建账号，而是根据老公众号历史文章，为接入向导输出一版结构化初始化建议。
+你是一位多平台内容账号接入顾问。你的任务不是直接创建账号，而是根据历史图文/文章，为接入向导输出一版结构化初始化建议。
 
 请严格返回 JSON 对象，不要包含 markdown 代码块，不要输出额外解释。
 
@@ -42,6 +43,8 @@ _EXISTING_ACCOUNT_SYSTEM_PROMPT = """\
 - 如果材料不足，请保守输出，并在 onboarding_notes 里明确提示低置信度
 - 不要编造精确数据
 - 推荐模式优先稳妥，除非材料非常充分且风格稳定，否则不要推荐 full_auto
+- 如果 content_platform 是 xiaohongshu，请重点分析小红书图文账号：封面钩子、首图承诺、滑动卡片结构、正文前三行、标签/搜索词、评论互动、种草/避坑/清单/经验等笔记类型。
+- 如果 content_platform 是 wechat，请重点分析公众号：长文结构、标题风格、导语、分节方式、观点密度和发布节奏。
 """
 
 
@@ -52,6 +55,7 @@ class AccountOnboardingService:
         self, payload: ExistingAccountAnalysisRequest
     ) -> ExistingAccountAnalysisResponse:
         account_name = payload.account_name.strip()
+        content_platform = normalize_content_platform(payload.content_platform)
         article_urls = self._normalize_urls(payload.article_urls)
         article_texts = self._normalize_texts(payload.article_texts)
 
@@ -71,6 +75,7 @@ class AccountOnboardingService:
             )
             return self._build_heuristic_response(
                 account_name=account_name,
+                content_platform=content_platform,
                 article_urls=article_urls,
                 article_texts=[],
                 fetch_notes=fetch_notes,
@@ -80,11 +85,13 @@ class AccountOnboardingService:
         try:
             analysis = await self._analyze_with_llm(
                 account_name=account_name,
+                content_platform=content_platform,
                 article_urls=article_urls,
                 article_texts=usable_texts,
             )
             response = self._coerce_response(
                 account_name=account_name,
+                content_platform=content_platform,
                 raw=analysis,
                 article_urls=article_urls,
                 article_texts=usable_texts,
@@ -99,6 +106,7 @@ class AccountOnboardingService:
             )
             response = self._build_heuristic_response(
                 account_name=account_name,
+                content_platform=content_platform,
                 article_urls=article_urls,
                 article_texts=usable_texts,
                 fetch_notes=fetch_notes,
@@ -120,6 +128,7 @@ class AccountOnboardingService:
         self,
         *,
         account_name: str,
+        content_platform: str,
         article_urls: list[str],
         article_texts: list[str],
     ) -> dict:
@@ -136,9 +145,11 @@ class AccountOnboardingService:
         prompt = json.dumps(
             {
                 "account_name": account_name,
+                "content_platform": content_platform,
+                "platform_label": platform_label(content_platform),
                 "article_urls": article_urls[:10],
                 "historical_articles": excerpts,
-                "task": "Analyze historical public-account content for onboarding.",
+                "task": "Analyze historical content for platform-specific onboarding.",
             },
             ensure_ascii=False,
         )
@@ -221,6 +232,7 @@ class AccountOnboardingService:
         self,
         *,
         account_name: str,
+        content_platform: str,
         raw: dict,
         article_urls: list[str],
         article_texts: list[str],
@@ -246,9 +258,14 @@ class AccountOnboardingService:
 
         return ExistingAccountAnalysisResponse(
             account_name=account_name,
-            inferred_positioning=str(raw.get("inferred_positioning") or "").strip() or self._fallback_positioning(account_name, topics),
+            content_platform=content_platform,
+            inferred_positioning=str(raw.get("inferred_positioning") or "").strip() or self._fallback_positioning(account_name, topics, content_platform),
             inferred_audience=str(raw.get("inferred_audience") or "").strip() or "Existing readers of this account plus adjacent readers with similar interests.",
-            inferred_tone_style=str(raw.get("inferred_tone_style") or "").strip() or "Knowledge-first, readable, and suitable for human review before publishing.",
+            inferred_tone_style=str(raw.get("inferred_tone_style") or "").strip() or (
+                "Short, visual, note-like, with concrete scenes and interaction hooks."
+                if content_platform == "xiaohongshu"
+                else "Knowledge-first, readable, and suitable for human review before publishing."
+            ),
             inferred_content_strategy=str(raw.get("inferred_content_strategy") or "").strip()
             or "Start from the recurring themes already visible in the historical material, then refine columns and cadence inside the account workspace.",
             inferred_reference_accounts_summary=str(reference_summary).strip() if reference_summary else None,
@@ -256,7 +273,11 @@ class AccountOnboardingService:
             onboarding_notes=notes[:6],
             extracted_topics=topics[:8],
             style_summary=str(raw.get("style_summary") or "").strip()
-            or "The existing account leans toward repeatable, explanatory long-form writing.",
+            or (
+                "The existing account should be treated as an image-text note account: cover promise, swipe-card structure, short body, and comment hook."
+                if content_platform == "xiaohongshu"
+                else "The existing account leans toward repeatable, explanatory long-form writing."
+            ),
             analysis_confidence=analysis_confidence if analysis_confidence in {"low", "medium", "high"} else "medium",
             source_summary=self._build_source_summary(article_urls, article_texts, fetch_notes),
             used_article_count=len(article_texts),
@@ -266,6 +287,7 @@ class AccountOnboardingService:
         self,
         *,
         account_name: str,
+        content_platform: str,
         article_urls: list[str],
         article_texts: list[str],
         fetch_notes: list[str],
@@ -279,9 +301,14 @@ class AccountOnboardingService:
 
         return ExistingAccountAnalysisResponse(
             account_name=account_name,
-            inferred_positioning=self._fallback_positioning(account_name, topics),
+            content_platform=content_platform,
+            inferred_positioning=self._fallback_positioning(account_name, topics, content_platform),
             inferred_audience="Existing followers of this account and adjacent readers who already respond to its current topics.",
-            inferred_tone_style="Existing-account style inferred from limited material; verify the tone before creating the account.",
+            inferred_tone_style=(
+                "Limited evidence; verify cover style, note voice, card rhythm, tags, and comment bait before operating."
+                if content_platform == "xiaohongshu"
+                else "Existing-account style inferred from limited material; verify the tone before creating the account."
+            ),
             inferred_content_strategy=(
                 "Use the current historical material as a baseline, keep the strongest recurring topics, and iterate from the account workspace after the first run."
             ),
@@ -293,7 +320,11 @@ class AccountOnboardingService:
             recommended_operation_mode="semi_auto",
             onboarding_notes=notes[:6],
             extracted_topics=topics[:8],
-            style_summary="The account appears to rely on repeatable editorial patterns, but the historical evidence is limited.",
+            style_summary=(
+                "The account appears to need Xiaohongshu image-text style learning, but the historical evidence is limited."
+                if content_platform == "xiaohongshu"
+                else "The account appears to rely on repeatable editorial patterns, but the historical evidence is limited."
+            ),
             analysis_confidence=analysis_confidence if analysis_confidence in {"low", "medium", "high"} else "low",
             source_summary=self._build_source_summary(article_urls, article_texts, fetch_notes),
             used_article_count=len(article_texts),
@@ -318,10 +349,11 @@ class AccountOnboardingService:
             return "medium"
         return "low"
 
-    def _fallback_positioning(self, account_name: str, topics: list[str]) -> str:
+    def _fallback_positioning(self, account_name: str, topics: list[str], content_platform: str = "wechat") -> str:
+        platform = platform_label(content_platform)
         if topics:
-            return f"{account_name} is an existing account that appears to focus on {', '.join(topics[:3])}. Use this as the starting positioning draft and refine it after onboarding."
-        return f"{account_name} is an existing public account. Start from its historical themes, verify audience and tone, then refine the positioning inside the workspace."
+            return f"{account_name} is an existing {platform} account that appears to focus on {', '.join(topics[:3])}. Use this as the starting positioning draft and refine it after onboarding."
+        return f"{account_name} is an existing {platform} account. Start from its historical themes, verify audience and tone, then refine the positioning inside the workspace."
 
     def _extract_topics(self, article_texts: list[str]) -> list[str]:
         counter: Counter[str] = Counter()
@@ -356,4 +388,3 @@ class AccountOnboardingService:
 
 
 account_onboarding_service = AccountOnboardingService()
-

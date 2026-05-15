@@ -87,7 +87,11 @@ DEFAULT_WORKFLOW_NODES = [
         "node_id": "profile_parsing",
         "agent_id": "profile_agent",
         "name": "Profile Parsing",
-        "input_mapping": {"positioning": "input.positioning"},
+        "input_mapping": {
+            "positioning": "input.positioning",
+            "content_platform": "account_context.content_platform",
+            "account_context": "account_context",
+        },
         "output_key": "profile",
         "required": True,
     },

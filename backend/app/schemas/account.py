@@ -34,6 +34,7 @@ class AccountCreateRequest(BaseModel):
     """Request body for creating a new account workspace."""
 
     name: str = Field(..., min_length=1, max_length=100, description="Account display name")
+    content_platform: str = Field(default="wechat", description="wechat / xiaohongshu")
     category: str | None = Field(default=None, max_length=50, description="Account category")
     positioning: str = Field(..., min_length=5, max_length=500, description="Positioning summary")
     audience: str | None = Field(default=None, max_length=200, description="Audience summary")
@@ -77,6 +78,7 @@ class AccountUpdateRequest(BaseModel):
     """Request body for updating an account workspace."""
 
     name: str | None = Field(default=None, min_length=1, max_length=100)
+    content_platform: str | None = None
     category: str | None = Field(default=None, max_length=50)
     positioning: str | None = Field(default=None, min_length=5, max_length=500)
     audience: str | None = Field(default=None, max_length=200)
@@ -123,6 +125,7 @@ class AccountSummary(BaseModel):
 
     account_id: str
     name: str
+    content_platform: str = "wechat"
     category: str | None
     positioning: str
     # Compatibility mirror fields only. Effective automation semantics should be
@@ -152,6 +155,7 @@ class AccountDetail(BaseModel):
 
     account_id: str
     name: str
+    content_platform: str = "wechat"
     category: str | None
     positioning: str
     audience: str | None

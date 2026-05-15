@@ -212,6 +212,20 @@ class LLMGateway:
             except LLMConfigurationError as e:
                 logger.warning("llm_provider_init_skipped", provider="zhipu", reason=str(e))
 
+        # 初始化 Xiaomi MiMo（OpenAI Compatible）
+        xiaomi_config = get_provider_config("xiaomi")
+        if xiaomi_config and xiaomi_config.get("api_key"):
+            try:
+                self._providers["xiaomi"] = OpenAICompatibleProvider(
+                    api_key=xiaomi_config["api_key"],
+                    base_url=xiaomi_config.get("base_url") or "https://api.mimo-v2.com/v1",
+                    timeout=xiaomi_config.get("timeout") or self.config.timeout,
+                    provider_id="xiaomi",
+                )
+                logger.info("llm_provider_initialized", provider="xiaomi")
+            except LLMConfigurationError as e:
+                logger.warning("llm_provider_init_skipped", provider="xiaomi", reason=str(e))
+
         if not self._providers:
             logger.warning(
                 "no_llm_providers_initialized",

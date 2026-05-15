@@ -89,6 +89,22 @@ class QueryPlannerService:
                 "纯背景知识堆砌",
             ],
         },
+        "xiaohongshu_image_text": {
+            "label": "小红书图文",
+            "keywords": ["小红书", "xhs", "rednote", "笔记", "图文", "种草", "避坑", "封面", "卡片", "收藏"],
+            "query_suffixes": ["小红书 爆款 笔记", "图文 笔记 结构", "封面 标题", "种草 避坑 经验"],
+            "source_preferences": [
+                "小红书图文笔记样例",
+                "同领域爆款封面与首图结构",
+                "评论区高频问题",
+                "可保存清单与避坑经验",
+            ],
+            "banned_angles": [
+                "公众号长文式大段分析",
+                "只有观点没有图片表达",
+                "没有场景和评论互动的泛选题",
+            ],
+        },
     }
 
     _LANE_ALIASES = {
@@ -108,6 +124,13 @@ class QueryPlannerService:
         "行业": "industry_observation",
         "趋势": "industry_observation",
         "商业": "industry_observation",
+        "小红书": "xiaohongshu_image_text",
+        "xhs": "xiaohongshu_image_text",
+        "rednote": "xiaohongshu_image_text",
+        "笔记": "xiaohongshu_image_text",
+        "图文": "xiaohongshu_image_text",
+        "种草": "xiaohongshu_image_text",
+        "封面": "xiaohongshu_image_text",
     }
 
     def build_plan(
@@ -130,6 +153,7 @@ class QueryPlannerService:
 
         lane_hint = (
             (ops_context.get("run_strategy") or {}).get("preferred_content_lane")
+            or account_context.get("content_platform")
             or account_context.get("content_strategy")
             or account_context.get("positioning")
             or profile.get("subdomain")

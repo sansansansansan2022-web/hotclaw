@@ -77,6 +77,8 @@ def _get_image_provider_preset(provider_id: str) -> dict[str, str] | None:
 
 def _derive_models_endpoint(base_url: str) -> str | None:
     normalized = base_url.rstrip("/")
+    if normalized.endswith("/chat/completions"):
+        return f"{normalized.rsplit('/chat/completions', 1)[0]}/models"
     if "/images/" in normalized:
         return f"{normalized.split('/images/', 1)[0]}/models"
     if normalized.endswith("/images"):
@@ -139,6 +141,10 @@ async def _run_image_connection_probe(
     try:
         async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
             if provider in {"openai", "volcengine", "custom"}:
+                effective_base_url = base_url.rstrip("/")
+                if effective_base_url.endswith("/chat/completions"):
+                    effective_base_url = f"{effective_base_url.rsplit('/chat/completions', 1)[0]}/images/generations"
+
                 models_url = _derive_models_endpoint(base_url)
                 if models_url:
                     response = await client.get(models_url, headers=headers)
@@ -183,7 +189,7 @@ async def _run_image_connection_probe(
                     )
 
             response = await client.post(
-                base_url,
+                effective_base_url if provider in {"openai", "volcengine", "custom"} else base_url,
                 headers=headers,
                 json={
                     "model": model,

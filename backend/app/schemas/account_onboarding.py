@@ -9,6 +9,7 @@ class ExistingAccountAnalysisRequest(BaseModel):
     """Request payload for analyzing an existing account from historical content."""
 
     account_name: str = Field(..., min_length=1, max_length=100)
+    content_platform: str = Field(default="wechat", description="wechat / xiaohongshu")
     article_urls: list[str] | None = Field(default=None, description="Best-effort historical article URLs")
     article_texts: list[str] | None = Field(default=None, description="Pasted historical article bodies")
 
@@ -17,6 +18,7 @@ class ExistingAccountAnalysisResponse(BaseModel):
     """Structured onboarding analysis for an existing account."""
 
     account_name: str
+    content_platform: str = "wechat"
     inferred_positioning: str
     inferred_audience: str
     inferred_tone_style: str
@@ -29,4 +31,3 @@ class ExistingAccountAnalysisResponse(BaseModel):
     analysis_confidence: Literal["low", "medium", "high"] = "medium"
     source_summary: str = ""
     used_article_count: int = 0
-

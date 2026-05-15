@@ -58,6 +58,7 @@ files\ \(1\)/
 
 # HotClaw local artifacts
 backend/.tmp/
+audit/maintenance/
 test-results/
 tmp_target.docx
 tmp_template.docx

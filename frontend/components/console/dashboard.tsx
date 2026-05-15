@@ -24,11 +24,28 @@ function accountTone(status: string | null): "success" | "warning" | "danger" | 
   return "muted";
 }
 
+function formatDashboardLoadError(error: unknown, locale: string): string {
+  const fallback = locale === "zh-CN" ? "无法加载仪表盘。" : "Unable to load dashboard.";
+  const message = error instanceof Error ? error.message : fallback;
+  if (!/failed to fetch|load failed|networkerror/i.test(message)) {
+    return message;
+  }
+
+  return locale === "zh-CN"
+    ? "无法连接后端服务，仪表盘数据暂时不可用。请确认后端已启动，并检查 /api/v1/health 后重试。"
+    : "Unable to connect to the backend service, so dashboard data is unavailable. Confirm the backend is running, check /api/v1/health, then retry.";
+}
+
 export function DashboardPage() {
   const { locale, t, taskStatusLabel, draftStatusLabel, publishStatusLabel, token } = useI18n();
   const [data, setData] = useState<DashboardState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const safeAccounts = Array.isArray(data?.accounts) ? data.accounts : [];
+  const safeTasks = Array.isArray(data?.tasks) ? data.tasks : [];
+  const safeDrafts = Array.isArray(data?.drafts) ? data.drafts : [];
+  const safeConfigs = (data?.configs && typeof data.configs === "object" ? data.configs : {}) as SystemConfigMap;
 
   const load = async () => {
     try {
@@ -43,14 +60,14 @@ export function DashboardPage() {
       ]);
 
       setData({
-        accounts: accountsRes.accounts,
-        tasks: tasksRes.tasks,
-        drafts: draftsRes.drafts,
-        pendingReviewCount: pendingRes.count,
-        configs: configsRes,
+        accounts: Array.isArray(accountsRes?.accounts) ? accountsRes.accounts : [],
+        tasks: Array.isArray(tasksRes?.tasks) ? tasksRes.tasks : [],
+        drafts: Array.isArray(draftsRes?.drafts) ? draftsRes.drafts : [],
+        pendingReviewCount: typeof pendingRes?.count === "number" ? pendingRes.count : 0,
+        configs: (configsRes && typeof configsRes === "object" ? configsRes : {}) as SystemConfigMap,
       });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Unable to load dashboard");
+      setError(formatDashboardLoadError(loadError, locale));
     } finally {
       setLoading(false);
     }
@@ -61,20 +78,17 @@ export function DashboardPage() {
   }, []);
 
   const metrics = useMemo(() => {
-    const accounts = data?.accounts ?? [];
-    const tasks = data?.tasks ?? [];
-    const drafts = data?.drafts ?? [];
-    const failedTasks = tasks.filter((task) => task.status === "failed").length;
-    const activeAccounts = accounts.filter((account) => account.is_active).length;
+    const failedTasks = safeTasks.filter((task) => task.status === "failed").length;
+    const activeAccounts = safeAccounts.filter((account) => account.is_active).length;
 
     return [
       {
         label: t("dashboard.managedAccounts"),
-        value: formatNumber(accounts.length),
+        value: formatNumber(safeAccounts.length),
         hint:
           locale === "zh-CN"
-            ? `${activeAccounts} 个启用，${accounts.length - activeAccounts} 个暂停`
-            : `${activeAccounts} active, ${accounts.length - activeAccounts} paused`,
+            ? `${activeAccounts} 个启用，${safeAccounts.length - activeAccounts} 个暂停`
+            : `${activeAccounts} active, ${safeAccounts.length - activeAccounts} paused`,
         tone: "success" as const,
         icon: <Icon name="accounts" className="h-6 w-6" />,
       },
@@ -87,7 +101,7 @@ export function DashboardPage() {
       },
       {
         label: t("dashboard.recentTasks"),
-        value: formatNumber(tasks.length),
+        value: formatNumber(safeTasks.length),
         hint:
           locale === "zh-CN"
             ? `${failedTasks} 个失败任务待跟进`
@@ -97,24 +111,24 @@ export function DashboardPage() {
       },
       {
         label: t("dashboard.publishReady"),
-        value: formatNumber(drafts.filter((draft) => draft.draft_status === "approved").length),
+        value: formatNumber(safeDrafts.filter((draft) => draft.draft_status === "approved").length),
         hint: locale === "zh-CN" ? "已通过审核、可投递到微信的草稿" : "Approved drafts ready for WeChat delivery",
         tone: "brand" as const,
         icon: <Icon name="publish" className="h-6 w-6" />,
       },
     ];
-  }, [data, locale, t]);
+  }, [locale, safeAccounts, safeDrafts, safeTasks, t]);
 
   const pendingCenter = useMemo(() => {
-    if (!data) return [];
-    const failedTasks = data.tasks.filter((task) => task.status === "failed").length;
-    const setupGap = data.accounts.filter((account) => !account.posting_frequency).length;
-    const missingRuntime = data.configs.global_publish_enabled === false ? 1 : 0;
+    const failedTasks = safeTasks.filter((task) => task.status === "failed").length;
+    const setupGap = safeAccounts.filter((account) => !account.posting_frequency).length;
+    const globalPublish = safeConfigs.global_publish_enabled;
+    const missingRuntime = globalPublish === false || globalPublish === "false" ? 1 : 0;
 
     return [
       {
         title: locale === "zh-CN" ? "草稿审核队列" : "Draft review queue",
-        count: data.pendingReviewCount,
+        count: data?.pendingReviewCount ?? 0,
         link: "/drafts",
         description:
           locale === "zh-CN"
@@ -149,18 +163,17 @@ export function DashboardPage() {
             : "Global publish toggles and timeout configuration live in runtime settings.",
       },
     ];
-  }, [data, locale]);
+  }, [data?.pendingReviewCount, locale, safeAccounts, safeConfigs, safeTasks]);
 
   const flowBoard = useMemo(() => {
-    if (!data) return [];
     return [
-      { label: draftStatusLabel("draft"), value: data.drafts.filter((draft) => draft.draft_status === "draft").length, tone: "muted" as const },
-      { label: draftStatusLabel("pending_review"), value: data.pendingReviewCount, tone: "warning" as const },
-      { label: draftStatusLabel("approved"), value: data.drafts.filter((draft) => draft.draft_status === "approved").length, tone: "success" as const },
-      { label: publishStatusLabel("published"), value: data.drafts.filter((draft) => draft.publish_status === "published").length, tone: "brand" as const },
-      { label: locale === "zh-CN" ? "发布失败" : "Failed Publish", value: data.drafts.filter((draft) => draft.publish_status === "failed").length, tone: "danger" as const },
+      { label: draftStatusLabel("draft"), value: safeDrafts.filter((draft) => draft.draft_status === "draft").length, tone: "muted" as const },
+      { label: draftStatusLabel("pending_review"), value: data?.pendingReviewCount ?? 0, tone: "warning" as const },
+      { label: draftStatusLabel("approved"), value: safeDrafts.filter((draft) => draft.draft_status === "approved").length, tone: "success" as const },
+      { label: publishStatusLabel("published"), value: safeDrafts.filter((draft) => draft.publish_status === "published").length, tone: "brand" as const },
+      { label: locale === "zh-CN" ? "发布失败" : "Failed Publish", value: safeDrafts.filter((draft) => draft.publish_status === "failed").length, tone: "danger" as const },
     ];
-  }, [data, draftStatusLabel, locale, publishStatusLabel]);
+  }, [data?.pendingReviewCount, draftStatusLabel, locale, publishStatusLabel, safeDrafts]);
 
   return (
     <div className="space-y-8">
@@ -239,9 +252,9 @@ export function DashboardPage() {
               title={locale === "zh-CN" ? "最近账号运行" : "Recent Account Runs"}
               description={locale === "zh-CN" ? "基于账号调度状态提取的最新运行信号。" : "Latest runtime signals pulled from account scheduler state."}
             >
-              {data.accounts.length ? (
+              {safeAccounts.length ? (
                 <div className="space-y-4">
-                  {data.accounts
+                  {safeAccounts
                     .slice()
                     .sort((left, right) => {
                       const leftDate = new Date(left.last_run_at ?? left.created_at).getTime();
@@ -309,9 +322,9 @@ export function DashboardPage() {
           </div>
 
           <Card title="Recent Tasks" description="Latest task runs across manual and account-triggered workflows.">
-            {data.tasks.length ? (
+            {safeTasks.length ? (
               <Table columns={["Task", "Status", "Created", "Duration", "Audit", "Action"]}>
-                {data.tasks.slice(0, 8).map((task) => (
+                {safeTasks.slice(0, 8).map((task) => (
                   <tr key={task.task_id} className="align-top">
                     <td className="px-5 py-4">
                       <div>

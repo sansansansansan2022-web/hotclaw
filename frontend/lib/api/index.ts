@@ -34,6 +34,11 @@ import type {
   DraftRerunData,
   LLMProviderInfo,
   PaginationMeta,
+  EffectivePlatformCapabilityResponse,
+  PlatformCapability,
+  PlatformCapabilityCreateRequest,
+  PlatformCapabilityListResponse,
+  PlatformCapabilityUpdateRequest,
   PublishRecord,
   PublishRecordListResponse,
   RefreshStatusResponse,
@@ -215,6 +220,14 @@ export const LLM_PROVIDER_TEMPLATES: LLMProviderTemplate[] = [
     supported_models: ["deepseek-chat", "deepseek-reasoner"],
   },
   {
+    provider_id: "xiaomi",
+    name: "Xiaomi MiMo",
+    description: "OpenAI-compatible MiMo endpoint. Use MiMo-V2.5 for multimodal understanding.",
+    base_url: "https://api.mimo-v2.com/v1",
+    default_model: "mimo-v2.5",
+    supported_models: ["mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2-flash"],
+  },
+  {
     provider_id: "compatible",
     name: "Compatible API",
     description: "OpenAI-compatible self-hosted or third-party endpoint.",
@@ -384,6 +397,22 @@ function buildUrl(path: string, root: ApiRoot = "v1"): string {
   return `${info.origin}${basePath}${normalizedPath}`;
 }
 
+function buildNetworkError(path: string, root: ApiRoot, requestUrl: string, cause: unknown): ApiError {
+  const info = getApiOriginDebugInfo();
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const basePath = root === "raw" ? "" : "/api/v1";
+  const apiAddress = info.origin || (typeof window !== "undefined" ? window.location.origin : "/api");
+  const requestPath = `${basePath}${normalizedPath}`;
+  const causeMessage = cause instanceof Error && cause.message ? ` 原始错误：${cause.message}` : "";
+
+  return new ApiError(
+    `无法连接后端服务。当前 API 地址：${apiAddress}；请求路径：${requestPath}；完整请求：${requestUrl}。请确认后端已启动，并检查 ${apiAddress}/api/v1/health。${causeMessage}`,
+    0,
+    undefined,
+    { requestUrl, requestPath, apiAddress, cause: cause instanceof Error ? cause.message : String(cause) },
+  );
+}
+
 function repairText(value: string): string {
   if (!value || /[\u3400-\u9fff]/.test(value) || !/[\u0080-\u00ff]/.test(value)) {
     return value;
@@ -428,14 +457,20 @@ async function parseBody<T>(response: Response): Promise<T | ApiEnvelope<T> | nu
 }
 
 async function request<T>(path: string, init?: RequestInit, root: ApiRoot = "v1"): Promise<T> {
-  const response = await fetch(buildUrl(path, root), {
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  });
+  const requestUrl = buildUrl(path, root);
+  let response: Response;
+  try {
+    response = await fetch(requestUrl, {
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers ?? {}),
+      },
+      ...init,
+    });
+  } catch (fetchError) {
+    throw buildNetworkError(path, root, requestUrl, fetchError);
+  }
 
   const body = await parseBody<T>(response);
 
@@ -936,7 +971,7 @@ export async function listLLMProviders(): Promise<LLMProviderInfo[]> {
 }
 
 export async function listSettingsLLMProviders(): Promise<LLMProviderInfo[]> {
-  return request<LLMProviderInfo[]>("/settings/providers", undefined, "raw");
+  return request<LLMProviderInfo[]>("/settings/providers");
 }
 
 export async function createLLMProvider(data: LLMProviderCreateRequest): Promise<LLMProviderInfo> {
@@ -993,7 +1028,7 @@ export async function listAgents(): Promise<{ agents: AgentInfo[] }> {
 }
 
 export async function listSettingsAgents(): Promise<{ agents: AgentInfo[] }> {
-  return request<{ agents: AgentInfo[] }>("/settings/agents", undefined, "raw");
+  return request<{ agents: AgentInfo[] }>("/settings/agents");
 }
 
 export async function getAgent(agentId: string): Promise<AgentInfo> {
@@ -1055,15 +1090,66 @@ export async function listSkills(): Promise<{ skills: SkillInfo[] }> {
 }
 
 export async function listSettingsSkills(): Promise<{ skills: SkillInfo[] }> {
-  return request<{ skills: SkillInfo[] }>("/settings/skills", undefined, "raw");
+  return request<{ skills: SkillInfo[] }>("/settings/skills");
+}
+
+export async function listPlatformCapabilities(params: {
+  contentPlatform?: string;
+  includeDeleted?: boolean;
+} = {}): Promise<PlatformCapabilityListResponse> {
+  return request<PlatformCapabilityListResponse>(
+    `/platform-capabilities${toQuery({
+      content_platform: params.contentPlatform,
+      include_deleted: params.includeDeleted ? "true" : undefined,
+    })}`,
+  );
+}
+
+export async function getEffectivePlatformCapabilities(
+  contentPlatform: string,
+): Promise<EffectivePlatformCapabilityResponse> {
+  return request<EffectivePlatformCapabilityResponse>(
+    `/platform-capabilities/effective/${encodeURIComponent(contentPlatform)}`,
+  );
+}
+
+export async function createPlatformCapability(
+  data: PlatformCapabilityCreateRequest,
+): Promise<PlatformCapability> {
+  return request<PlatformCapability>("/platform-capabilities", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updatePlatformCapability(
+  capabilityId: string,
+  data: PlatformCapabilityUpdateRequest,
+): Promise<PlatformCapability> {
+  return request<PlatformCapability>(`/platform-capabilities/${encodeURIComponent(capabilityId)}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deletePlatformCapability(capabilityId: string): Promise<PlatformCapability> {
+  return request<PlatformCapability>(`/platform-capabilities/${encodeURIComponent(capabilityId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function restorePlatformCapability(capabilityId: string): Promise<PlatformCapability> {
+  return request<PlatformCapability>(`/platform-capabilities/${encodeURIComponent(capabilityId)}/restore`, {
+    method: "POST",
+  });
 }
 
 export async function getAllSystemConfigs(): Promise<SystemConfigMap> {
-  return request<SystemConfigMap>("/system-configs/all", undefined, "raw");
+  return request<SystemConfigMap>("/system-configs/all");
 }
 
 export async function getSettingsSystemConfigs(): Promise<SystemConfigMap> {
-  return request<SystemConfigMap>("/settings/system-configs/all", undefined, "raw");
+  return request<SystemConfigMap>("/settings/system-configs/all");
 }
 
 export async function getSystemConfigValue(key: string, defaultValue?: string): Promise<SystemConfigValue> {
@@ -1091,7 +1177,7 @@ export async function upsertSystemConfig(
     await request(`/system-configs/${key}`, {
       method: "PUT",
       body: JSON.stringify({ value, value_type: valueType }),
-    }, "raw");
+    });
     return;
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) {
@@ -1109,11 +1195,11 @@ export async function upsertSystemConfig(
       description: options.description ?? key,
       is_sensitive: options.isSensitive ?? false,
     }),
-  }, "raw");
+  });
 }
 
 export async function updateGlobalLanguage(locale: AppLocale): Promise<void> {
   await upsertSystemConfig("ui_language", locale, "string");
 }
 
-export type { AgentInfo, LLMProviderInfo, PaginationMeta, SkillInfo };
+export type { AgentInfo, LLMProviderInfo, PaginationMeta, PlatformCapability, SkillInfo };

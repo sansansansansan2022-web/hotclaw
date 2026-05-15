@@ -24,6 +24,7 @@ import litellm
 
 from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
+from app.platforms import collect_platform_prompt_hints, resolve_content_platform
 from app.services.article_assembler_service import article_assembler_service
 from app.services.query_planner_service import query_planner_service
 
@@ -117,7 +118,7 @@ class TopicPlannerAgent(BaseAgent):
     }
 
     # 默认系统提示词
-    default_system_prompt = """You are a senior WeChat content strategist.
+    default_system_prompt = """You are a senior multi-platform content strategist for WeChat and Xiaohongshu.
 
 Turn source-backed hot topics into 3-5 topic candidates that this account can actually own.
 Return strict JSON only.
@@ -129,6 +130,8 @@ Rules:
 - Avoid generic lane drift, shallow summaries, and topics that duplicate the recent-avoid list.
 - topic_kind must be one of: paper_digest, research_trend, github_project_review, tools_roundup, benchmark_analysis, industry_method_explainer, general_analysis.
 - When external evidence exists, evidence_refs must name the real paper or repo titles that support the topic.
+- If content_platform is xiaohongshu, think in note packages: cover promise, swipe-card sequence, personal scene, save/share value, comment hook, and image-text fit. Prefer practical, visually demonstrable angles over long-form essay angles.
+- If content_platform is wechat, keep the existing long-form public-account editorial standard.
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
@@ -268,6 +271,8 @@ Rules:
         profile = input_data.get("profile") or {}
         hot_topics = input_data.get("hot_topics") or {}
         account_context = input_data.get("account_context") or {}
+        content_platform = resolve_content_platform(account_context, profile)
+        platform_hints = collect_platform_prompt_hints(account_context, "recommendation")
         ops_context = input_data.get("ops_context") or {}
         query_plan = self._resolve_query_plan(input_data)
         reference_digest = input_data.get("reference_digest") or {}
@@ -283,6 +288,7 @@ Rules:
             "tone_style": account_context.get("tone_style") or profile.get("tone") or "",
             "content_strategy": account_context.get("content_strategy") or "",
             "preferred_content_lane": (ops_context.get("run_strategy") or {}).get("preferred_content_lane") or "",
+            "content_platform": content_platform,
         }
 
         # 获取热点话题列表
@@ -296,6 +302,9 @@ Rules:
                 "",
                 "QUERY PLAN",
                 article_assembler_service.to_pretty_json(query_plan),
+                "",
+                "PLATFORM CAPABILITY HINTS",
+                article_assembler_service.to_pretty_json(platform_hints),
                 "",
                 "REFERENCE DIGEST",
                 article_assembler_service.to_pretty_json(reference_digest),
@@ -318,6 +327,7 @@ Rules:
                 "- Each topic must include title, angle, hook, target_emotion, estimated_appeal, reasoning, why_now, reference_basis, target_reader, content_lane, topic_kind, evidence_refs.",
                 "- angle should explain the account-owned perspective, not just paraphrase the hot topic title.",
                 "- If the topic is grounded in a paper or repo, topic_kind and evidence_refs must reflect that evidence explicitly.",
+                "- For xiaohongshu, title should read like a note topic, angle should include the visual/card expression, hook should include the cover-page promise or comment trigger.",
             ]
         )
 

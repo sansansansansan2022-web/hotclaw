@@ -26,6 +26,11 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const safeProviders = Array.isArray(providers) ? providers : [];
+  const safeAgents = Array.isArray(agents) ? agents : [];
+  const safeSkills = Array.isArray(skills) ? skills : [];
+  const safeAccounts = Array.isArray(accounts) ? accounts : [];
+
   const load = async () => {
     try {
       setLoading(true);
@@ -39,10 +44,10 @@ export function SettingsPage() {
       ]);
       const nextConfigs = configsRes as SystemConfigMap;
       setConfigs(nextConfigs);
-      setProviders(providersRes);
-      setAgents(agentsRes.agents);
-      setSkills(skillsRes.skills);
-      setAccounts(accountsRes.accounts);
+      setProviders(Array.isArray(providersRes) ? providersRes : []);
+      setAgents(Array.isArray(agentsRes?.agents) ? agentsRes.agents : []);
+      setSkills(Array.isArray(skillsRes?.skills) ? skillsRes.skills : []);
+      setAccounts(Array.isArray(accountsRes?.accounts) ? accountsRes.accounts : []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t("settings.title"));
     } finally {
@@ -71,19 +76,24 @@ export function SettingsPage() {
           <div className="grid gap-5 md:grid-cols-4">
             <StatCard label={t("settings.systemConfigs")} value={formatNumber(Object.keys(configs).length)} hint={`Environment: ${String(configs.app_env ?? "unknown")}`} tone="brand" icon={<Icon name="settings" className="h-6 w-6" />} />
             <Link href="/settings/llm-providers" className="block transition hover:-translate-y-0.5">
-              <StatCard label={t("settings.providers")} value={formatNumber(providers.length)} hint="Click to open model configuration" tone="info" icon={<Icon name="dashboard" className="h-6 w-6" />} />
+              <StatCard label={t("settings.providers")} value={formatNumber(safeProviders.length)} hint="Click to open model configuration" tone="info" icon={<Icon name="dashboard" className="h-6 w-6" />} />
             </Link>
             <Link href="/settings/agents" className="block transition hover:-translate-y-0.5">
-              <StatCard label={t("settings.agents")} value={formatNumber(agents.length)} hint="Click to manage registered agents" tone="success" icon={<Icon name="workspace" className="h-6 w-6" />} />
+              <StatCard label={t("settings.agents")} value={formatNumber(safeAgents.length)} hint="Click to manage registered agents" tone="success" icon={<Icon name="workspace" className="h-6 w-6" />} />
             </Link>
             <Link href="/settings/skills" className="block transition hover:-translate-y-0.5">
-              <StatCard label={t("settings.skills")} value={formatNumber(skills.length)} hint="Click to inspect skill configuration" tone="warning" icon={<Icon name="drafts" className="h-6 w-6" />} />
+              <StatCard label={t("settings.skills")} value={formatNumber(safeSkills.length)} hint="Click to inspect skill configuration" tone="warning" icon={<Icon name="drafts" className="h-6 w-6" />} />
             </Link>
           </div>
 
           <div className="grid gap-6 xl:grid-cols-[1.05fr_1.2fr]">
             <Card title={t("settings.priorityTitle")} description={t("settings.priorityDescription")}>
               <div className="grid gap-3 sm:grid-cols-2">
+                <Link href="/settings/platform-capabilities" className="rounded-2xl border border-slate-200 p-4 transition hover:border-brand-200 hover:bg-brand-50/60">
+                  <p className="text-sm font-semibold text-slate-900">平台内容能力</p>
+                  <p className="mt-1 text-sm text-slate-500">配置不同平台的选题、账号分析、排版和发布准备规则。</p>
+                  <Badge tone="info" className="mt-3">运营规则</Badge>
+                </Link>
                 <Link href="/settings/wechat" className="rounded-2xl border border-slate-200 p-4 transition hover:border-brand-200 hover:bg-brand-50/60">
                   <p className="text-sm font-semibold text-slate-900">{t("settings.wechatConfig")}</p>
                   <p className="mt-1 text-sm text-slate-500">{t("settings.wechatConfigDesc")}</p>
@@ -146,19 +156,24 @@ export function SettingsPage() {
             </Card>
 
             <Card title={t("settings.coverage")} description={t("settings.coverageDesc")}>
-              {accounts.length ? (
+              {safeAccounts.length ? (
                 <div className="space-y-3">
-                  {accounts.slice(0, 8).map((account) => (
-                    <Link key={account.account_id} href={`/settings/wechat/${account.account_id}`} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 p-4 transition hover:border-brand-200 hover:bg-brand-50/60">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">{account.name}</p>
-                        <p className="mt-1 text-sm text-slate-500">{startCase(account.operation_mode)} mode</p>
-                      </div>
-                      <Button variant="secondary" size="sm">
-                        {t("settings.configure")}
-                      </Button>
-                    </Link>
-                  ))}
+                  {safeAccounts.slice(0, 8).map((account) => {
+                    const isXiaohongshu = account.content_platform === "xiaohongshu";
+                    return (
+                      <Link key={account.account_id} href={isXiaohongshu ? "/settings/platform-capabilities" : `/settings/wechat/${account.account_id}`} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 p-4 transition hover:border-brand-200 hover:bg-brand-50/60">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{account.name}</p>
+                          <p className="mt-1 text-sm text-slate-500">
+                            {isXiaohongshu ? "小红书内容能力" : `${startCase(account.operation_mode)} mode`}
+                          </p>
+                        </div>
+                        <Button variant="secondary" size="sm">
+                          {isXiaohongshu ? "打开能力" : t("settings.configure")}
+                        </Button>
+                      </Link>
+                    );
+                  })}
                 </div>
               ) : (
                 <EmptyState title={t("settings.accountsEmpty")} description={t("settings.accountsEmptyDesc")} />

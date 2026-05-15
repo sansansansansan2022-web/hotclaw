@@ -119,6 +119,25 @@ function getWeChatConnectionSummary(config: WeChatConfigDetail | null, locale: "
   };
 }
 
+function getPlatformSummary(account: AccountDetail, locale: "en" | "zh-CN") {
+  if (account.content_platform === "xiaohongshu") {
+    return {
+      title: locale === "zh-CN" ? "小红书图文" : "Xiaohongshu",
+      description:
+        locale === "zh-CN"
+          ? "选题、标题、封面卡片和账号分析会按小红书图文笔记风格运行。"
+          : "Topics, titles, cover cards, and account analysis run in image-text note style.",
+    };
+  }
+  return {
+    title: locale === "zh-CN" ? "微信公众号" : "WeChat",
+    description:
+      locale === "zh-CN"
+        ? "选题、标题和排版会按公众号长图文风格运行。"
+        : "Topics, titles, and formatting run in official-account long-form style.",
+  };
+}
+
 interface AccountWorkspaceState {
   account: AccountDetail;
   wechatConfig: WeChatConfigDetail | null;
@@ -179,6 +198,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         latestRuntimePosture: "这个账号最近一次运行时采用的姿态",
         downgradedFrom: (mode: string) => `最近一次运行已从 ${mode} 降级`,
         officialAccount: "公众号状态",
+        platform: "平台",
         connected: "已连接",
         contentOnly: "仅内容模式",
         accountContext: "账号上下文",
@@ -201,6 +221,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         publishWithoutReview: "无需审核即可发布",
         officialAccountStatus: "公众号状态",
         openWechatConfig: "打开微信配置",
+        openPlatformCapabilities: "打开平台内容能力",
         operationsAssets: "操作入口与资产",
         operationsAssetsDesc: "所有链接都保持在当前账号上下文里，不会把运营人员重新带回全局工作台。",
         automationPlan: "自动化计划",
@@ -209,6 +230,8 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         wechatConfig: "微信配置",
         wechatConfigConnectedDesc: "检查这个账号已连接的 AppID/AppSecret 绑定和默认发布字段。",
         wechatConfigPendingDesc: "如果想让这个账号离开仅内容模式，就在这里完成真实公众号连接。",
+        platformCapabilities: "平台内容能力",
+        platformCapabilitiesDesc: "调整小红书的选题、账号分析、封面卡片和发布准备规则。",
         workspace: "账号工作台",
         workspaceDesc: "在这个账号上下文里发起任务并查看队列。",
         drafts: "账号草稿",
@@ -293,6 +316,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         latestRuntimePosture: "Latest runtime posture for this account",
         downgradedFrom: (mode: string) => `Downgraded from ${mode} on the latest run`,
         officialAccount: "Official Account",
+        platform: "Platform",
         connected: "Connected",
         contentOnly: "Content-only",
         accountContext: "Account Context",
@@ -315,6 +339,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         publishWithoutReview: "Publish Without Review",
         officialAccountStatus: "Official Account Status",
         openWechatConfig: "Open WeChat Config",
+        openPlatformCapabilities: "Open Platform Rules",
         operationsAssets: "Operations & Assets",
         operationsAssetsDesc: "Every link stays in the current account context instead of routing operators back through the global workspace.",
         automationPlan: "Automation Plan",
@@ -323,6 +348,8 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         wechatConfig: "WeChat Config",
         wechatConfigConnectedDesc: "Review the connected AppID/AppSecret binding and the default publish fields for this account.",
         wechatConfigPendingDesc: "Complete the real official-account connection if you want this account to leave content-only mode.",
+        platformCapabilities: "Platform Content Rules",
+        platformCapabilitiesDesc: "Tune Xiaohongshu topics, account analysis, cover-card and publish-prep rules.",
         workspace: "Account Workspace",
         workspaceDesc: "Run tasks and inspect queues inside this account context.",
         drafts: "Account Drafts",
@@ -481,6 +508,16 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         automationPlan.plan_type !== latestEffectiveMode,
     );
   const wechatConnection = getWeChatConnectionSummary(data?.wechatConfig ?? null, locale);
+  const platformSummary = data ? getPlatformSummary(data.account, locale) : null;
+  const isXiaohongshuAccount = data?.account.content_platform === "xiaohongshu";
+  const platformConfigHref = isXiaohongshuAccount ? "/settings/platform-capabilities" : `/settings/wechat/${accountId}`;
+  const platformConfigButton = isXiaohongshuAccount ? copy.openPlatformCapabilities : copy.openWechatConfig;
+  const platformConfigTitle = isXiaohongshuAccount ? copy.platformCapabilities : copy.wechatConfig;
+  const platformConfigDesc = isXiaohongshuAccount
+    ? copy.platformCapabilitiesDesc
+    : wechatConnection.connected
+      ? copy.wechatConfigConnectedDesc
+      : copy.wechatConfigPendingDesc;
 
   const onboardingTasks = useMemo(
     () => [
@@ -568,6 +605,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
             <Badge tone="brand">{copy.currentWorkspace}</Badge>
             <Badge tone="muted">{data.account.name}</Badge>
             <Badge tone="muted">{accountId}</Badge>
+            <Badge tone="brand">{platformSummary?.title}</Badge>
             <Badge tone={wechatConnection.tone}>{wechatConnection.title}</Badge>
           </div>
 
@@ -619,9 +657,9 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                     : wechatConnection.description}
                 </p>
                 <div className="mt-3">
-                  <Link href={`/settings/wechat/${accountId}`}>
+                  <Link href={platformConfigHref}>
                     <Button variant="secondary" size="sm">
-                      {copy.reviewWechatConfig}
+                      {isXiaohongshuAccount ? copy.openPlatformCapabilities : copy.reviewWechatConfig}
                     </Button>
                   </Link>
                 </div>
@@ -635,7 +673,14 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
             </div>
           ) : null}
 
-          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-6">
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-7">
+            <StatCard
+              label={copy.platform}
+              value={platformSummary?.title ?? ""}
+              hint={platformSummary?.description ?? ""}
+              tone="brand"
+              icon={<Icon name="workspace" className="h-6 w-6" />}
+            />
             <StatCard
               label={copy.activePlan}
               value={operationModeLabel(automationPlan?.plan_type ?? data.account.operation_mode)}
@@ -741,9 +786,9 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                   <p className="font-medium text-slate-900">{copy.officialAccountStatus}</p>
                   <p className="mt-2 leading-6">{wechatConnection.description}</p>
                   <div className="mt-3">
-                    <Link href={`/settings/wechat/${accountId}`}>
+                    <Link href={platformConfigHref}>
                       <Button variant="secondary" size="sm">
-                        {copy.openWechatConfig}
+                        {platformConfigButton}
                       </Button>
                     </Link>
                   </div>
@@ -765,11 +810,9 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                     desc: copy.referenceSourcesDesc,
                   },
                   {
-                    href: `/settings/wechat/${accountId}`,
-                    title: copy.wechatConfig,
-                    desc: wechatConnection.connected
-                      ? copy.wechatConfigConnectedDesc
-                      : copy.wechatConfigPendingDesc,
+                    href: platformConfigHref,
+                    title: platformConfigTitle,
+                    desc: platformConfigDesc,
                   },
                   {
                     href: `/accounts/${accountId}/workspace`,

@@ -248,6 +248,13 @@ HOTCLAW_API_ORIGIN=http://127.0.0.1:8000
 - `GET /api/v1/tasks/{task_id}/evidence`
 - `GET /api/v1/tasks/{task_id}/skill-invocations`
 
+## MCP Servers
+
+已登记的 MCP server：
+- `xiaohongshu`：小红书 MCP 发布器，启动命令为 `python -m xhs_mcp_server`
+
+配置和登录步骤见 [docs/xiaohongshu-mcp.md](docs/xiaohongshu-mcp.md)。
+
 ## 常用命令
 
 ### Backend
@@ -299,4 +306,3 @@ HotClaw 的推进顺序已经明确：
 也就是说，HotClaw 的目标是：
 
 **围绕公众号账号做内容决策、创作协作、审核发布的运营工作台。**
-

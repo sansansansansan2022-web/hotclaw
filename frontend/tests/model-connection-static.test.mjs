@@ -15,5 +15,8 @@ const llmTestButtonCount = (llmProvidersPage.match(/Test Connection/g) ?? []).le
 assert.ok(llmTestButtonCount >= 2, "LLM Providers page should expose Test Connection in edit and view modes");
 
 assert.match(apiIndex, /export async function testImageGenerationConnection/, "Frontend API should expose image connection test helper");
+assert.match(apiIndex, /provider_id: "xiaomi"/, "LLM provider templates should include Xiaomi MiMo");
+assert.match(apiIndex, /https:\/\/api\.mimo-v2\.com\/v1/, "Xiaomi MiMo should use the documented OpenAI-compatible base URL");
+assert.match(apiIndex, /mimo-v2\.5/, "Xiaomi MiMo template should include the multimodal model");
 
 console.log("model connection static checks passed");

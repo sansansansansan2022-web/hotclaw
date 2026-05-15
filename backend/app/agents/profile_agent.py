@@ -8,6 +8,7 @@ import litellm
 
 from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
+from app.platforms import normalize_content_platform
 from app.skills.profile_parse_skill import ProfileParseMixin
 
 
@@ -25,17 +26,19 @@ class ProfileAgent(BaseAgent, ProfileParseMixin):
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
         positioning = str(input_data.get("positioning") or "")
+        content_platform = normalize_content_platform(input_data.get("content_platform"))
         system_prompt = context.get("system_prompt") or self.default_system_prompt
 
         try:
             response = await self.run_litellm_completion(
                 context=context,
                 completion_callable=litellm.acompletion,
-                messages=self.build_messages(positioning, system_prompt),
+                messages=self.build_messages(positioning, system_prompt, content_platform),
                 timeout=settings.llm_timeout,
             )
             content = response.choices[0].message.content
             data = self.normalize_profile(self._parse_json(content), positioning)
+            data["content_platform"] = content_platform
             return self._attach_runtime_trace(self._success(data), context)
         except json.JSONDecodeError as exc:
             return self._attach_runtime_trace(
@@ -57,6 +60,7 @@ class ProfileAgent(BaseAgent, ProfileParseMixin):
 
         return self._success(
             {
+                "content_platform": normalize_content_platform(input_data.get("content_platform")),
                 "domain": "泛资讯",
                 "subdomain": "通用",
                 "target_audience": {"age_range": "18-45", "occupation": "general", "interests": []},
@@ -67,5 +71,6 @@ class ProfileAgent(BaseAgent, ProfileParseMixin):
                 "research_mode": "enabled" if "scholar" in source_preferences else "disabled",
                 "open_source_mode": "enabled" if "github" in source_preferences else "disabled",
                 "positioning_raw": positioning,
+                "visual_style": {},
             }
         )

@@ -35,6 +35,8 @@ from app.services.automation_plan_service import automation_plan_service
 from app.services.account_harness_service import account_harness_service
 from app.services.article_assembler_service import article_assembler_service
 from app.services.reference_digest_service import reference_digest_service
+from app.services.platform_capability_service import platform_capability_service
+from app.platforms import normalize_content_platform
 
 logger = get_logger(__name__)
 
@@ -74,6 +76,7 @@ class AccountService:
         account = AccountModel(
             id=account_id,
             name=data["name"],
+            content_platform=normalize_content_platform(data.get("content_platform")),
             positioning=data["positioning"],
             category=data.get("category"),
             audience=data.get("audience"),
@@ -170,6 +173,7 @@ class AccountService:
         return {
             "account_id": account.id,
             "name": account.name,
+            "content_platform": normalize_content_platform(getattr(account, "content_platform", None)),
             "category": account.category,
             "positioning": account.positioning,
             "operation_mode": legacy_mirror["operation_mode"],
@@ -239,6 +243,7 @@ class AccountService:
         return {
             "account_id": account.id,
             "name": account.name,
+            "content_platform": normalize_content_platform(getattr(account, "content_platform", None)),
             "category": account.category,
             "positioning": account.positioning,
             "audience": account.audience,
@@ -399,6 +404,9 @@ class AccountService:
                     message=f"invalid operation_mode: {data['operation_mode']}",
                     details={"valid_modes": list(VALID_OPERATION_MODES)}
                 )
+
+        if "content_platform" in data and data["content_platform"] is not None:
+            data["content_platform"] = normalize_content_platform(data["content_platform"])
 
         account = await self.get_account(account_id, db)
         for key, value in data.items():
@@ -706,6 +714,8 @@ class AccountService:
 
         account = await self.get_account(account_id, db)
         summary = await automation_plan_service.get_effective_summary(account, db)
+        content_platform = normalize_content_platform(getattr(account, "content_platform", None))
+        platform_capabilities = await platform_capability_service.get_effective_capabilities(content_platform, db)
         source_rows = await db.execute(
             select(
                 ReferenceSourceModel.id,
@@ -757,6 +767,8 @@ class AccountService:
         return {
             "account_id": account.id,
             "account_name": account.name,
+            "content_platform": content_platform,
+            "platform_capabilities": platform_capabilities,
             "positioning": account.positioning,
             "audience": account.audience,
             "tone_style": account.tone_style,

@@ -26,6 +26,7 @@ import { useAppStore } from "@/store/appStore";
 
 interface NewAccountDraft {
   name: string;
+  contentPlatform: "wechat" | "xiaohongshu";
   positioning: string;
   audience: string;
   toneStyle: string;
@@ -34,6 +35,7 @@ interface NewAccountDraft {
 
 interface ExistingInputDraft {
   accountName: string;
+  contentPlatform: "wechat" | "xiaohongshu";
   articleUrlsText: string;
   articleTextsText: string;
 }
@@ -60,6 +62,7 @@ interface WeChatDraft {
 
 const newDraftDefaults: NewAccountDraft = {
   name: "",
+  contentPlatform: "wechat",
   positioning: "",
   audience: "",
   toneStyle: "",
@@ -68,6 +71,7 @@ const newDraftDefaults: NewAccountDraft = {
 
 const existingInputDefaults: ExistingInputDraft = {
   accountName: "",
+  contentPlatform: "wechat",
   articleUrlsText: "",
   articleTextsText: "",
 };
@@ -258,6 +262,7 @@ export function AccountOnboardingWizard() {
       setError(null);
       const analysis = await analyzeExistingAccount({
         account_name: existingInput.accountName.trim(),
+        content_platform: existingInput.contentPlatform,
         article_urls: parsedArticleUrls,
         article_texts: parsedArticleTexts,
       });
@@ -379,6 +384,7 @@ export function AccountOnboardingWizard() {
       const payload: AccountCreateRequest = isExisting
         ? {
             name: existingReview?.name.trim() ?? "",
+            content_platform: existingInput.contentPlatform,
             positioning: existingReview?.positioning.trim() ?? "",
             audience: existingReview?.audience.trim() || undefined,
             tone_style: existingReview?.toneStyle.trim() || undefined,
@@ -391,6 +397,7 @@ export function AccountOnboardingWizard() {
           }
         : {
             name: newDraft.name.trim(),
+            content_platform: newDraft.contentPlatform,
             positioning: newDraft.positioning.trim(),
             audience: newDraft.audience.trim() || undefined,
             tone_style: newDraft.toneStyle.trim() || undefined,
@@ -518,6 +525,13 @@ export function AccountOnboardingWizard() {
               <Input value={newDraft.name} onChange={(event) => setNewDraft((current) => ({ ...current, name: event.target.value }))} placeholder="HotClaw Growth Notes" />
             </div>
             <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Platform</label>
+              <Select value={newDraft.contentPlatform} onChange={(event) => setNewDraft((current) => ({ ...current, contentPlatform: event.target.value as NewAccountDraft["contentPlatform"] }))}>
+                <option value="wechat">WeChat Official Account</option>
+                <option value="xiaohongshu">Xiaohongshu Image-text</option>
+              </Select>
+            </div>
+            <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">Content Lane / Positioning</label>
               <Input value={newDraft.positioning} onChange={(event) => setNewDraft((current) => ({ ...current, positioning: event.target.value }))} placeholder="AI tools, creator growth, digital operations" />
             </div>
@@ -567,8 +581,15 @@ export function AccountOnboardingWizard() {
               <Input value={existingInput.accountName} onChange={(event) => setExistingInput((current) => ({ ...current, accountName: event.target.value }))} placeholder="HotClaw Existing Account" />
             </div>
             <div>
+              <label className="mb-2 block text-sm font-medium text-slate-700">Platform</label>
+              <Select value={existingInput.contentPlatform} onChange={(event) => setExistingInput((current) => ({ ...current, contentPlatform: event.target.value as ExistingInputDraft["contentPlatform"] }))}>
+                <option value="wechat">WeChat Official Account</option>
+                <option value="xiaohongshu">Xiaohongshu Image-text</option>
+              </Select>
+            </div>
+            <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">Article URLs</label>
-              <Textarea value={existingInput.articleUrlsText} onChange={(event) => setExistingInput((current) => ({ ...current, articleUrlsText: event.target.value }))} placeholder={"One URL per line\nhttps://mp.weixin.qq.com/...\nhttps://mp.weixin.qq.com/..."} />
+              <Textarea value={existingInput.articleUrlsText} onChange={(event) => setExistingInput((current) => ({ ...current, articleUrlsText: event.target.value }))} placeholder={existingInput.contentPlatform === "xiaohongshu" ? "One note URL per line\nhttps://www.xiaohongshu.com/..." : "One URL per line\nhttps://mp.weixin.qq.com/...\nhttps://mp.weixin.qq.com/..."} />
             </div>
             <div>
               <label className="mb-2 block text-sm font-medium text-slate-700">Article Texts</label>

@@ -35,7 +35,9 @@ class OpenAICompatibleProvider(LLMProvider):
         api_key: str | None = None,
         base_url: str = "http://localhost:8000/v1",
         timeout: int = 120,  # 本地服务可能需要更长超时
+        provider_id: str = "compatible",
     ):
+        self.name = provider_id
         self.api_key = api_key or "not-needed"
         self.base_url = base_url
         self.timeout = timeout
@@ -49,17 +51,24 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def supports_model(self, model: str) -> bool:
         """兼容模式支持所有模型（由服务端决定）"""
-        # 移除 prefix
-        clean_model = model.replace("compatible/", "")
+        # 移除常见前缀
+        clean_model = model.replace("compatible/", "").replace("openai/", "")
         # 允许任意模型名
         return bool(clean_model)
 
     def get_model_name(self, options: LLMCallOptions) -> str:
         """获取模型名"""
         if options.model:
-            return options.model
-        # 如果没有指定模型，返回空字符串让服务端决定
-        return ""
+            raw_model = options.model.strip()
+            if not raw_model:
+                return "openai/default"
+            if raw_model.startswith(("compatible/", "xiaomi/")):
+                return f"openai/{raw_model.split('/', 1)[1]}"
+            if "/" in raw_model:
+                return raw_model
+            return f"openai/{raw_model}"
+        # litellm 必须携带 provider 前缀，避免 "LLM Provider NOT provided"
+        return "openai/default"
 
     async def complete(
         self,
@@ -75,7 +84,7 @@ class OpenAICompatibleProvider(LLMProvider):
 
         # 构建请求参数
         kwargs = {
-            "model": model if model else "default",
+            "model": model,
             "messages": messages,
             "timeout": self.timeout,
             "temperature": options.temperature,

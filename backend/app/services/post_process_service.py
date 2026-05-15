@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.platforms import collect_platform_prompt_hints, resolve_content_platform
 from app.services.article_assembler_service import article_assembler_service
 from app.services.html_ppt_layout_service import html_ppt_layout_service
 
@@ -43,11 +44,14 @@ class PostProcessService:
                 "image_slots": [],
                 "cover_image_prompt": "",
                 "wechat_publish_format": {},
+                "xiaohongshu_publish_format": {},
             }
         account_context = input_data.get("account_context") if isinstance(input_data.get("account_context"), dict) else {}
         outline_plan = input_data.get("outline_plan") if isinstance(input_data.get("outline_plan"), dict) else {}
         source_candidates = input_data.get("source_candidates") if isinstance(input_data.get("source_candidates"), list) else []
         reference_digest = input_data.get("reference_digest") if isinstance(input_data.get("reference_digest"), dict) else {}
+        content_platform = resolve_content_platform(account_context)
+        platform_hints = collect_platform_prompt_hints(account_context, "post_process")
 
         template = formatter._select_template(
             article=article,
@@ -92,6 +96,31 @@ class PostProcessService:
             )
         }
 
+        review_checklist = [
+            "确认标题、摘要与正文判断一致。",
+            "确认事实、来源和引用都可追溯。",
+            "确认生成图片是否符合品牌风格、主题和版权要求。",
+        ]
+        xiaohongshu_format = {}
+        if content_platform == "xiaohongshu":
+            review_checklist = [
+                "确认封面标题在方图上足够短、足够具体。",
+                "确认正文前 3 行有场景、结果或反差钩子。",
+                "确认图片/卡片顺序能独立表达重点，适合滑动阅读。",
+                "确认结尾有收藏、评论或私信触发点。",
+            ]
+            xiaohongshu_format = {
+                "title": title[:40],
+                "note_body": final_markdown,
+                "cover_card_prompt": image_slots[0]["prompt"] if image_slots else formatter._cover_prompt(title, account_context, template),
+                "card_count_recommendation": min(max(len(headings) + 1, 3), 6),
+                "content_format": "xiaohongshu_image_text_note",
+                "template_id": template["id"],
+                "template_name": template["name"],
+                "review_checklist": review_checklist,
+                "ready_for_review": True,
+            }
+
         return {
             "used_post_process": True,
             "post_process_skipped": False,
@@ -108,14 +137,15 @@ class PostProcessService:
                     else ""
                 )
                 + f"Applied the {template['name']} template with mobile-first spacing, "
-                "section hierarchy, semantic image slots, and WeChat inline HTML."
+                "section hierarchy, semantic image slots, and platform-specific review assets."
             ),
             "layout_notes": (
                 ["当前草稿存在审核风险，排版仅供预览；正式发布前请先处理审核问题。"]
                 if gate_blocked
                 else []
             )
-            + formatter._layout_notes(template),
+            + formatter._layout_notes(template)
+            + platform_hints,
             "image_slots": image_slots,
             "layout_artifacts": layout_artifacts,
             "cover_image_prompt": formatter._cover_prompt(title, account_context, template),
@@ -126,15 +156,12 @@ class PostProcessService:
                 "template_name": template["name"],
                 "content_format": "wechat_inline_html",
                 "recommended_preview_image_slot": image_slots[0]["slot_id"] if image_slots else None,
-                "review_checklist": [
-                    "确认标题、摘要与正文判断一致。",
-                    "确认事实、来源和引用都可追溯。",
-                    "确认生成图片是否符合品牌风格、主题和版权要求。",
-                ],
+                "review_checklist": review_checklist,
                 "needs_human_image_selection": False,
                 "preview_images_embedded": True,
                 "ready_for_review": True,
             },
+            "xiaohongshu_publish_format": xiaohongshu_format,
         }
 
 

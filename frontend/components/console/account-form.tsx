@@ -10,6 +10,7 @@ import { useAppStore } from "@/store/appStore";
 
 const initialForm: AccountCreateRequest = {
   name: "",
+  content_platform: "wechat",
   category: "",
   positioning: "",
   audience: "",
@@ -30,6 +31,7 @@ const initialForm: AccountCreateRequest = {
 function normalize(detail: AccountDetail): AccountCreateRequest {
   return {
     name: detail.name,
+    content_platform: detail.content_platform ?? "wechat",
     category: detail.category ?? "",
     positioning: detail.positioning,
     audience: detail.audience ?? "",
@@ -93,6 +95,14 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
       { value: "weekly", label: locale === "zh-CN" ? "每周" : "Weekly" },
       { value: "biweekly", label: locale === "zh-CN" ? "双周" : "Biweekly" },
       { value: "monthly", label: locale === "zh-CN" ? "每月" : "Monthly" },
+    ],
+    [locale],
+  );
+
+  const contentPlatforms = useMemo(
+    () => [
+      { value: "wechat", label: locale === "zh-CN" ? "微信公众号" : "WeChat" },
+      { value: "xiaohongshu", label: locale === "zh-CN" ? "小红书图文" : "Xiaohongshu" },
     ],
     [locale],
   );
@@ -166,6 +176,16 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">{locale === "zh-CN" ? "账号名称" : "Account name"}</label>
                     <Input value={form.name} onChange={(event) => setField("name", event.target.value)} placeholder={locale === "zh-CN" ? "HotClaw 增长实验室" : "HotClaw Growth Lab"} />
+                  </div>
+                  <div>
+                    <label className="mb-2 block text-sm font-medium text-slate-700">{locale === "zh-CN" ? "平台" : "Platform"}</label>
+                    <Select value={form.content_platform ?? "wechat"} onChange={(event) => setField("content_platform", event.target.value as AccountCreateRequest["content_platform"])}>
+                      {contentPlatforms.map((platform) => (
+                        <option key={platform.value} value={platform.value}>
+                          {platform.label}
+                        </option>
+                      ))}
+                    </Select>
                   </div>
                   <div>
                     <label className="mb-2 block text-sm font-medium text-slate-700">{locale === "zh-CN" ? "分类" : "Category"}</label>

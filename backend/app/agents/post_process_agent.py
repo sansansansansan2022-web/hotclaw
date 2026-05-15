@@ -1,4 +1,4 @@
-"""Post-process agent for WeChat-ready draft finishing."""
+"""Post-process agent for platform-ready draft finishing."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from html import escape
 from typing import Any
 
 from app.agents.base import AgentResult, BaseAgent
+from app.platforms import resolve_content_platform
 from app.services.image_generation_service import image_generation_service
 from app.services.post_process_service import post_process_service
 
@@ -17,7 +18,7 @@ class PostProcessAgent(BaseAgent):
 
     agent_id = "post_process_agent"
     name = "Post-process Agent"
-    description = "Prepare a passed draft for human review with WeChat formatting and preview image placeholders."
+    description = "Prepare a passed draft for human review with platform-specific formatting and preview image placeholders."
 
     input_schema = {
         "type": "object",
@@ -52,6 +53,7 @@ class PostProcessAgent(BaseAgent):
             "layout_artifacts": {"type": "object"},
             "cover_image_prompt": {"type": "string"},
             "wechat_publish_format": {"type": "object"},
+            "xiaohongshu_publish_format": {"type": "object"},
         },
     }
 
@@ -116,11 +118,42 @@ class PostProcessAgent(BaseAgent):
         },
     )
 
+    XIAOHONGSHU_TEMPLATES: tuple[dict[str, Any], ...] = (
+        {
+            "id": "xhs_cover_cards",
+            "name": "小红书封面卡片",
+            "scenario": "适合观点、清单、经验复盘和可收藏图文笔记。",
+            "summary": "把内容改造成封面承诺、3-6 张滑动卡片、正文短笔记和评论钩子的图文结构。",
+            "accent_color": "#e11d48",
+            "accent_soft": "#ffe4e6",
+            "hero_background": "linear-gradient(135deg,#e11d48 0%,#fb7185 100%)",
+            "body_background": "#fff7f8",
+            "surface": "#ffffff",
+            "heading_style": "tag_bar",
+            "recommended_for": ["种草", "经验", "清单", "避坑", "教程"],
+            "style_keywords": ["封面强钩子", "滑动卡片", "可收藏", "评论互动"],
+        },
+        {
+            "id": "xhs_clean_note",
+            "name": "小红书清爽笔记",
+            "scenario": "适合生活方式、成长、轻知识和个人体验型图文。",
+            "summary": "用口语化开场、短段落、重点标记和互动结尾，让正文更像小红书笔记而不是公众号长文。",
+            "accent_color": "#db2777",
+            "accent_soft": "#fce7f3",
+            "hero_background": "linear-gradient(135deg,#db2777 0%,#f9a8d4 100%)",
+            "body_background": "#fff8fb",
+            "surface": "#ffffff",
+            "heading_style": "soft_marker",
+            "recommended_for": ["生活方式", "成长", "情绪", "个人经验"],
+            "style_keywords": ["轻口语", "短句", "场景感", "互动感"],
+        },
+    )
+
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
         return self._success(await post_process_service.prepare(formatter=self, input_data=input_data, context=context))
 
     def _template_options(self) -> list[dict[str, Any]]:
-        return [self._public_template(template) for template in self.LAYOUT_TEMPLATES]
+        return [self._public_template(template) for template in (*self.LAYOUT_TEMPLATES, *self.XIAOHONGSHU_TEMPLATES)]
 
     def _public_template(self, template: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -141,6 +174,23 @@ class PostProcessAgent(BaseAgent):
         outline_plan: dict[str, Any],
         source_candidates: list[Any],
     ) -> dict[str, Any]:
+        content_platform = resolve_content_platform(account_context)
+        if content_platform == "xiaohongshu":
+            text = " ".join(
+                str(value or "")
+                for value in (
+                    article.get("selected_topic"),
+                    article.get("selected_title"),
+                    article.get("summary"),
+                    outline_plan.get("content_lane"),
+                    account_context.get("positioning"),
+                    account_context.get("tone_style"),
+                )
+            ).lower()
+            if any(keyword in text for keyword in ("生活", "成长", "情绪", "体验", "关系", "穿搭", "美妆", "旅行")):
+                return self.XIAOHONGSHU_TEMPLATES[1]
+            return self.XIAOHONGSHU_TEMPLATES[0]
+
         text = " ".join(
             str(value or "")
             for value in (
@@ -175,7 +225,7 @@ class PostProcessAgent(BaseAgent):
         return next(template for template in self.LAYOUT_TEMPLATES if template["id"] == selected_id)
 
     def _template_index(self, template_id: str) -> int:
-        for index, template in enumerate(self.LAYOUT_TEMPLATES):
+        for index, template in enumerate((*self.LAYOUT_TEMPLATES, *self.XIAOHONGSHU_TEMPLATES)):
             if template["id"] == template_id:
                 return index
         return 999
@@ -669,14 +719,20 @@ class PostProcessAgent(BaseAgent):
         tone = str(account_context.get("tone_style") or "professional, editorial, analytical").strip()
         audience = str(account_context.get("target_audience") or account_context.get("audience") or "").strip()
         focus = section_heading or title
+        content_platform = resolve_content_platform(account_context)
         role = "cover image" if image_kind == "cover" else "inline section illustration"
         composition = (
-            "wide editorial cover, one clear focal metaphor, cinematic lighting"
+            (
+                "square Xiaohongshu cover card concept, bright clean lifestyle/editorial composition, clear room for overlay text"
+                if content_platform == "xiaohongshu"
+                else "wide editorial cover, one clear focal metaphor, cinematic lighting"
+            )
             if image_kind == "cover"
             else "clean conceptual illustration placed between paragraphs, clear visual hierarchy"
         )
+        platform_name = "Xiaohongshu image-text note" if content_platform == "xiaohongshu" else "WeChat public account"
         return (
-            f"Create a WeChat public account {role} for an article titled: {title}. "
+            f"Create a {platform_name} {role} for an article titled: {title}. "
             f"Article summary: {summary or title}. Visual focus: {focus}. "
             f"Audience: {audience or 'AI engineers, product builders, and technical decision makers'}. "
             f"Tone: {tone}. Template mood: {template['name']} with accent color {template['accent_color']}. "
@@ -833,8 +889,10 @@ class PostProcessAgent(BaseAgent):
 
     def _cover_prompt(self, title: str, account_context: dict[str, Any], template: dict[str, Any]) -> str:
         tone = str(account_context.get("tone_style") or "clear, professional").strip()
+        content_platform = resolve_content_platform(account_context)
+        platform_name = "Xiaohongshu square cover card" if content_platform == "xiaohongshu" else "WeChat article cover"
         return (
-            f"Create a WeChat article cover for '{title}' using the {template['name']} style. "
+            f"Create a {platform_name} for '{title}' using the {template['name']} style. "
             f"Tone: {tone}. Strong focal image, clean negative space, no embedded text."
         )
 

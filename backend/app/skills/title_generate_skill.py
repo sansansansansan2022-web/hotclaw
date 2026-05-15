@@ -8,6 +8,7 @@ from typing import Any
 import litellm
 
 from app.core.config import settings
+from app.platforms import collect_platform_prompt_hints, resolve_content_platform
 from app.services.article_assembler_service import article_assembler_service
 from app.services.query_planner_service import query_planner_service
 from app.skills.base import BaseSkill, SkillResult
@@ -52,7 +53,7 @@ class TitleGenerateMixin:
         },
     }
 
-    default_system_prompt = """You are a WeChat title strategist.
+    default_system_prompt = """You are a multi-platform title strategist for WeChat and Xiaohongshu.
 
 Choose the strongest topic candidate and generate 4-6 titles that feel click-worthy without losing credibility.
 Return strict JSON only.
@@ -62,6 +63,8 @@ Rules:
 - Avoid empty shock-value or titles that could belong to any account.
 - Show style diversity, but keep the title promises compatible with the outline the team will later write.
 - Do not invent specific paper names or repo names that are absent from the evidence list.
+- If content_platform is xiaohongshu, write note-style titles: concrete result, first-person/scene if useful, searchable keywords, cover-friendly length, and no public-account essay phrasing.
+- If content_platform is wechat, keep long-form public-account title logic.
 """
 
     def build_messages(self, input_data: dict[str, Any], system_prompt: str) -> list[dict[str, str]]:
@@ -74,6 +77,8 @@ Rules:
         profile = input_data.get("profile") or {}
         topics = input_data.get("topics") or {}
         account_context = input_data.get("account_context") or {}
+        content_platform = resolve_content_platform(account_context, profile)
+        platform_hints = collect_platform_prompt_hints(account_context, "recommendation")
         ops_context = input_data.get("ops_context") or {}
         query_plan = input_data.get("query_plan")
         if not isinstance(query_plan, dict):
@@ -93,6 +98,7 @@ Rules:
             "tone_style": account_context.get("tone_style") or profile.get("tone") or "",
             "audience": account_context.get("audience") or profile.get("target_audience") or "",
             "preferred_content_lane": (query_plan.get("lane") or {}).get("label") or "",
+            "content_platform": content_platform,
         }
 
         return "\n".join(
@@ -104,6 +110,9 @@ Rules:
                 "",
                 "QUERY PLAN",
                 article_assembler_service.to_pretty_json(query_plan),
+                "",
+                "PLATFORM CAPABILITY HINTS",
+                article_assembler_service.to_pretty_json(platform_hints),
                 "",
                 "REFERENCE DIGEST",
                 article_assembler_service.to_pretty_json(reference_digest),
@@ -122,6 +131,7 @@ Rules:
                 "- titles must include text, style, score, reasoning.",
                 "- Generate 4-6 options with real style diversity, but keep them consistent with the chosen topic package.",
                 "- If a title mentions a paper or repository by name, that name must appear in SELECTED EVIDENCE.",
+                "- For xiaohongshu, include at least two cover-friendly titles that are short enough for a square cover and one searchable title with concrete keywords.",
             ]
         )
 
