@@ -784,7 +784,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                     desc: copy.tasksLinkDesc,
                   },
                   {
-                    href: "/publish-logs",
+                    href: `/publish-logs?account_id=${accountId}`,
                     title: copy.publishLogs,
                     desc: copy.publishLogsDesc,
                   },
