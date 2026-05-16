@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { getDraftPublishRecords, listAccounts, listDrafts, refreshPublishStatus } from "@/lib/api";
+import { getAccount, getDraftPublishRecords, listAccounts, listDrafts, refreshPublishStatus } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatDateTime, formatNumber, truncate } from "@/lib/utils";
 import type { PublishRecord } from "@/types";
@@ -17,7 +17,7 @@ function publishTone(status: string): "success" | "warning" | "danger" | "muted"
   return "muted";
 }
 
-export function PublishLogsPage() {
+export function PublishLogsPage({ initialAccountId }: { initialAccountId?: string | null }) {
   const { locale, t, publishStatusLabel } = useI18n();
   const pushToast = useAppStore((state) => state.pushToast);
   const [rows, setRows] = useState<Array<PublishRecord & { draftTitle: string; accountName: string }>>([]);
@@ -25,14 +25,20 @@ export function PublishLogsPage() {
   const [accountCount, setAccountCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const scopedAccountId = initialAccountId?.trim() || undefined;
+  const isScoped = Boolean(scopedAccountId);
 
   const load = async () => {
     try {
       setLoading(true);
       setError(null);
       const [draftsRes, accountsRes] = await Promise.all([
-        listDrafts(1, 100).catch(() => ({ drafts: [], pagination: { page: 1, page_size: 100, total: 0 } })),
-        listAccounts(1, 100).catch(() => ({ accounts: [], pagination: { page: 1, page_size: 100, total: 0 } })),
+        listDrafts(1, 100, scopedAccountId ? { account_id: scopedAccountId } : undefined).catch(() => ({ drafts: [], pagination: { page: 1, page_size: 100, total: 0 } })),
+        scopedAccountId
+          ? getAccount(scopedAccountId)
+              .then((account) => ({ accounts: [{ account_id: account.account_id, name: account.name }], pagination: { page: 1, page_size: 1, total: 1 } }))
+              .catch(() => ({ accounts: [], pagination: { page: 1, page_size: 1, total: 0 } }))
+          : listAccounts(1, 100).catch(() => ({ accounts: [], pagination: { page: 1, page_size: 100, total: 0 } })),
       ]);
 
       const accountMap = new Map(accountsRes.accounts.map((account) => [account.account_id, account.name]));
@@ -59,7 +65,7 @@ export function PublishLogsPage() {
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [scopedAccountId]);
 
   const stats = useMemo(() => {
     const failed = rows.filter((row) => row.publish_status === "failed").length;
@@ -85,12 +91,32 @@ export function PublishLogsPage() {
     <div className="space-y-8">
       <PageHeader
         eyebrow={t("publish.eyebrow")}
-        title={t("publish.title")}
-        description={t("publish.description")}
+        title={isScoped ? (locale === "zh-CN" ? "账号发布日志" : "Account Publish Logs") : t("publish.title")}
+        description={
+          isScoped
+            ? locale === "zh-CN"
+              ? "只查看当前账号草稿关联的发布尝试与失败。"
+              : "Inspect only publish attempts and failures linked to this account's drafts."
+            : t("publish.description")
+        }
       />
 
       <div className="grid gap-5 md:grid-cols-3">
-        <StatCard label={t("publish.records")} value={formatNumber(rows.length)} hint={locale === "zh-CN" ? "由每个草稿的记录聚合出的全局视图" : "Global view composed from per-draft records"} tone="brand" icon={<Icon name="publish" className="h-6 w-6" />} />
+        <StatCard
+          label={t("publish.records")}
+          value={formatNumber(rows.length)}
+          hint={
+            isScoped
+              ? locale === "zh-CN"
+                ? "由当前账号草稿的记录聚合出的账号视图"
+                : "Account view composed from this account's draft records"
+              : locale === "zh-CN"
+                ? "由每个草稿的记录聚合出的全局视图"
+                : "Global view composed from per-draft records"
+          }
+          tone="brand"
+          icon={<Icon name="publish" className="h-6 w-6" />}
+        />
         <StatCard label={t("publish.pendingSync")} value={formatNumber(stats.pending)} hint={locale === "zh-CN" ? "仍处于 pending 或 publishing 状态的记录" : "Records still in pending or publishing state"} tone="warning" icon={<Icon name="refresh" className="h-6 w-6" />} />
         <StatCard label={t("publish.failedPublishes")} value={formatNumber(stats.failed)} hint={locale === "zh-CN" ? "需要重试或检查配置的记录" : "Records that need a retry or config check"} tone="danger" icon={<Icon name="warning" className="h-6 w-6" />} />
       </div>
@@ -142,10 +168,10 @@ export function PublishLogsPage() {
               description={t("publish.emptyDesc")}
               action={
                 <div className="flex flex-wrap items-center justify-center gap-3">
-                  <Link href="/drafts">
+                  <Link href={scopedAccountId ? `/drafts?account_id=${scopedAccountId}` : "/drafts"}>
                     <Button>{t("publish.openDrafts")}</Button>
                   </Link>
-                  <Link href="/settings/wechat">
+                  <Link href={scopedAccountId ? `/settings/wechat/${scopedAccountId}` : "/settings/wechat"}>
                     <Button variant="secondary">{t("publish.reviewWechat")}</Button>
                   </Link>
                 </div>
