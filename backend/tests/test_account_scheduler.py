@@ -12,6 +12,7 @@ Covers:
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
@@ -245,6 +246,32 @@ class TestAccountServiceRun:
 
 class TestSchedulerEligibility:
     """Test scheduler eligibility checks."""
+
+    def test_is_eligible_accepts_naive_due_datetime(self):
+        """Persisted naive datetimes should not crash scheduler eligibility checks."""
+        from app.scheduler.account_scheduler import account_scheduler
+
+        account = SimpleNamespace(
+            is_active=True,
+            auto_run_enabled=True,
+            operation_mode="semi_auto",
+            next_run_at=datetime.now() - timedelta(hours=1),
+        )
+
+        assert account_scheduler._is_eligible_for_auto_run(account) is True
+
+    def test_is_eligible_rejects_naive_future_datetime(self):
+        """Naive future timestamps should still be treated as not due."""
+        from app.scheduler.account_scheduler import account_scheduler
+
+        account = SimpleNamespace(
+            is_active=True,
+            auto_run_enabled=True,
+            operation_mode="semi_auto",
+            next_run_at=datetime.now() + timedelta(hours=1),
+        )
+
+        assert account_scheduler._is_eligible_for_auto_run(account) is False
 
     @pytest.mark.asyncio
     async def test_get_due_accounts_excludes_manual_mode(self, db_session):
@@ -608,6 +635,65 @@ class TestNextRunAtRefresh:
 
         # next_run_at should be None when no frequency is set
         assert account.next_run_at is None
+
+
+class TestSchedulerTaskCompletionState:
+    """Test scheduler task/account state contract."""
+
+    @pytest.mark.asyncio
+    async def test_swallowed_task_failure_does_not_mark_account_success(self, db_session, monkeypatch):
+        """If run_task records failure and returns, scheduler must not overwrite it as success."""
+        from app.scheduler.account_scheduler import account_scheduler
+
+        class ReuseSessionFactory:
+            def __call__(self):
+                return self
+
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        account = AccountModel(
+            id="scheduler-failed-account",
+            name="Scheduler Failed Account",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            posting_frequency="daily",
+            last_run_status="never_run",
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        async def fake_run_task(task_id, db):
+            task = await db.get(TaskModel, task_id)
+            task.status = "failed"
+            task.error_message = "orchestrator failed"
+            task.completed_at = datetime.now(timezone.utc)
+            db.add(task)
+            await account_service.update_account_run_status(
+                account.id, db, "failed", "orchestrator failed"
+            )
+            await db.commit()
+
+        monkeypatch.setattr("app.db.session.async_session_factory", ReuseSessionFactory())
+        monkeypatch.setattr("app.services.task_service.task_service.run_task", fake_run_task)
+
+        await account_scheduler._run_account_task(account.id)
+
+        await db_session.refresh(account)
+        task_result = await db_session.execute(
+            select(TaskModel).where(TaskModel.account_id == account.id)
+        )
+        task = task_result.scalar_one()
+
+        assert task.status == "failed"
+        assert account.last_run_status == "failed"
+        assert account.last_error_message == "orchestrator failed"
 
 
 class TestTemporaryTaskCompatibility:
