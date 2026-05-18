@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   confirmPublishDraft,
@@ -59,17 +59,33 @@ function fallbackSections(detail: DraftDetail | null): SectionDraft[] {
 export function DraftDetailPage({ draftId }: { draftId: string }) {
   const { locale, draftStatusLabel, publishStatusLabel } = useI18n();
   const parsedId = Number(draftId);
+  const latestDraftIdRef = useRef(draftId);
+  const loadRequestRef = useRef(0);
   const pushToast = useAppStore((state) => state.pushToast);
-  const [detail, setDetail] = useState<DraftDetail | null>(null);
+  const [loadedDetail, setDetail] = useState<DraftDetail | null>(null);
   const [records, setRecords] = useState<PublishRecord[]>([]);
   const [previewMode, setPreviewMode] = useState<PreviewMode>("html");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  latestDraftIdRef.current = draftId;
 
-  const load = async () => {
+  const detail = loadedDetail?.id === parsedId ? loadedDetail : null;
+
+  const load = useCallback(async () => {
+    if (latestDraftIdRef.current !== draftId) {
+      return;
+    }
+
+    const requestId = ++loadRequestRef.current;
+    const isCurrentRequest = () => loadRequestRef.current === requestId && latestDraftIdRef.current === draftId;
+
     if (!Number.isFinite(parsedId)) {
-      setLoading(false);
-      setError(locale === "zh-CN" ? "草稿 ID 必须是数字。" : "Draft id must be numeric.");
+      if (isCurrentRequest()) {
+        setDetail(null);
+        setRecords([]);
+        setLoading(false);
+        setError(locale === "zh-CN" ? "草稿 ID 必须是数字。" : "Draft id must be numeric.");
+      }
       return;
     }
 
@@ -82,18 +98,25 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
         getDraft(parsedId),
         getDraftPublishRecords(parsedId).catch(() => ({ draft_id: parsedId, total: 0, records: [] })),
       ]);
+      if (!isCurrentRequest()) {
+        return;
+      }
       setDetail(detailRes);
       setRecords(recordRes.records);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载草稿详情。" : "Unable to load draft detail.");
+      if (isCurrentRequest()) {
+        setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载草稿详情。" : "Unable to load draft detail.");
+      }
     } finally {
-      setLoading(false);
+      if (isCurrentRequest()) {
+        setLoading(false);
+      }
     }
-  };
+  }, [draftId, locale, parsedId]);
 
   useEffect(() => {
     void load();
-  }, [draftId]);
+  }, [load]);
 
   const actions = useMemo(() => {
     if (!detail) return { canApprove: false, canReject: false, canDiscard: false, canPublish: false, canRetry: false };
