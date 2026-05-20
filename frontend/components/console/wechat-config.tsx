@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createWeChatConfig, getWeChatConfig, listAccounts, testWeChatConnection, updateWeChatConfig } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -32,8 +32,10 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
   const { locale, t, token } = useI18n();
   const router = useRouter();
   const pushToast = useAppStore((state) => state.pushToast);
+  const loadRequestRef = useRef(0);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(accountId ?? null);
+  const [loadedAccountId, setLoadedAccountId] = useState<string | null>(null);
   const [existing, setExisting] = useState<WeChatConfigDetail | null>(null);
   const [form, setForm] = useState<ConfigFormState>(emptyForm);
   const [loading, setLoading] = useState(true);
@@ -41,10 +43,12 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const load = async (targetAccountId?: string | null) => {
+    const requestId = ++loadRequestRef.current;
     try {
       setLoading(true);
       setError(null);
       const accountsRes = await listAccounts(1, 100).catch(() => ({ accounts: [], pagination: { page: 1, page_size: 100, total: 0 } }));
+      if (requestId !== loadRequestRef.current) return;
       setAccounts(accountsRes.accounts);
 
       const resolvedAccountId = targetAccountId ?? accountId ?? accountsRes.accounts[0]?.account_id ?? null;
@@ -53,11 +57,13 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
       if (!resolvedAccountId) {
         setExisting(null);
         setForm(emptyForm);
+        setLoadedAccountId(null);
         return;
       }
 
       try {
         const config = await getWeChatConfig(resolvedAccountId);
+        if (requestId !== loadRequestRef.current) return;
         setExisting(config);
         setForm({
           app_id: "",
@@ -68,14 +74,20 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
           only_fans_can_comment: config.only_fans_can_comment,
           is_enabled: config.is_enabled,
         });
+        setLoadedAccountId(resolvedAccountId);
       } catch {
+        if (requestId !== loadRequestRef.current) return;
         setExisting(null);
         setForm(emptyForm);
+        setLoadedAccountId(resolvedAccountId);
       }
     } catch (loadError) {
+      if (requestId !== loadRequestRef.current) return;
       setError(loadError instanceof Error ? loadError.message : t("wechat.loadError"));
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -84,13 +96,14 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
   }, [accountId]);
 
   const selectedAccount = useMemo(() => accounts.find((account) => account.account_id === selectedAccountId) ?? null, [accounts, selectedAccountId]);
+  const selectedAccountReady = Boolean(selectedAccountId && loadedAccountId === selectedAccountId && !loading);
 
   const setField = <K extends keyof ConfigFormState>(key: K, value: ConfigFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
   const submit = async () => {
-    if (!selectedAccountId) return;
+    if (!selectedAccountId || !selectedAccountReady) return;
     try {
       setSaving(true);
       setError(null);
@@ -133,6 +146,7 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
   };
 
   const runConnectionTest = async () => {
+    if (!selectedAccountReady) return;
     if (!form.app_id || !form.app_secret) {
       pushToast({ tone: "warning", title: locale === "zh-CN" ? "需要凭证" : "Credentials required", message: locale === "zh-CN" ? "测试连接前请先填写 App ID 和 App Secret。" : "Enter App ID and App Secret to test the connection." });
       return;
@@ -173,7 +187,12 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
                 value={selectedAccountId ?? ""}
                 onChange={(event) => {
                   const nextId = event.target.value;
+                  loadRequestRef.current += 1;
                   setSelectedAccountId(nextId);
+                  setLoadedAccountId(null);
+                  setExisting(null);
+                  setForm(emptyForm);
+                  setLoading(true);
                   router.push(`/settings/wechat/${nextId}`);
                 }}
               >
@@ -276,10 +295,10 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
 
               <Card title={locale === "zh-CN" ? "操作" : "Actions"} description={locale === "zh-CN" ? "先做连通性校验，再保存到后端。" : "Run validation before saving or persist the config to the backend."}>
                 <div className="flex flex-wrap gap-3">
-                  <Button variant="secondary" onClick={() => void runConnectionTest()}>
+                  <Button variant="secondary" disabled={!selectedAccountReady || saving} onClick={() => void runConnectionTest()}>
                     {locale === "zh-CN" ? "测试连接" : "Test Connection"}
                   </Button>
-                  <Button disabled={saving || !selectedAccountId} onClick={() => void submit()}>
+                  <Button disabled={saving || !selectedAccountReady} onClick={() => void submit()}>
                     {saving ? (locale === "zh-CN" ? "保存中..." : "Saving...") : existing ? (locale === "zh-CN" ? "保存配置" : "Save Configuration") : (locale === "zh-CN" ? "创建配置" : "Create Configuration")}
                   </Button>
                 </div>
