@@ -193,3 +193,28 @@ async def test_account_run_api_creates_account_owned_task_and_schedules_backgrou
     coro = scheduled.get("coro")
     if coro is not None:
         coro.close()
+
+
+@pytest.mark.asyncio
+async def test_disable_account_persists_after_request_session_rollback(client, db_session):
+    account = AccountModel(
+        id="acct-disable-persist",
+        name="Disable Persist",
+        positioning="Account disable should survive request cleanup.",
+        operation_mode="semi_auto",
+        is_active=True,
+    )
+    db_session.add(account)
+    await db_session.commit()
+    account_id = account.id
+
+    resp = await client.post(f"/api/v1/accounts/{account_id}/disable")
+
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is False
+
+    await db_session.rollback()
+    db_session.expire_all()
+    persisted = await db_session.get(AccountModel, account_id)
+    assert persisted is not None
+    assert persisted.is_active is False

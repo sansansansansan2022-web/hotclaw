@@ -254,7 +254,7 @@ class AccountHarnessService:
                 allow_run = False
                 issues.append("Scheduler run blocked because the account is in failure recovery.")
 
-        if fallback_used and requested_mode in {"manual", "semi_auto"}:
+        if fallback_used and requested_mode in {"manual", "semi_auto"} and trigger["source"] != "scheduler":
             allow_run = True
 
         account_health_status = str(health_raw.get("status") or "")

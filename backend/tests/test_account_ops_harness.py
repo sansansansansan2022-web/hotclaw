@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, ArticleDraftModel, TaskModel
+from app.services.account_harness_service import account_harness_service
 from app.services.task_service import task_service
 
 
@@ -139,3 +140,45 @@ async def test_run_task_uses_effective_mode_for_draft_creation(db_session, monke
     task_result = await db_session.execute(select(TaskModel).where(TaskModel.id == task.id))
     saved_task = task_result.scalar_one()
     assert saved_task.result_data["ops_context"]["run_strategy"]["effective_mode"] == "semi_auto"
+
+
+def test_scheduler_backlog_block_survives_ops_agent_fallback():
+    context = account_harness_service._normalize_ops_context(
+        {
+            "account": {
+                "account_id": "acc-scheduler-block",
+                "name": "Scheduler Block Account",
+            },
+            "automation_plan": {"plan_type": "semi_auto"},
+            "reference_sources": [],
+            "recent_tasks": [],
+            "recent_drafts": [],
+            "recent_publishes": [],
+            "signals": {
+                "enabled_reference_source_count": 0,
+                "pending_review_count": account_harness_service.PENDING_REVIEW_BLOCK_THRESHOLD,
+                "recent_failed_publish_count": 0,
+                "recent_success_publish_count": 0,
+                "recent_failed_task_count": 0,
+                "preferred_content_lane": None,
+            },
+            "trigger": {"source": "scheduler", "requested_plan_type": "semi_auto"},
+        },
+        {
+            "account_health": {"status": "attention", "issues": ["Ops agent fallback was required."]},
+            "operation_stage": "style_learning",
+            "run_strategy": {
+                "allow_run": True,
+                "effective_mode": "semi_auto",
+                "allow_auto_publish": False,
+                "preferred_reference_source_ids": [],
+                "avoid_recent_topics": [],
+                "preferred_content_lane": None,
+            },
+            "ops_notes": ["Fallback policy."],
+        },
+        fallback_used=True,
+    )
+
+    assert context["run_strategy"]["allow_run"] is False
+    assert "Scheduler run blocked because review backlog is too large." in context["account_health"]["issues"]
