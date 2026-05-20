@@ -206,14 +206,15 @@ async def test_disable_account_persists_after_request_session_rollback(client, d
     )
     db_session.add(account)
     await db_session.commit()
+    account_id = account.id
 
-    resp = await client.post(f"/api/v1/accounts/{account.id}/disable")
+    resp = await client.post(f"/api/v1/accounts/{account_id}/disable")
 
     assert resp.status_code == 200
     assert resp.json()["is_active"] is False
 
     await db_session.rollback()
     db_session.expire_all()
-    persisted = await db_session.get(AccountModel, account.id)
+    persisted = await db_session.get(AccountModel, account_id)
     assert persisted is not None
     assert persisted.is_active is False
