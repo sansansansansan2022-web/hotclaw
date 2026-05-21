@@ -7,6 +7,7 @@ import pytest_asyncio
 from datetime import datetime, timezone
 from sqlalchemy import select
 
+from app.api import draft_routes
 from app.models.tables import AccountModel, TaskModel, ArticleDraftModel
 from app.services.draft_service import draft_service
 from app.core.exceptions import (
@@ -181,6 +182,36 @@ class TestDraftService:
         original_draft, new_task = await draft_service.rerun_from_draft(pending_draft.id, db_session)
         assert original_draft.id == pending_draft.id
         assert new_task.account_id == pending_draft.account_id
+        assert new_task.input_data["ops_context"]["run_strategy"]["effective_mode"] == "semi_auto"
+
+    @pytest.mark.asyncio
+    async def test_rerun_api_schedules_created_task(self, client, db_session, pending_draft, monkeypatch):
+        scheduled: dict[str, object] = {}
+
+        class DummyTask:
+            pass
+
+        def fake_create_task(coro):
+            scheduled["coro"] = coro
+            scheduled["task"] = DummyTask()
+            return scheduled["task"]
+
+        monkeypatch.setattr(draft_routes.asyncio, "create_task", fake_create_task)
+        draft_routes._background_tasks.clear()
+
+        response = await client.post(f"/api/v1/drafts/{pending_draft.id}/rerun")
+
+        assert response.status_code == 200, response.text
+        new_task_id = response.json()["new_task_id"]
+        new_task = await db_session.get(TaskModel, new_task_id)
+        assert new_task is not None
+        assert new_task.status == "pending"
+        assert new_task.input_data["ops_context"]["run_strategy"]["effective_mode"] == "semi_auto"
+        assert draft_routes._background_tasks[new_task_id] is scheduled["task"]
+
+        coro = scheduled.get("coro")
+        if coro is not None:
+            coro.close()
 
     @pytest.mark.asyncio
     async def test_pending_count(self, db_session, pending_draft):

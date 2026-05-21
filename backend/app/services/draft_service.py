@@ -17,6 +17,7 @@ from app.core.logger import get_logger
 from app.core.tracer import generate_task_id
 from app.models.tables import ArticleDraftModel, AuditResultModel, TaskModel, AccountModel
 from app.models.wechat_config import WeChatConfigModel, WeChatPublishRecordModel
+from app.services.account_harness_service import account_harness_service
 from app.services.article_assembler_service import article_assembler_service
 
 logger = get_logger(__name__)
@@ -627,14 +628,29 @@ class DraftService:
                 f"account {draft.account_id} not found"
             )
 
-        # Create new task with same positioning
+        ops_context = await account_harness_service.evaluate_account_run(
+            account,
+            db,
+            allow_auto=False,
+        )
+        run_strategy = ops_context.get("run_strategy", {})
+        if not run_strategy.get("allow_run", True):
+            raise DraftCreateError(
+                draft.task_id,
+                "account operations harness blocked this rerun"
+            )
+
+        # Create new task with same positioning and runtime safety context.
         task_id = generate_task_id()
         task = TaskModel(
             id=task_id,
             account_id=draft.account_id,
             workflow_id="default_pipeline",
             status="pending",
-            input_data={"positioning": account.positioning},
+            input_data={
+                "positioning": account.positioning,
+                "ops_context": ops_context,
+            },
         )
         db.add(task)
         await db.flush()
