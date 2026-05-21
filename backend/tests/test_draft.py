@@ -196,6 +196,14 @@ class TestDraftService:
             scheduled["task"] = DummyTask()
             return scheduled["task"]
 
+        async def noop_coro() -> None:
+            return None
+
+        def noop_background(task_id: str):
+            scheduled["background_task_id"] = task_id
+            return noop_coro()
+
+        monkeypatch.setattr(draft_routes, "_run_task_in_background", noop_background)
         monkeypatch.setattr(draft_routes.asyncio, "create_task", fake_create_task)
         draft_routes._background_tasks.clear()
 
@@ -207,6 +215,7 @@ class TestDraftService:
         assert new_task is not None
         assert new_task.status == "pending"
         assert new_task.input_data["ops_context"]["run_strategy"]["effective_mode"] == "semi_auto"
+        assert scheduled["background_task_id"] == new_task_id
         assert draft_routes._background_tasks[new_task_id] is scheduled["task"]
 
         coro = scheduled.get("coro")
