@@ -1,5 +1,7 @@
 """Draft API endpoints."""
 
+import asyncio
+
 from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +30,30 @@ from app.services.publish_record_service import publish_record_service, PublishR
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/api/v1/drafts", tags=["drafts"])
+_background_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _run_task_in_background(task_id: str) -> None:
+    """Run a draft-rerun task in a dedicated DB session."""
+    from app.core.tracer import set_task_id
+    from app.db.session import async_session_factory
+    from app.services.task_service import task_service
+
+    async with async_session_factory() as bg_db:
+        try:
+            set_task_id(task_id)
+            await task_service.run_task(task_id, bg_db)
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+        finally:
+            _background_tasks.pop(task_id, None)
+
+
+def _schedule_task_in_background(task_id: str) -> None:
+    bg_task = asyncio.create_task(_run_task_in_background(task_id))
+    _background_tasks[task_id] = bg_task
 
 
 @router.get("", response_model=DraftListResponse)
@@ -220,6 +246,7 @@ async def rerun_draft(
     try:
         original_draft, new_task = await draft_service.rerun_from_draft(draft_id, db)
         await db.commit()
+        _schedule_task_in_background(new_task.id)
         return DraftRerunData(
             draft_id=original_draft.id,
             original_task_id=original_draft.task_id,
