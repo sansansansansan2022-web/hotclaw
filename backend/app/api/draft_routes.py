@@ -51,6 +51,11 @@ async def _run_task_in_background(task_id: str) -> None:
             _background_tasks.pop(task_id, None)
 
 
+def _schedule_task_in_background(task_id: str) -> None:
+    bg_task = asyncio.create_task(_run_task_in_background(task_id))
+    _background_tasks[task_id] = bg_task
+
+
 @router.get("", response_model=DraftListResponse)
 async def list_drafts(
     page: int = Query(1, ge=1),
@@ -241,8 +246,7 @@ async def rerun_draft(
     try:
         original_draft, new_task = await draft_service.rerun_from_draft(draft_id, db)
         await db.commit()
-        bg_task = asyncio.create_task(_run_task_in_background(new_task.id))
-        _background_tasks[new_task.id] = bg_task
+        _schedule_task_in_background(new_task.id)
         return DraftRerunData(
             draft_id=original_draft.id,
             original_task_id=original_draft.task_id,

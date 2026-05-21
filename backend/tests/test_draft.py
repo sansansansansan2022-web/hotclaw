@@ -188,23 +188,10 @@ class TestDraftService:
     async def test_rerun_api_schedules_created_task(self, client, db_session, pending_draft, monkeypatch):
         scheduled: dict[str, object] = {}
 
-        class DummyTask:
-            pass
-
-        def fake_create_task(coro):
-            scheduled["coro"] = coro
-            scheduled["task"] = DummyTask()
-            return scheduled["task"]
-
-        async def noop_coro() -> None:
-            return None
-
-        def noop_background(task_id: str):
+        def fake_schedule_task(task_id: str) -> None:
             scheduled["background_task_id"] = task_id
-            return noop_coro()
 
-        monkeypatch.setattr(draft_routes, "_run_task_in_background", noop_background)
-        monkeypatch.setattr(draft_routes.asyncio, "create_task", fake_create_task)
+        monkeypatch.setattr(draft_routes, "_schedule_task_in_background", fake_schedule_task)
         draft_routes._background_tasks.clear()
 
         response = await client.post(f"/api/v1/drafts/{pending_draft.id}/rerun")
@@ -216,11 +203,6 @@ class TestDraftService:
         assert new_task.status == "pending"
         assert new_task.input_data["ops_context"]["run_strategy"]["effective_mode"] == "semi_auto"
         assert scheduled["background_task_id"] == new_task_id
-        assert draft_routes._background_tasks[new_task_id] is scheduled["task"]
-
-        coro = scheduled.get("coro")
-        if coro is not None:
-            coro.close()
 
     @pytest.mark.asyncio
     async def test_pending_count(self, db_session, pending_draft):
