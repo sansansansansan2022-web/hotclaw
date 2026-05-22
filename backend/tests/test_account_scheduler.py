@@ -198,6 +198,64 @@ class TestAccountServiceRun:
         assert account.last_error_message is None
         assert task.id is not None
 
+    @pytest.mark.asyncio
+    async def test_scheduler_preserves_task_service_failure_status(self, db_session, monkeypatch):
+        """
+        Scheduler must not overwrite a task_service-persisted failure as success.
+        """
+        from app.db import session as session_module
+        from app.scheduler.account_scheduler import AccountScheduler
+        from app.services.task_service import task_service
+
+        account = AccountModel(
+            id="test-scheduler-failed-task",
+            name="Scheduler Failed Task",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            posting_frequency="weekly",
+            last_run_status="never_run",
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        class _SessionContext:
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        monkeypatch.setattr(session_module, "async_session_factory", lambda: _SessionContext())
+
+        async def fake_run_task(task_id: str, db):
+            task = await db.get(TaskModel, task_id)
+            task.status = "failed"
+            task.error_message = "orchestrator exploded"
+            task.completed_at = datetime.now(timezone.utc)
+            db.add(task)
+            await account_service.update_account_run_status(
+                account.id, db, "failed", task.error_message
+            )
+            await db.commit()
+
+        monkeypatch.setattr(task_service, "run_task", fake_run_task)
+
+        scheduler = AccountScheduler()
+        await scheduler._run_account_task(account.id)
+
+        await db_session.refresh(account)
+        task_result = await db_session.execute(
+            select(TaskModel).where(TaskModel.account_id == account.id)
+        )
+        task = task_result.scalar_one()
+
+        assert task.status == "failed"
+        assert account.last_run_status == "failed"
+        assert account.last_error_message == "orchestrator exploded"
+
     # -------------------------------------------------------------------------
     # Test: Update account run status
     # -------------------------------------------------------------------------
