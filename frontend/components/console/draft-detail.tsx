@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   confirmPublishDraft,
@@ -65,9 +65,16 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
   const [previewMode, setPreviewMode] = useState<PreviewMode>("html");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
 
   const load = async () => {
-    if (!Number.isFinite(parsedId)) {
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
+    const currentDraftId = Number(draftId);
+
+    if (!Number.isFinite(currentDraftId)) {
+      setDetail(null);
+      setRecords([]);
       setLoading(false);
       setError(locale === "zh-CN" ? "草稿 ID 必须是数字。" : "Draft id must be numeric.");
       return;
@@ -79,15 +86,25 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
       setDetail(null);
       setRecords([]);
       const [detailRes, recordRes] = await Promise.all([
-        getDraft(parsedId),
-        getDraftPublishRecords(parsedId).catch(() => ({ draft_id: parsedId, total: 0, records: [] })),
+        getDraft(currentDraftId),
+        getDraftPublishRecords(currentDraftId).catch(() => ({ draft_id: currentDraftId, total: 0, records: [] })),
       ]);
+      if (loadRequestRef.current !== requestId) return;
+      if (detailRes.id !== currentDraftId) {
+        throw new Error(locale === "zh-CN" ? "草稿响应与当前页面不匹配。" : "Draft response does not match the current page.");
+      }
       setDetail(detailRes);
       setRecords(recordRes.records);
+      if (!detailRes.content_html && detailRes.content_markdown) {
+        setPreviewMode("markdown");
+      }
     } catch (loadError) {
+      if (loadRequestRef.current !== requestId) return;
       setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载草稿详情。" : "Unable to load draft detail.");
     } finally {
-      setLoading(false);
+      if (loadRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
   };
 
@@ -96,7 +113,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
   }, [draftId]);
 
   const actions = useMemo(() => {
-    if (!detail) return { canApprove: false, canReject: false, canDiscard: false, canPublish: false, canRetry: false };
+    if (!detail || loading || detail.id !== parsedId) return { canApprove: false, canReject: false, canDiscard: false, canPublish: false, canRetry: false };
     return {
       canApprove: detail.draft_status === "pending_review",
       canReject: detail.draft_status === "pending_review",
@@ -104,7 +121,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
       canPublish: detail.draft_status === "approved" && detail.publish_status !== "published",
       canRetry: detail.publish_status === "failed",
     };
-  }, [detail]);
+  }, [detail, loading, parsedId]);
 
   const insights = useMemo(() => {
     const sections = normalizeSectionDrafts(detail?.section_drafts);
