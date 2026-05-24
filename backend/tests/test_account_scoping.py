@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import pytest_asyncio
 
-from app.api import account_routes
+from app.api import account_routes, draft_routes
 from app.models.tables import AccountModel, ArticleDraftModel, TaskModel
 from app.services.account_service import account_service
 
@@ -189,6 +189,86 @@ async def test_account_run_api_creates_account_owned_task_and_schedules_backgrou
     assert body["account_id"] == account.id
     assert body["status"] == "pending"
     assert account_routes._background_tasks[task_id] is scheduled["task"]
+
+    coro = scheduled.get("coro")
+    if coro is not None:
+        coro.close()
+
+
+@pytest.mark.asyncio
+async def test_disable_account_api_persists(client, db_session):
+    account = AccountModel(
+        id="acct-disable-api",
+        name="Disable API",
+        positioning="Disable account positioning",
+        operation_mode="semi_auto",
+        auto_run_enabled=True,
+        is_active=True,
+    )
+    db_session.add(account)
+    await db_session.commit()
+
+    resp = await client.post(f"/api/v1/accounts/{account.id}/disable")
+
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is False
+
+    await db_session.rollback()
+    await db_session.refresh(account)
+    assert account.is_active is False
+
+
+@pytest.mark.asyncio
+async def test_draft_rerun_api_schedules_background_task(client, db_session, monkeypatch):
+    account = AccountModel(
+        id="acct-draft-rerun-api",
+        name="Draft Rerun API",
+        positioning="Draft rerun positioning",
+        operation_mode="semi_auto",
+        is_active=True,
+    )
+    task = TaskModel(
+        id="task-draft-rerun-api",
+        account_id=account.id,
+        workflow_id="default_pipeline",
+        status="completed",
+        input_data={"positioning": account.positioning},
+    )
+    draft = ArticleDraftModel(
+        task_id=task.id,
+        account_id=account.id,
+        title="Rerunnable Draft",
+        content_markdown="# Rerunnable",
+        word_count=20,
+        draft_status="approved",
+        publish_status="not_published",
+        source_type="semi_auto_task",
+    )
+    db_session.add_all([account, task, draft])
+    await db_session.commit()
+
+    scheduled: dict[str, object] = {}
+
+    class DummyTask:
+        pass
+
+    def fake_create_task(coro):
+        scheduled["coro"] = coro
+        scheduled["task"] = DummyTask()
+        return scheduled["task"]
+
+    monkeypatch.setattr(draft_routes.asyncio, "create_task", fake_create_task)
+    draft_routes._background_tasks.clear()
+
+    resp = await client.post(f"/api/v1/drafts/{draft.id}/rerun")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    new_task_id = body["new_task_id"]
+    new_task = await db_session.get(TaskModel, new_task_id)
+    assert new_task is not None
+    assert new_task.status == "pending"
+    assert draft_routes._background_tasks[new_task_id] is scheduled["task"]
 
     coro = scheduled.get("coro")
     if coro is not None:
