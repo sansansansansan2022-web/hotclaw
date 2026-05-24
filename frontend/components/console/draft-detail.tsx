@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   confirmPublishDraft,
@@ -65,8 +65,11 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
   const [previewMode, setPreviewMode] = useState<PreviewMode>("html");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadSeqRef = useRef(0);
 
   const load = async () => {
+    const loadSeq = loadSeqRef.current + 1;
+    loadSeqRef.current = loadSeq;
     if (!Number.isFinite(parsedId)) {
       setLoading(false);
       setError(locale === "zh-CN" ? "草稿 ID 必须是数字。" : "Draft id must be numeric.");
@@ -82,12 +85,16 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
         getDraft(parsedId),
         getDraftPublishRecords(parsedId).catch(() => ({ draft_id: parsedId, total: 0, records: [] })),
       ]);
+      if (loadSeqRef.current !== loadSeq || detailRes.id !== parsedId) return;
       setDetail(detailRes);
       setRecords(recordRes.records);
     } catch (loadError) {
+      if (loadSeqRef.current !== loadSeq) return;
       setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载草稿详情。" : "Unable to load draft detail.");
     } finally {
-      setLoading(false);
+      if (loadSeqRef.current === loadSeq) {
+        setLoading(false);
+      }
     }
   };
 
@@ -96,7 +103,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
   }, [draftId]);
 
   const actions = useMemo(() => {
-    if (!detail) return { canApprove: false, canReject: false, canDiscard: false, canPublish: false, canRetry: false };
+    if (!detail || detail.id !== parsedId) return { canApprove: false, canReject: false, canDiscard: false, canPublish: false, canRetry: false };
     return {
       canApprove: detail.draft_status === "pending_review",
       canReject: detail.draft_status === "pending_review",
@@ -104,7 +111,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
       canPublish: detail.draft_status === "approved" && detail.publish_status !== "published",
       canRetry: detail.publish_status === "failed",
     };
-  }, [detail]);
+  }, [detail, parsedId]);
 
   const insights = useMemo(() => {
     const sections = normalizeSectionDrafts(detail?.section_drafts);
@@ -129,6 +136,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
   const missingDraft = Boolean(error && /(not found|unavailable)/i.test(error));
 
   const runAction = async (callback: () => Promise<unknown>, successTitle: string, successMessage: string) => {
+    if (!detail || detail.id !== parsedId) return;
     try {
       await callback();
       pushToast({ tone: "success", title: successTitle, message: successMessage });
