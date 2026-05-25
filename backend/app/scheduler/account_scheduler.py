@@ -211,6 +211,15 @@ class AccountScheduler:
                 # Run the task
                 try:
                     await task_service.run_task(task.id, db)
+                    await db.refresh(task)
+                    if task.status != "completed":
+                        logger.warning(
+                            "account_auto_run_finished_without_success",
+                            account_id=account_id,
+                            task_id=task.id,
+                            task_status=task.status,
+                        )
+                        return
                     # Task succeeded - update status
                     await account_service.update_account_run_status(account_id, db, "success")
                 except Exception as task_error:
@@ -225,8 +234,8 @@ class AccountScheduler:
                     await account_service.update_account_run_status(
                         account_id, db, "failed", error_msg
                     )
-                    # Re-raise to update task status
-                    raise
+                    await db.commit()
+                    return
 
                 # Refresh next run time after completion
                 await account_service.refresh_next_run(account_id, db)
