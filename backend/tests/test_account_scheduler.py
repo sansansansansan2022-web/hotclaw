@@ -243,6 +243,71 @@ class TestAccountServiceRun:
         assert len(semi_auto_account.last_error_message) <= 500
 
 
+@pytest.mark.asyncio
+async def test_scheduler_does_not_overwrite_failed_task_as_success(db_session, monkeypatch):
+    account = AccountModel(
+        id="test-scheduler-preserve-failure",
+        name="Scheduler Preserve Failure",
+        positioning="Scheduler failure should remain visible.",
+        operation_mode="semi_auto",
+        auto_run_enabled=True,
+        is_active=True,
+        next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        posting_frequency="daily",
+        last_run_status="never_run",
+    )
+    db_session.add(account)
+    await db_session.commit()
+
+    class ExistingSessionFactory:
+        def __call__(self):
+            return self
+
+        async def __aenter__(self):
+            return db_session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    async def fake_evaluate_account_run(*args, **kwargs):
+        return {
+            "run_strategy": {
+                "allow_run": True,
+                "effective_mode": "semi_auto",
+                "allow_auto_publish": False,
+                "preferred_reference_source_ids": [],
+                "avoid_recent_topics": [],
+            },
+            "ops_notes": [],
+            "fallback_used": True,
+        }
+
+    async def fake_run_task(task_id, db):
+        task = await db.get(TaskModel, task_id)
+        task.status = "failed"
+        task.error_message = "boom"
+        db.add(task)
+        await db.flush()
+        await account_service.update_account_run_status(account.id, db, "failed", "boom")
+        await db.commit()
+
+    from app.scheduler.account_scheduler import AccountScheduler
+    from app.services.task_service import task_service
+
+    monkeypatch.setattr("app.db.session.async_session_factory", ExistingSessionFactory())
+    monkeypatch.setattr(
+        "app.services.account_service.account_harness_service.evaluate_account_run",
+        fake_evaluate_account_run,
+    )
+    monkeypatch.setattr(task_service, "run_task", fake_run_task)
+
+    await AccountScheduler()._run_account_task(account.id)
+
+    refreshed = await db_session.get(AccountModel, account.id)
+    assert refreshed.last_run_status == "failed"
+    assert refreshed.last_error_message == "boom"
+
+
 class TestSchedulerEligibility:
     """Test scheduler eligibility checks."""
 
