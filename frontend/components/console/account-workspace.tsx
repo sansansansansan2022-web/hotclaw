@@ -380,7 +380,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
       const [account, tasksRes, draftsRes, pendingRes, wechatConfig] = await Promise.all([
         getAccount(accountId),
         listAccountTasks(accountId, 1, 8),
-        listDrafts(1, 8, { account_id: accountId }),
+        listDrafts(1, 8, { account_id: accountId, draft_status: "pending_review" }),
         getPendingDraftCount(accountId).catch(() => ({ count: 0 })),
         getWeChatConfig(accountId).catch(() => null),
       ]);

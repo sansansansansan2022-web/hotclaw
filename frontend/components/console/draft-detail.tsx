@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   confirmPublishDraft,
@@ -65,8 +65,12 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
   const [previewMode, setPreviewMode] = useState<PreviewMode>("html");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const loadSeq = useRef(0);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const seq = loadSeq.current + 1;
+    loadSeq.current = seq;
+
     if (!Number.isFinite(parsedId)) {
       setLoading(false);
       setError(locale === "zh-CN" ? "草稿 ID 必须是数字。" : "Draft id must be numeric.");
@@ -82,18 +86,22 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
         getDraft(parsedId),
         getDraftPublishRecords(parsedId).catch(() => ({ draft_id: parsedId, total: 0, records: [] })),
       ]);
+      if (loadSeq.current !== seq || detailRes.id !== parsedId) return;
       setDetail(detailRes);
       setRecords(recordRes.records);
     } catch (loadError) {
+      if (loadSeq.current !== seq) return;
       setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载草稿详情。" : "Unable to load draft detail.");
     } finally {
-      setLoading(false);
+      if (loadSeq.current === seq) {
+        setLoading(false);
+      }
     }
-  };
+  }, [locale, parsedId]);
 
   useEffect(() => {
     void load();
-  }, [draftId]);
+  }, [load]);
 
   const actions = useMemo(() => {
     if (!detail) return { canApprove: false, canReject: false, canDiscard: false, canPublish: false, canRetry: false };
@@ -202,7 +210,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
                 disabled={!actions.canApprove}
                 onClick={() =>
                   void runAction(
-                    () => confirmPublishDraft(parsedId),
+                    () => confirmPublishDraft(detail.id),
                     locale === "zh-CN" ? "草稿已通过" : "Draft approved",
                     locale === "zh-CN" ? "该草稿已确认可发布。" : "The draft was confirmed for publishing.",
                   )
@@ -215,7 +223,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
                 disabled={!actions.canReject}
                 onClick={() =>
                   void runAction(
-                    () => rejectDraft(parsedId),
+                    () => rejectDraft(detail.id),
                     locale === "zh-CN" ? "草稿已拒绝" : "Draft rejected",
                     locale === "zh-CN" ? "该草稿已被标记为拒绝。" : "The draft has been marked as rejected.",
                   )
@@ -228,7 +236,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
                 disabled={!actions.canDiscard}
                 onClick={() =>
                   void runAction(
-                    () => discardDraft(parsedId),
+                    () => discardDraft(detail.id),
                     locale === "zh-CN" ? "草稿已丢弃" : "Draft discarded",
                     locale === "zh-CN" ? "该草稿已被丢弃。" : "The draft has been discarded.",
                   )
@@ -241,7 +249,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
                 disabled={!actions.canPublish}
                 onClick={() =>
                   void runAction(
-                    () => publishDraftToWeChat(parsedId),
+                    () => publishDraftToWeChat(detail.id),
                     locale === "zh-CN" ? "发布已开始" : "Publish started",
                     locale === "zh-CN" ? "草稿已进入微信发布流水线。" : "The draft was sent to the WeChat publish pipeline.",
                   )
@@ -254,7 +262,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
                 disabled={!actions.canRetry}
                 onClick={() =>
                   void runAction(
-                    () => retryPublishDraft(parsedId),
+                    () => retryPublishDraft(detail.id),
                     locale === "zh-CN" ? "重试已开始" : "Retry started",
                     locale === "zh-CN" ? "已经创建新的发布重试记录。" : "A retry publish attempt was created.",
                   )
@@ -266,7 +274,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
                 variant="ghost"
                 onClick={() =>
                   void runAction(
-                    () => rerunFromDraft(parsedId),
+                    () => rerunFromDraft(detail.id),
                     locale === "zh-CN" ? "重跑已加入队列" : "Rerun queued",
                     locale === "zh-CN" ? "已基于这条草稿创建新的任务。" : "A new task was created from this draft.",
                   )
