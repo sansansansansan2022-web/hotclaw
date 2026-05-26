@@ -2,6 +2,8 @@
 Tests for Draft (Article Draft) functionality.
 """
 
+import asyncio
+
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone
@@ -181,6 +183,37 @@ class TestDraftService:
         original_draft, new_task = await draft_service.rerun_from_draft(pending_draft.id, db_session)
         assert original_draft.id == pending_draft.id
         assert new_task.account_id == pending_draft.account_id
+        assert isinstance(new_task.input_data, dict)
+        assert isinstance(new_task.input_data.get("ops_context"), dict)
+
+    @pytest.mark.asyncio
+    async def test_rerun_endpoint_schedules_created_task(self, client, db_session, pending_draft, monkeypatch):
+        started = asyncio.Event()
+        captured: dict[str, str | None] = {}
+
+        async def _fake_background(task_id: str, account_id: str | None):
+            captured["task_id"] = task_id
+            captured["account_id"] = account_id
+            started.set()
+
+        monkeypatch.setattr(
+            "app.api.draft_routes._run_draft_rerun_task_in_background",
+            _fake_background,
+        )
+
+        response = await client.post(f"/api/v1/drafts/{pending_draft.id}/rerun")
+        assert response.status_code == 200, response.text
+        data = response.json()
+
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert captured["task_id"] == data["new_task_id"]
+        assert captured["account_id"] == pending_draft.account_id
+
+        result = await db_session.execute(select(TaskModel).where(TaskModel.id == data["new_task_id"]))
+        task = result.scalar_one()
+        assert task.status == "pending"
+        assert isinstance(task.input_data, dict)
+        assert isinstance(task.input_data.get("ops_context"), dict)
 
     @pytest.mark.asyncio
     async def test_pending_count(self, db_session, pending_draft):

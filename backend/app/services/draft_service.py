@@ -14,7 +14,6 @@ from app.core.exceptions import (
     DraftCreateError,
 )
 from app.core.logger import get_logger
-from app.core.tracer import generate_task_id
 from app.models.tables import ArticleDraftModel, AuditResultModel, TaskModel, AccountModel
 from app.models.wechat_config import WeChatConfigModel, WeChatPublishRecordModel
 from app.services.article_assembler_service import article_assembler_service
@@ -627,22 +626,14 @@ class DraftService:
                 f"account {draft.account_id} not found"
             )
 
-        # Create new task with same positioning
-        task_id = generate_task_id()
-        task = TaskModel(
-            id=task_id,
-            account_id=draft.account_id,
-            workflow_id="default_pipeline",
-            status="pending",
-            input_data={"positioning": account.positioning},
-        )
-        db.add(task)
-        await db.flush()
+        from app.services.account_service import account_service
+
+        _, task = await account_service.run_account(account.id, db, allow_auto=False)
         logger.info(
             "draft_rerun_created",
             draft_id=draft_id,
             original_task_id=draft.task_id,
-            new_task_id=task_id,
+            new_task_id=task.id,
             account_id=draft.account_id
         )
 
