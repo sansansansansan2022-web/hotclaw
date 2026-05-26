@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, ArticleDraftModel, TaskModel
+from app.services.account_harness_service import account_harness_service
 from app.services.task_service import task_service
 
 
@@ -15,6 +16,48 @@ async def _create_account(client, payload: dict) -> str:
     response = await client.post("/api/v1/accounts", json=payload)
     assert response.status_code == 201, response.text
     return response.json()["account_id"]
+
+
+def test_ops_harness_caps_agent_mode_escalation_to_configured_plan():
+    snapshot = {
+        "account": {"account_id": "acc-cap", "name": "Cap Account"},
+        "automation_plan": {"plan_type": "semi_auto"},
+        "trigger": {"source": "manual", "requested_plan_type": "semi_auto"},
+        "reference_sources": [{"id": "ref-1"}],
+        "recent_tasks": [],
+        "recent_drafts": [],
+        "recent_publishes": [],
+        "signals": {
+            "enabled_reference_source_count": 1,
+            "pending_review_count": 0,
+            "recent_failed_publish_count": 0,
+            "recent_success_publish_count": 0,
+            "recent_failed_task_count": 0,
+            "preferred_content_lane": None,
+        },
+    }
+    agent_data = {
+        "account_health": {"status": "ready", "issues": []},
+        "operation_stage": "ready",
+        "run_strategy": {
+            "allow_run": True,
+            "effective_mode": "full_auto",
+            "allow_auto_publish": True,
+            "preferred_reference_source_ids": ["ref-1"],
+        },
+        "ops_notes": [],
+    }
+
+    context = account_harness_service._normalize_ops_context(
+        snapshot,
+        agent_data,
+        fallback_used=False,
+    )
+
+    run_strategy = context["run_strategy"]
+    assert run_strategy["requested_mode"] == "semi_auto"
+    assert run_strategy["effective_mode"] == "semi_auto"
+    assert run_strategy["allow_auto_publish"] is False
 
 
 @pytest.mark.asyncio

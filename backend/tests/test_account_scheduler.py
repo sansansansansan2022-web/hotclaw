@@ -13,6 +13,7 @@ import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.tables import AccountModel, TaskModel
 from app.services.account_service import account_service
@@ -422,6 +423,103 @@ class TestAccountCRUDWithStatus:
                 {"operation_mode": "bad_mode"},
                 db_session
             )
+
+    @pytest.mark.asyncio
+    async def test_disable_account_api_persists_inactive_status(self, client, db_session):
+        account = AccountModel(
+            id="test-disable-api",
+            name="Disable API",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        response = await client.post(f"/api/v1/accounts/{account.id}/disable")
+        assert response.status_code == 200, response.text
+        assert response.json()["is_active"] is False
+
+        result = await db_session.execute(select(AccountModel).where(AccountModel.id == account.id))
+        saved_account = result.scalar_one()
+        assert saved_account.is_active is False
+
+    @pytest.mark.asyncio
+    async def test_scheduler_does_not_overwrite_failed_task_as_success(
+        self, db_session, monkeypatch
+    ):
+        from app.scheduler.account_scheduler import AccountScheduler
+        from app.services.task_service import task_service
+
+        account = AccountModel(
+            id="test-scheduler-failed-task",
+            name="Scheduler Failed Task",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            posting_frequency="daily",
+            last_run_status="never_run",
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        async def _fake_run_task(task_id, db):
+            task_result = await db.execute(select(TaskModel).where(TaskModel.id == task_id))
+            task = task_result.scalar_one()
+            task.status = "failed"
+            task.error_message = "orchestrator boom"
+            task.completed_at = datetime.now(timezone.utc)
+            db.add(task)
+
+            account_result = await db.execute(
+                select(AccountModel).where(AccountModel.id == task.account_id)
+            )
+            saved_account = account_result.scalar_one()
+            saved_account.last_run_status = "failed"
+            saved_account.last_error_message = "orchestrator boom"
+            db.add(saved_account)
+            await db.commit()
+
+        session_factory = async_sessionmaker(
+            db_session.bind,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        monkeypatch.setattr("app.db.session.async_session_factory", session_factory)
+        monkeypatch.setattr(task_service, "run_task", _fake_run_task)
+
+        scheduler = AccountScheduler()
+        await scheduler._run_account_task(account.id)
+
+        await db_session.refresh(account)
+        result = await db_session.execute(select(AccountModel).where(AccountModel.id == account.id))
+        saved_account = result.scalar_one()
+        assert saved_account.last_run_status == "failed"
+        assert saved_account.last_error_message == "orchestrator boom"
+
+        task_result = await db_session.execute(
+            select(TaskModel).where(TaskModel.account_id == account.id)
+        )
+        saved_task = task_result.scalar_one()
+        assert saved_task.status == "failed"
+
+    def test_scheduler_eligibility_accepts_naive_due_timestamp(self):
+        from app.scheduler.account_scheduler import AccountScheduler
+
+        account = AccountModel(
+            id="test-naive-next-run",
+            name="Naive Next Run",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=(datetime.now(timezone.utc) - timedelta(hours=1)).replace(tzinfo=None),
+        )
+
+        assert AccountScheduler()._is_eligible_for_auto_run(account) is True
 
 
 class TestDueAccountsExcludesRunningTasks:

@@ -216,6 +216,14 @@ class AccountHarnessService:
             else str(signals.get("preferred_content_lane") or "").strip() or None
         )
 
+        mode_rank = {"manual": 0, "semi_auto": 1, "full_auto": 2}
+        if effective_mode not in mode_rank:
+            effective_mode = requested_mode
+        if mode_rank.get(effective_mode, 0) > mode_rank.get(requested_mode, 0):
+            effective_mode = requested_mode
+            allow_auto_publish = False
+            ops_notes.append("Ops agent requested a more permissive mode, so this run was capped to the configured plan.")
+
         degrade_reasons: list[str] = []
         if requested_mode == "full_auto":
             if signals["enabled_reference_source_count"] < self.MIN_REFERENCE_SOURCES_FOR_FULL_AUTO:
