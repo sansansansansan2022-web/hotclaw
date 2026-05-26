@@ -168,7 +168,10 @@ class AccountScheduler:
             return False
         # Must be past next_run_at
         now = datetime.now(timezone.utc)
-        if account.next_run_at > now:
+        next_run_at = account.next_run_at
+        if next_run_at.tzinfo is None:
+            next_run_at = next_run_at.replace(tzinfo=timezone.utc)
+        if next_run_at > now:
             return False
         return True
 

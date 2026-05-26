@@ -506,6 +506,21 @@ class TestAccountCRUDWithStatus:
         saved_task = task_result.scalar_one()
         assert saved_task.status == "failed"
 
+    def test_scheduler_eligibility_accepts_naive_due_timestamp(self):
+        from app.scheduler.account_scheduler import AccountScheduler
+
+        account = AccountModel(
+            id="test-naive-next-run",
+            name="Naive Next Run",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=(datetime.now(timezone.utc) - timedelta(hours=1)).replace(tzinfo=None),
+        )
+
+        assert AccountScheduler()._is_eligible_for_auto_run(account) is True
+
 
 class TestDueAccountsExcludesRunningTasks:
     """Test that get_due_accounts excludes accounts with pending/running tasks."""
