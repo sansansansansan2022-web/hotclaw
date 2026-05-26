@@ -13,8 +13,8 @@ import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from conftest import test_session_factory
 from app.models.tables import AccountModel, TaskModel
 from app.services.account_service import account_service
 from app.core.exceptions import (
@@ -483,7 +483,12 @@ class TestAccountCRUDWithStatus:
             db.add(saved_account)
             await db.commit()
 
-        monkeypatch.setattr("app.db.session.async_session_factory", test_session_factory)
+        session_factory = async_sessionmaker(
+            db_session.bind,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        monkeypatch.setattr("app.db.session.async_session_factory", session_factory)
         monkeypatch.setattr(task_service, "run_task", _fake_run_task)
 
         scheduler = AccountScheduler()
