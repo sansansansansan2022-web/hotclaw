@@ -6,9 +6,114 @@ import json
 import re
 from copy import deepcopy
 from html import escape
+from html.parser import HTMLParser
 from typing import Any
 
 from app.services.reference_digest_service import reference_digest_service
+
+
+class _SafeHtmlParser(HTMLParser):
+    """Allow a small article-formatting subset and strip active content."""
+
+    ALLOWED_TAGS = {
+        "a",
+        "blockquote",
+        "br",
+        "code",
+        "em",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "i",
+        "img",
+        "li",
+        "ol",
+        "p",
+        "pre",
+        "strong",
+        "ul",
+    }
+    BLOCKED_CONTENT_TAGS = {"script", "style", "iframe", "object", "embed", "svg", "math"}
+    VOID_TAGS = {"br", "img"}
+    URI_ATTRS = {"href", "src"}
+    ALLOWED_ATTRS = {
+        "a": {"href", "title", "target", "rel"},
+        "img": {"src", "alt", "title"},
+    }
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._blocked_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if self._blocked_depth or tag in self.BLOCKED_CONTENT_TAGS:
+            self._blocked_depth += 1
+            return
+        if tag not in self.ALLOWED_TAGS:
+            return
+
+        rendered_attrs = self._render_attrs(tag, attrs)
+        if tag in self.VOID_TAGS:
+            self.parts.append(f"<{tag}{rendered_attrs}/>")
+        else:
+            self.parts.append(f"<{tag}{rendered_attrs}>")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if self._blocked_depth or tag in self.BLOCKED_CONTENT_TAGS:
+            return
+        if tag not in self.ALLOWED_TAGS:
+            return
+
+        rendered_attrs = self._render_attrs(tag, attrs)
+        self.parts.append(f"<{tag}{rendered_attrs}/>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if self._blocked_depth:
+            self._blocked_depth -= 1
+            return
+        if tag in self.ALLOWED_TAGS and tag not in self.VOID_TAGS:
+            self.parts.append(f"</{tag}>")
+
+    def handle_data(self, data: str) -> None:
+        if not self._blocked_depth:
+            self.parts.append(escape(data, quote=False))
+
+    def _render_attrs(self, tag: str, attrs: list[tuple[str, str | None]]) -> str:
+        allowed_attrs = self.ALLOWED_ATTRS.get(tag, set())
+        rendered: list[str] = []
+        for raw_name, raw_value in attrs:
+            name = raw_name.lower().strip()
+            if name not in allowed_attrs or raw_value is None:
+                continue
+            value = str(raw_value).strip()
+            if name in self.URI_ATTRS and not self._is_safe_uri(value):
+                continue
+            if name == "target" and value not in {"_blank", "_self", "_parent", "_top"}:
+                continue
+            if name == "rel" and tag == "a":
+                value = " ".join(part for part in value.split() if part in {"noopener", "noreferrer", "nofollow"})
+                if not value:
+                    continue
+            rendered.append(f' {name}="{escape(value, quote=True)}"')
+
+        if tag == "a" and any(attr.startswith(' target="_blank"') for attr in rendered):
+            rel_attr = next((attr for attr in rendered if attr.startswith(" rel=")), None)
+            if rel_attr is None:
+                rendered.append(' rel="noopener noreferrer"')
+        return "".join(rendered)
+
+    def _is_safe_uri(self, value: str) -> bool:
+        normalized = value.strip().lower()
+        if not normalized:
+            return False
+        if normalized.startswith(("#", "/", "./", "../")):
+            return True
+        return normalized.startswith(("http://", "https://", "mailto:", "tel:"))
 
 
 class ArticleAssemblerService:
@@ -605,13 +710,19 @@ class ArticleAssemblerService:
     def ensure_content_html(self, content_html: Any, content_markdown: Any) -> str | None:
         html = self._clean_text(content_html)
         if html:
-            return html
+            return self._sanitize_html(html) or None
 
         markdown = self._clean_text(content_markdown)
         if not markdown:
             return None
 
         return self._markdown_to_html(markdown)
+
+    def _sanitize_html(self, html: str) -> str:
+        parser = _SafeHtmlParser()
+        parser.feed(html)
+        parser.close()
+        return "".join(parser.parts).strip()
 
     def _markdown_to_html(self, markdown: str) -> str:
         normalized = markdown.replace("\r\n", "\n").strip()
