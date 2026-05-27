@@ -101,6 +101,10 @@ class _SafeHtmlParser(HTMLParser):
                     continue
             rendered.append(f' {name}="{escape(value, quote=True)}"')
 
+        if tag == "a" and not any(attr.startswith(" href=") for attr in rendered):
+            rendered = [
+                attr for attr in rendered if not attr.startswith((" target=", " rel="))
+            ]
         if tag == "a" and any(attr.startswith(' target="_blank"') for attr in rendered):
             rel_attr = next((attr for attr in rendered if attr.startswith(" rel=")), None)
             if rel_attr is None:
