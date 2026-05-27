@@ -319,6 +319,29 @@ def test_article_assembler_normalizes_legacy_content_shape():
     assert result["content"]["content_html"]
 
 
+def test_article_assembler_sanitizes_persisted_html_preview():
+    html = article_assembler_service.ensure_content_html(
+        """
+        <h1 onclick="alert(1)">Safe title</h1>
+        <script>alert("owned")</script>
+        <p>Body <img src="javascript:alert(1)" onerror="alert(2)" alt="bad image"></p>
+        <a href="javascript:alert(3)" target="_blank">bad link</a>
+        <a href="https://example.com/path" target="_blank">safe link</a>
+        """,
+        "",
+    )
+
+    assert html is not None
+    assert "<script" not in html
+    assert "owned" not in html
+    assert "onclick" not in html
+    assert "onerror" not in html
+    assert "javascript:" not in html
+    assert '<img alt="bad image"/>' in html
+    assert "<a>bad link</a>" in html
+    assert '<a href="https://example.com/path" target="_blank" rel="noopener noreferrer">safe link</a>' in html
+
+
 @pytest.mark.asyncio
 async def test_structured_pipeline_falls_back_to_legacy_writer(db_session, monkeypatch):
     task = TaskModel(
