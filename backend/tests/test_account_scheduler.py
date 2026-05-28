@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import account_scheduler
 from app.services.account_service import account_service
 from app.core.exceptions import (
     AccountNotFoundError,
@@ -361,6 +362,51 @@ class TestSchedulerEligibility:
         due_ids = [a.id for a in due_accounts]
 
         assert "test-due-no-auto" not in due_ids
+
+
+class TestSchedulerTaskExecution:
+    """Test scheduler interaction with task execution outcomes."""
+
+    @pytest.mark.asyncio
+    async def test_scheduler_preserves_failed_task_status(self, db_session, monkeypatch):
+        account = AccountModel(
+            id="test-scheduler-failure-account",
+            name="Scheduler Failure Account",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            posting_frequency="weekly",
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        class SessionContext:
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        async def fail_orchestrator(task, db):
+            raise RuntimeError("scheduler boom")
+
+        monkeypatch.setattr("app.db.session.async_session_factory", lambda: SessionContext())
+        monkeypatch.setattr("app.services.task_service.orchestrator_engine.run", fail_orchestrator)
+
+        await account_scheduler._run_account_task(account.id)
+
+        await db_session.refresh(account)
+        task_result = await db_session.execute(
+            select(TaskModel).where(TaskModel.account_id == account.id)
+        )
+        task = task_result.scalar_one()
+
+        assert task.status == "failed"
+        assert "scheduler boom" in task.error_message
+        assert account.last_run_status == "failed"
+        assert "scheduler boom" in account.last_error_message
 
 
 class TestAccountCRUDWithStatus:
