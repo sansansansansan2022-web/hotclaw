@@ -11,11 +11,13 @@ Covers:
 
 import pytest
 import pytest_asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
 from app.services.account_service import account_service
+from app.scheduler.account_scheduler import account_scheduler
 from app.core.exceptions import (
     AccountNotFoundError,
     AccountInactiveError,
@@ -656,3 +658,44 @@ class TestTemporaryTaskCompatibility:
         # The _refresh_account_next_run and _update_account_run_status_on_failure
         # methods should be called with None and gracefully skip
         # (This is implicitly tested - if there was an error, the test would fail)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_preserves_failed_task_status(db_session, monkeypatch):
+    """Scheduler must not overwrite a task_service failure as account success."""
+    account = AccountModel(
+        id="test-scheduler-failure-account",
+        name="Scheduler Failure Account",
+        positioning="Test positioning",
+        operation_mode="semi_auto",
+        auto_run_enabled=True,
+        is_active=True,
+        posting_frequency="daily",
+        next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        last_run_status="never_run",
+    )
+    db_session.add(account)
+    await db_session.commit()
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("orchestrator exploded")
+
+    @asynccontextmanager
+    async def _test_session_factory():
+        yield db_session
+
+    monkeypatch.setattr("app.services.task_service.orchestrator_engine.run", _boom)
+    monkeypatch.setattr("app.db.session.async_session_factory", _test_session_factory)
+
+    await account_scheduler._run_account_task(account.id)
+
+    await db_session.refresh(account)
+    task_result = await db_session.execute(
+        select(TaskModel).where(TaskModel.account_id == account.id)
+    )
+    task = task_result.scalar_one()
+
+    assert task.status == "failed"
+    assert task.error_message == "orchestrator exploded"
+    assert account.last_run_status == "failed"
+    assert account.last_error_message == "orchestrator exploded"
