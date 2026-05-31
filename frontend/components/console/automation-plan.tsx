@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createAutomationPlan,
   getAccount,
@@ -103,23 +103,35 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadSeqRef = useRef(0);
 
   const load = async () => {
+    const requestSeq = loadSeqRef.current + 1;
+    loadSeqRef.current = requestSeq;
     try {
       setLoading(true);
       setError(null);
+      setData(null);
+      setForm(null);
       const [account, plan] = await Promise.all([getAccount(accountId), getAutomationPlan(accountId)]);
+      if (loadSeqRef.current !== requestSeq || account.account_id !== accountId || plan.account_id !== accountId) return;
       setData({ account, plan });
       setForm(buildInitialForm(plan));
     } catch (loadError) {
+      if (loadSeqRef.current !== requestSeq) return;
       setError(loadError instanceof Error ? loadError.message : t("automationPlan.loadError"));
     } finally {
-      setLoading(false);
+      if (loadSeqRef.current === requestSeq) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     void load();
+    return () => {
+      loadSeqRef.current += 1;
+    };
   }, [accountId]);
 
   const formatDisplayDateTime = (value?: string | null) => {
@@ -154,7 +166,17 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
   }, [form, t, token]);
 
   const handleSave = async () => {
-    if (!form) return;
+    if (!form || !data) return;
+    if (loading || data.account.account_id !== accountId || data.plan.account_id !== accountId) {
+      pushToast({
+        tone: "warning",
+        title: t("automationPlan.saveFailedTitle"),
+        message: locale === "zh-CN" ? "请等待当前账号的自动化计划加载完成后再保存。" : "Wait for this account's automation plan to finish loading before saving.",
+      });
+      return;
+    }
+    const targetAccountId = accountId;
+    const saveSeq = loadSeqRef.current;
 
     try {
       setSaving(true);
@@ -166,16 +188,18 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
 
       const saved =
         data?.plan.id == null
-          ? await createAutomationPlan(accountId, payload)
-          : await updateAutomationPlan(accountId, payload);
+          ? await createAutomationPlan(targetAccountId, payload)
+          : await updateAutomationPlan(targetAccountId, payload);
 
       pushToast({
         tone: "success",
         title: t("automationPlan.savedTitle"),
         message: t("automationPlan.savedMessage"),
       });
-      setData((current) => (current ? { ...current, plan: saved } : current));
-      setForm(buildInitialForm(saved));
+      if (loadSeqRef.current === saveSeq && saved.account_id === targetAccountId) {
+        setData((current) => (current && current.account.account_id === targetAccountId ? { ...current, plan: saved } : current));
+        setForm(buildInitialForm(saved));
+      }
     } catch (saveError) {
       pushToast({
         tone: "danger",
@@ -190,6 +214,7 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
   const planType = (form?.plan_type ?? "manual") as AutomationPlanType;
   const scheduleType = (form?.schedule_type ?? "none") as AutomationScheduleType;
   const runStrategy = (form?.run_strategy ?? "manual_only") as AutomationRunStrategy;
+  const formMatchesAccount = Boolean(data && data.account.account_id === accountId && data.plan.account_id === accountId);
 
   return (
     <div className="space-y-8">
@@ -546,13 +571,13 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-3 pt-2">
-                  <Button onClick={() => void handleSave()} disabled={saving}>
+                  <Button onClick={() => void handleSave()} disabled={saving || loading || !formMatchesAccount}>
                     <Icon name="check" className="h-4 w-4" />
                     {saving ? t("automationPlan.saving") : t("automationPlan.save")}
                   </Button>
                   <Button
                     variant="secondary"
-                    disabled={saving}
+                    disabled={saving || loading || !formMatchesAccount}
                     onClick={() => setForm(buildInitialForm(data.plan))}
                   >
                     {t("automationPlan.reset")}

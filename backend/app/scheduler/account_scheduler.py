@@ -168,7 +168,10 @@ class AccountScheduler:
             return False
         # Must be past next_run_at
         now = datetime.now(timezone.utc)
-        if account.next_run_at > now:
+        next_run_at = account.next_run_at
+        if next_run_at.tzinfo is None:
+            next_run_at = next_run_at.replace(tzinfo=timezone.utc)
+        if next_run_at > now:
             return False
         return True
 
@@ -211,6 +214,24 @@ class AccountScheduler:
                 # Run the task
                 try:
                     await task_service.run_task(task.id, db)
+                    task_after_run = await task_service.get_task(task.id, db)
+                    if task_after_run.status != "completed":
+                        error_msg = (
+                            task_after_run.error_message
+                            or f"Task finished with unexpected status: {task_after_run.status}"
+                        )
+                        await account_service.update_account_run_status(
+                            account_id, db, "failed", error_msg
+                        )
+                        await db.commit()
+                        logger.error(
+                            "account_task_failed",
+                            account_id=account_id,
+                            task_id=task.id,
+                            status=task_after_run.status,
+                            error=error_msg,
+                        )
+                        return
                     # Task succeeded - update status
                     await account_service.update_account_run_status(account_id, db, "success")
                 except Exception as task_error:

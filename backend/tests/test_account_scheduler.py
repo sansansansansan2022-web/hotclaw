@@ -9,12 +9,16 @@ Covers:
 5. Error message tracking
 """
 
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import AccountScheduler
 from app.services.account_service import account_service
 from app.core.exceptions import (
     AccountNotFoundError,
@@ -245,6 +249,18 @@ class TestAccountServiceRun:
 
 class TestSchedulerEligibility:
     """Test scheduler eligibility checks."""
+
+    def test_final_eligibility_accepts_naive_due_timestamp(self):
+        """Persisted naive datetimes should not crash the scheduler's final guard."""
+        scheduler = AccountScheduler()
+        account = SimpleNamespace(
+            is_active=True,
+            auto_run_enabled=True,
+            operation_mode="semi_auto",
+            next_run_at=datetime.now() - timedelta(minutes=5),
+        )
+
+        assert scheduler._is_eligible_for_auto_run(account) is True
 
     @pytest.mark.asyncio
     async def test_get_due_accounts_excludes_manual_mode(self, db_session):
@@ -656,3 +672,49 @@ class TestTemporaryTaskCompatibility:
         # The _refresh_account_next_run and _update_account_run_status_on_failure
         # methods should be called with None and gracefully skip
         # (This is implicitly tested - if there was an error, the test would fail)
+
+
+class TestSchedulerTaskStateSync:
+    """Regression tests for scheduler/task status synchronization."""
+
+    @pytest.mark.asyncio
+    async def test_scheduler_preserves_failed_task_status(self, db_session, monkeypatch):
+        """TaskService swallows orchestrator errors, so scheduler must inspect task status."""
+        account = AccountModel(
+            id="test-scheduler-failed-task",
+            name="Scheduler Failed Task",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            posting_frequency="daily",
+            next_run_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+            last_run_status="never_run",
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        @asynccontextmanager
+        async def _test_session_factory():
+            yield db_session
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("orchestrator exploded")
+
+        monkeypatch.setattr("app.db.session.async_session_factory", _test_session_factory)
+        monkeypatch.setattr("app.services.task_service.orchestrator_engine.run", _boom)
+
+        scheduler = AccountScheduler()
+        await scheduler._run_account_task(account.id)
+
+        refreshed_account = await db_session.get(AccountModel, account.id)
+        assert refreshed_account is not None
+        assert refreshed_account.last_run_status == "failed"
+        assert refreshed_account.last_error_message == "orchestrator exploded"
+
+        result = await db_session.execute(
+            select(TaskModel).where(TaskModel.account_id == account.id)
+        )
+        task = result.scalar_one()
+        assert task.status == "failed"
+        assert task.error_message == "orchestrator exploded"
