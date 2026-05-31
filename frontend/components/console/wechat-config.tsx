@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createWeChatConfig, getWeChatConfig, listAccounts, testWeChatConnection, updateWeChatConfig } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -39,12 +39,20 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadedAccountId, setLoadedAccountId] = useState<string | null>(null);
+  const loadSeqRef = useRef(0);
 
   const load = async (targetAccountId?: string | null) => {
+    const requestSeq = loadSeqRef.current + 1;
+    loadSeqRef.current = requestSeq;
     try {
       setLoading(true);
       setError(null);
+      setLoadedAccountId(null);
+      setExisting(null);
+      setForm(emptyForm);
       const accountsRes = await listAccounts(1, 100).catch(() => ({ accounts: [], pagination: { page: 1, page_size: 100, total: 0 } }));
+      if (loadSeqRef.current !== requestSeq) return;
       setAccounts(accountsRes.accounts);
 
       const resolvedAccountId = targetAccountId ?? accountId ?? accountsRes.accounts[0]?.account_id ?? null;
@@ -58,6 +66,7 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
 
       try {
         const config = await getWeChatConfig(resolvedAccountId);
+        if (loadSeqRef.current !== requestSeq) return;
         setExisting(config);
         setForm({
           app_id: "",
@@ -68,22 +77,32 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
           only_fans_can_comment: config.only_fans_can_comment,
           is_enabled: config.is_enabled,
         });
+        setLoadedAccountId(resolvedAccountId);
       } catch {
+        if (loadSeqRef.current !== requestSeq) return;
         setExisting(null);
         setForm(emptyForm);
+        setLoadedAccountId(resolvedAccountId);
       }
     } catch (loadError) {
+      if (loadSeqRef.current !== requestSeq) return;
       setError(loadError instanceof Error ? loadError.message : t("wechat.loadError"));
     } finally {
-      setLoading(false);
+      if (loadSeqRef.current === requestSeq) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     void load(accountId ?? null);
+    return () => {
+      loadSeqRef.current += 1;
+    };
   }, [accountId]);
 
   const selectedAccount = useMemo(() => accounts.find((account) => account.account_id === selectedAccountId) ?? null, [accounts, selectedAccountId]);
+  const formMatchesSelection = Boolean(selectedAccountId && loadedAccountId === selectedAccountId);
 
   const setField = <K extends keyof ConfigFormState>(key: K, value: ConfigFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -91,6 +110,16 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
 
   const submit = async () => {
     if (!selectedAccountId) return;
+    const targetAccountId = selectedAccountId;
+    if (loading || !formMatchesSelection || (existing && existing.account_id !== targetAccountId)) {
+      pushToast({
+        tone: "warning",
+        title: locale === "zh-CN" ? "配置仍在加载" : "Config still loading",
+        message: locale === "zh-CN" ? "请等待当前账号的微信配置加载完成后再保存。" : "Wait for this account's WeChat config to finish loading before saving.",
+      });
+      return;
+    }
+    const submitSeq = loadSeqRef.current;
     try {
       setSaving(true);
       setError(null);
@@ -104,7 +133,7 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
           only_fans_can_comment: form.only_fans_can_comment,
           is_enabled: form.is_enabled,
         };
-        await updateWeChatConfig(selectedAccountId, payload);
+        await updateWeChatConfig(targetAccountId, payload);
         pushToast({ tone: "success", title: locale === "zh-CN" ? "微信配置已更新" : "WeChat config updated", message: locale === "zh-CN" ? "账号配置已成功保存。" : "The account configuration was saved." });
       } else {
         if (!form.app_id || !form.app_secret) {
@@ -112,7 +141,7 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
           return;
         }
         const payload: WeChatConfigCreate = {
-          account_id: selectedAccountId,
+          account_id: targetAccountId,
           app_id: form.app_id,
           app_secret: form.app_secret,
           default_author: form.default_author || undefined,
@@ -124,7 +153,9 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
         await createWeChatConfig(payload);
         pushToast({ tone: "success", title: locale === "zh-CN" ? "微信配置已创建" : "WeChat config created", message: locale === "zh-CN" ? "该账号现在已经绑定微信配置。" : "The account is now bound to a WeChat config." });
       }
-      await load(selectedAccountId);
+      if (loadSeqRef.current === submitSeq) {
+        await load(targetAccountId);
+      }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : (locale === "zh-CN" ? "无法保存微信配置" : "Unable to save WeChat config"));
     } finally {
@@ -173,7 +204,12 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
                 value={selectedAccountId ?? ""}
                 onChange={(event) => {
                   const nextId = event.target.value;
+                  loadSeqRef.current += 1;
                   setSelectedAccountId(nextId);
+                  setLoadedAccountId(null);
+                  setExisting(null);
+                  setForm(emptyForm);
+                  setLoading(true);
                   router.push(`/settings/wechat/${nextId}`);
                 }}
               >
@@ -276,10 +312,10 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
 
               <Card title={locale === "zh-CN" ? "操作" : "Actions"} description={locale === "zh-CN" ? "先做连通性校验，再保存到后端。" : "Run validation before saving or persist the config to the backend."}>
                 <div className="flex flex-wrap gap-3">
-                  <Button variant="secondary" onClick={() => void runConnectionTest()}>
+                  <Button variant="secondary" disabled={loading || !formMatchesSelection} onClick={() => void runConnectionTest()}>
                     {locale === "zh-CN" ? "测试连接" : "Test Connection"}
                   </Button>
-                  <Button disabled={saving || !selectedAccountId} onClick={() => void submit()}>
+                  <Button disabled={saving || loading || !selectedAccountId || !formMatchesSelection} onClick={() => void submit()}>
                     {saving ? (locale === "zh-CN" ? "保存中..." : "Saving...") : existing ? (locale === "zh-CN" ? "保存配置" : "Save Configuration") : (locale === "zh-CN" ? "创建配置" : "Create Configuration")}
                   </Button>
                 </div>

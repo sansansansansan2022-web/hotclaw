@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAccount, getAccount, updateAccount } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -56,24 +56,44 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
   const [loading, setLoading] = useState(Boolean(accountId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadedAccountId, setLoadedAccountId] = useState<string | null>(null);
+  const loadSeqRef = useRef(0);
 
   const editing = Boolean(accountId);
 
   useEffect(() => {
-    if (!accountId) return;
+    if (!accountId) {
+      loadSeqRef.current += 1;
+      setForm(initialForm);
+      setLoadedAccountId(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    const requestSeq = loadSeqRef.current + 1;
+    loadSeqRef.current = requestSeq;
     const load = async () => {
       try {
         setLoading(true);
         setError(null);
+        setLoadedAccountId(null);
         const detail = await getAccount(accountId);
+        if (loadSeqRef.current !== requestSeq || detail.account_id !== accountId) return;
         setForm(normalize(detail));
+        setLoadedAccountId(accountId);
       } catch (loadError) {
+        if (loadSeqRef.current !== requestSeq) return;
         setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载账号" : "Unable to load account");
       } finally {
-        setLoading(false);
+        if (loadSeqRef.current === requestSeq) {
+          setLoading(false);
+        }
       }
     };
     void load();
+    return () => {
+      loadSeqRef.current += 1;
+    };
   }, [accountId, locale]);
 
   const title = useMemo(() => (editing ? (locale === "zh-CN" ? "编辑账号" : "Edit Account") : locale === "zh-CN" ? "新增账号" : "Add Account"), [editing, locale]);
@@ -102,6 +122,14 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
   };
 
   const submit = async () => {
+    if (editing && (!accountId || loading || loadedAccountId !== accountId)) {
+      pushToast({
+        tone: "warning",
+        title: locale === "zh-CN" ? "账号仍在加载" : "Account still loading",
+        message: locale === "zh-CN" ? "请等待当前账号资料加载完成后再保存。" : "Wait for the current account profile to finish loading before saving.",
+      });
+      return;
+    }
     if (!form.name.trim() || !form.positioning.trim()) {
       pushToast({
         tone: "warning",
@@ -110,18 +138,22 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
       });
       return;
     }
+    const targetAccountId = accountId;
+    const submitSeq = loadSeqRef.current;
 
     try {
       setSaving(true);
       setError(null);
-      if (editing && accountId) {
-        await updateAccount(accountId, form);
+      if (editing && targetAccountId) {
+        await updateAccount(targetAccountId, form);
         pushToast({
           tone: "success",
           title: locale === "zh-CN" ? "账号已更新" : "Account updated",
           message: locale === "zh-CN" ? "账号资料已成功保存。" : "The account profile was saved successfully.",
         });
-        router.push(`/accounts/${accountId}`);
+        if (loadSeqRef.current === submitSeq) {
+          router.push(`/accounts/${targetAccountId}`);
+        }
       } else {
         const created = await createAccount(form);
         pushToast({
@@ -129,7 +161,9 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
           title: locale === "zh-CN" ? "账号已创建" : "Account created",
           message: locale === "zh-CN" ? `账号 ${created.name} 已准备好继续配置。` : `Account ${created.name} is ready for configuration.`,
         });
-        router.push(`/accounts/${created.account_id}`);
+        if (loadSeqRef.current === submitSeq) {
+          router.push(`/accounts/${created.account_id}`);
+        }
       }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : locale === "zh-CN" ? "无法保存账号" : "Unable to save account");
@@ -297,7 +331,7 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
           </div>
 
           <div className="flex justify-end">
-            <Button disabled={saving} onClick={() => void submit()}>
+            <Button disabled={saving || (editing && (loading || loadedAccountId !== accountId))} onClick={() => void submit()}>
               {saving ? (locale === "zh-CN" ? "保存中..." : "Saving...") : editing ? (locale === "zh-CN" ? "保存修改" : "Save Changes") : locale === "zh-CN" ? "创建账号" : "Create Account"}
             </Button>
           </div>
