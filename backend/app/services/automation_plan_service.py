@@ -120,6 +120,16 @@ class AutomationPlanService:
         self, account: AccountModel, db: AsyncSession
     ) -> AutomationPlanModel:
         payload = self._payload_from_account(account)
+        existing = await self.get_active_plan(account.id, db)
+        if existing:
+            payload["publish_review_required"] = existing.publish_review_required
+            payload["timezone"] = existing.timezone
+            payload["notes"] = existing.notes
+            if payload.get("schedule_type") == existing.schedule_type:
+                payload["schedule_config"] = self._merge_legacy_schedule_config(
+                    existing.schedule_config,
+                    payload.get("schedule_config"),
+                )
         return await self.upsert_plan(account, payload, db)
 
     async def mark_run_started(self, account: AccountModel, db: AsyncSession) -> dict[str, Any]:
@@ -363,6 +373,25 @@ class AutomationPlanService:
         if account.posting_frequency:
             return "hybrid"
         return "manual_only"
+
+    def _merge_legacy_schedule_config(
+        self,
+        existing: dict[str, Any] | None,
+        legacy: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not legacy:
+            return legacy
+        merged = dict(existing or {})
+        if "time" in legacy:
+            merged["time"] = legacy["time"]
+        if "interval_weeks" in legacy:
+            merged["interval_weeks"] = legacy["interval_weeks"]
+        else:
+            merged.pop("interval_weeks", None)
+        for key, value in legacy.items():
+            if key not in {"time", "interval_weeks", "weekday", "day"}:
+                merged[key] = value
+        return merged
 
     def _default_run_strategy(self, plan_type: str, schedule_type: str) -> str:
         if plan_type == "manual" or schedule_type == "none":
