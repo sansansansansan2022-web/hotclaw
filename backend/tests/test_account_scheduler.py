@@ -13,6 +13,7 @@ import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.tables import AccountModel, TaskModel
 from app.services.account_service import account_service
@@ -241,6 +242,57 @@ class TestAccountServiceRun:
 
         await db_session.refresh(semi_auto_account)
         assert len(semi_auto_account.last_error_message) <= 500
+
+    @pytest.mark.asyncio
+    async def test_scheduler_preserves_failed_task_status(self, db_session, monkeypatch):
+        """A swallowed task failure must not be overwritten as scheduler success."""
+        from app.db import session as session_module
+        from app.scheduler.account_scheduler import account_scheduler
+        from app.services.task_service import task_service
+
+        test_factory = async_sessionmaker(
+            bind=db_session.bind,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        monkeypatch.setattr(session_module, "async_session_factory", test_factory)
+
+        account = AccountModel(
+            id="test-scheduler-failed-task",
+            name="Scheduler Failed Task",
+            positioning="Scheduler failed task account.",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            posting_frequency="daily",
+            next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            last_run_status="never_run",
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        async def _fake_run_task(task_id: str, db: AsyncSession) -> None:
+            result = await db.execute(select(TaskModel).where(TaskModel.id == task_id))
+            task = result.scalar_one()
+            task.status = "failed"
+            task.error_message = "pipeline failed"
+            task.completed_at = datetime.now(timezone.utc)
+            db.add(task)
+            await db.commit()
+
+        monkeypatch.setattr(task_service, "run_task", _fake_run_task)
+
+        await account_scheduler._run_account_task(account.id)
+
+        refreshed_task = await db_session.execute(
+            select(TaskModel).where(TaskModel.account_id == account.id)
+        )
+        saved_task = refreshed_task.scalar_one()
+        await db_session.refresh(account)
+
+        assert saved_task.status == "failed"
+        assert account.last_run_status == "failed"
+        assert account.last_error_message == "pipeline failed"
 
 
 class TestSchedulerEligibility:

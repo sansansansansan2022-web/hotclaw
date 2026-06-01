@@ -78,6 +78,59 @@ async def test_run_task_updates_account_status_and_next_run_on_success(db_sessio
 
 
 @pytest.mark.asyncio
+async def test_run_task_keeps_completed_task_when_account_bookkeeping_fails(db_session, monkeypatch):
+    """Post-completion account bookkeeping failures must not corrupt task status."""
+    account = AccountModel(
+        id="acc-bookkeeping-fail",
+        name="A",
+        positioning="P",
+        operation_mode="semi_auto",
+        auto_run_enabled=True,
+        is_active=True,
+        posting_frequency="daily",
+        next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        last_run_status="running",
+    )
+    task = TaskModel(
+        id="task-bookkeeping-fail",
+        workflow_id="default_pipeline",
+        status="pending",
+        input_data={"positioning": "x"},
+        account_id=account.id,
+    )
+    db_session.add_all([account, task])
+    await db_session.commit()
+
+    async def _fake_run(task_obj, db):
+        now = datetime.now(timezone.utc)
+        task_obj.status = "completed"
+        task_obj.started_at = now - timedelta(seconds=2)
+        task_obj.completed_at = now
+        task_obj.result_data = {"content": "ok"}
+        db.add(task_obj)
+        await db.flush()
+        return {"content": "ok"}
+
+    async def _skip_draft(*args, **kwargs):
+        return None
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("next-run update failed")
+
+    monkeypatch.setattr("app.services.task_service.orchestrator_engine.run", _fake_run)
+    monkeypatch.setattr(task_service, "_create_draft_from_task_result", _skip_draft)
+    monkeypatch.setattr(task_service, "_refresh_account_next_run", _boom)
+
+    task_id = task.id
+    await task_service.run_task(task_id, db_session)
+
+    refreshed_task = await db_session.execute(select(TaskModel).where(TaskModel.id == task_id))
+    saved_task = refreshed_task.scalar_one()
+    assert saved_task.status == "completed"
+    assert saved_task.error_message is None
+
+
+@pytest.mark.asyncio
 async def test_run_task_updates_account_status_on_failure(db_session, monkeypatch):
     """Failure path should persist account.last_run_status=failed."""
     account = AccountModel(

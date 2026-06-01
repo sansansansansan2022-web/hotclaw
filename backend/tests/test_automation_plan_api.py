@@ -104,3 +104,72 @@ async def test_patch_automation_plan_updates_legacy_account_fields(client):
     assert detail["max_posts_per_day"] == 2
     assert detail["min_interval_minutes"] == 180
     assert detail["automation_plan_summary"]["plan_type"] == "full_auto"
+
+
+async def test_account_profile_patch_preserves_plan_only_publish_safeguards(client):
+    account_id = await _create_account(
+        client,
+        {
+            "name": "Automation Legacy Patch Account",
+            "positioning": "Patch profile fields without clobbering plan-only safeguards.",
+            "operation_mode": "semi_auto",
+            "automation_plan": {
+                "plan_type": "semi_auto",
+                "is_enabled": True,
+                "run_strategy": "hybrid",
+                "schedule_type": "weekly",
+                "schedule_config": {"weekday": "wed", "time": "09:30"},
+                "auto_publish_enabled": True,
+                "publish_review_required": False,
+            },
+        },
+    )
+
+    patch_response = await client.patch(
+        f"/api/v1/accounts/{account_id}",
+        json={
+            "name": "Automation Legacy Patch Account Updated",
+            "positioning": "Patch profile fields without clobbering plan-only safeguards.",
+            "category": "",
+            "audience": "",
+            "tone_style": "",
+            "posting_frequency": "weekly",
+            "posting_time": "09:30",
+            "content_strategy": "",
+            "reference_accounts": "",
+            "operation_mode": "semi_auto",
+            "auto_run_enabled": True,
+            "auto_publish_enabled": True,
+            "is_active": True,
+            "publish_paused": False,
+            "max_posts_per_day": None,
+            "min_interval_minutes": None,
+        },
+    )
+    assert patch_response.status_code == 200, patch_response.text
+
+    plan_response = await client.get(f"/api/v1/accounts/{account_id}/automation-plan")
+    assert plan_response.status_code == 200
+    plan = plan_response.json()
+    assert plan["publish_review_required"] is False
+    assert plan["schedule_config"]["weekday"] == "wed"
+
+
+async def test_disable_account_persists_across_transaction_boundary(client, db_session):
+    account_id = await _create_account(
+        client,
+        {
+            "name": "Disable Persist Account",
+            "positioning": "Disable account persistence test account.",
+            "operation_mode": "manual",
+        },
+    )
+
+    response = await client.post(f"/api/v1/accounts/{account_id}/disable")
+    assert response.status_code == 200, response.text
+    assert response.json()["is_active"] is False
+
+    await db_session.rollback()
+    detail_response = await client.get(f"/api/v1/accounts/{account_id}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["is_active"] is False

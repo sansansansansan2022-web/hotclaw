@@ -70,11 +70,21 @@ class TaskService:
             logger.info("task_completed", task_id=task_id)
 
             # If this task is bound to an account, refresh the account's next_run_at
-            if task.account_id:
-                await self._update_account_run_status(task.account_id, db, "success")
-                await self._refresh_account_next_run(task.account_id, db)
-                # account_service 仅 flush，这里补一次 commit 持久化账号状态
-                await db.commit()
+            account_id = task.account_id
+            if account_id:
+                try:
+                    await self._update_account_run_status(account_id, db, "success")
+                    await self._refresh_account_next_run(account_id, db)
+                    # account_service 仅 flush，这里补一次 commit 持久化账号状态
+                    await db.commit()
+                except Exception as account_error:
+                    await db.rollback()
+                    logger.error(
+                        "task_account_completion_update_failed",
+                        task_id=task_id,
+                        account_id=account_id,
+                        error=str(account_error),
+                    )
 
         except Exception as e:
             task.status = "failed"

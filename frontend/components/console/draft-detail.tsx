@@ -34,7 +34,7 @@ import {
   SectionDraftsView,
   StyleProfileSummaryView,
 } from "@/components/console/content-insights";
-import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, SkeletonRows, Table, Tabs, Textarea } from "@/components/console/ui";
+import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Input, PageHeader, SkeletonRows, Table, Tabs, Textarea } from "@/components/console/ui";
 import { useAppStore } from "@/store/appStore";
 
 type PreviewMode = "markdown" | "html" | "sections";
@@ -65,6 +65,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
   const [previewMode, setPreviewMode] = useState<PreviewMode>("html");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const load = async () => {
     if (!Number.isFinite(parsedId)) {
@@ -226,13 +227,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
               <Button
                 variant="destructive"
                 disabled={!actions.canDiscard}
-                onClick={() =>
-                  void runAction(
-                    () => discardDraft(parsedId),
-                    locale === "zh-CN" ? "草稿已丢弃" : "Draft discarded",
-                    locale === "zh-CN" ? "该草稿已被丢弃。" : "The draft has been discarded.",
-                  )
-                }
+                onClick={() => setConfirmDiscard(true)}
               >
                 {locale === "zh-CN" ? "丢弃" : "Discard"}
               </Button>
@@ -557,6 +552,27 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
           }
         />
       )}
+      <ConfirmDialog
+        open={confirmDiscard}
+        title={locale === "zh-CN" ? "丢弃这篇草稿？" : "Discard this draft?"}
+        description={
+          locale === "zh-CN"
+            ? "丢弃后这篇草稿会进入终态，无法继续审核或发布。"
+            : "Discarding moves this draft to a terminal state; it cannot be reviewed or published afterward."
+        }
+        confirmLabel={locale === "zh-CN" ? "确认丢弃" : "Discard Draft"}
+        cancelLabel={locale === "zh-CN" ? "取消" : "Cancel"}
+        tone="danger"
+        onCancel={() => setConfirmDiscard(false)}
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          void runAction(
+            () => discardDraft(parsedId),
+            locale === "zh-CN" ? "草稿已丢弃" : "Draft discarded",
+            locale === "zh-CN" ? "该草稿已被丢弃。" : "The draft has been discarded.",
+          );
+        }}
+      />
     </div>
   );
 }

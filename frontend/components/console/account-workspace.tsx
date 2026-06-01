@@ -120,6 +120,7 @@ interface AccountWorkspaceState {
   wechatConfig: WeChatConfigDetail | null;
   tasks: TaskSummary[];
   drafts: DraftSummary[];
+  pendingDrafts: DraftSummary[];
   pendingReviewCount: number;
   filteredOutTaskCount: number;
   filteredOutDraftCount: number;
@@ -377,10 +378,11 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
       setLoading(true);
       setError(null);
 
-      const [account, tasksRes, draftsRes, pendingRes, wechatConfig] = await Promise.all([
+      const [account, tasksRes, draftsRes, pendingDraftsRes, pendingRes, wechatConfig] = await Promise.all([
         getAccount(accountId),
         listAccountTasks(accountId, 1, 8),
         listDrafts(1, 8, { account_id: accountId }),
+        listDrafts(1, 6, { account_id: accountId, draft_status: "pending_review" }),
         getPendingDraftCount(accountId).catch(() => ({ count: 0 })),
         getWeChatConfig(accountId).catch(() => null),
       ]);
@@ -388,6 +390,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
       const scopedTasks = tasksRes.tasks.filter((task) => task.account_id === accountId);
       const filteredOutTaskCount = tasksRes.tasks.length - scopedTasks.length;
       const scopedDrafts = draftsRes.drafts.filter((draft) => draft.account_id === accountId);
+      const scopedPendingDrafts = pendingDraftsRes.drafts.filter((draft) => draft.account_id === accountId);
       const filteredOutDraftCount = draftsRes.drafts.length - scopedDrafts.length;
 
       if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
@@ -398,6 +401,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
           apiSource: apiInfo.source,
           taskCount: scopedTasks.length,
           draftCount: scopedDrafts.length,
+          pendingDraftCount: scopedPendingDrafts.length,
           filteredOutTaskCount,
           filteredOutDraftCount,
         });
@@ -416,6 +420,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         wechatConfig,
         tasks: scopedTasks,
         drafts: scopedDrafts,
+        pendingDrafts: scopedPendingDrafts,
         pendingReviewCount: pendingRes.count,
         filteredOutTaskCount,
         filteredOutDraftCount,
@@ -458,7 +463,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
   };
 
   const pendingDrafts = useMemo(
-    () => (data?.drafts ?? []).filter((draft) => draft.draft_status === "pending_review").slice(0, 6),
+    () => data?.pendingDrafts ?? [],
     [data],
   );
 
