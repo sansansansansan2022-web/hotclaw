@@ -121,9 +121,10 @@ async def test_run_task_keeps_completed_task_when_account_bookkeeping_fails(db_s
     monkeypatch.setattr(task_service, "_create_draft_from_task_result", _skip_draft)
     monkeypatch.setattr(task_service, "_refresh_account_next_run", _boom)
 
-    await task_service.run_task(task.id, db_session)
+    task_id = task.id
+    await task_service.run_task(task_id, db_session)
 
-    refreshed_task = await db_session.execute(select(TaskModel).where(TaskModel.id == task.id))
+    refreshed_task = await db_session.execute(select(TaskModel).where(TaskModel.id == task_id))
     saved_task = refreshed_task.scalar_one()
     assert saved_task.status == "completed"
     assert saved_task.error_message is None
