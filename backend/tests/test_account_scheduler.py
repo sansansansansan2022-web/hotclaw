@@ -288,14 +288,11 @@ class TestAccountServiceRun:
             select(TaskModel).where(TaskModel.account_id == account.id)
         )
         saved_task = refreshed_task.scalar_one()
-        refreshed_account = await db_session.execute(
-            select(AccountModel).where(AccountModel.id == account.id)
-        )
-        saved_account = refreshed_account.scalar_one()
+        await db_session.refresh(account)
 
         assert saved_task.status == "failed"
-        assert saved_account.last_run_status == "failed"
-        assert saved_account.last_error_message == "pipeline failed"
+        assert account.last_run_status == "failed"
+        assert account.last_error_message == "pipeline failed"
 
 
 class TestSchedulerEligibility:
