@@ -12,9 +12,11 @@ Covers:
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import account_scheduler
 from app.services.account_service import account_service
 from app.core.exceptions import (
     AccountNotFoundError,
@@ -245,6 +247,20 @@ class TestAccountServiceRun:
 
 class TestSchedulerEligibility:
     """Test scheduler eligibility checks."""
+
+    def test_scheduler_eligibility_accepts_naive_due_timestamp(self):
+        """
+        Some SQLite/dev schemas return naive datetimes; the scheduler should
+        treat persisted naive timestamps as UTC instead of crashing the tick.
+        """
+        account = SimpleNamespace(
+            is_active=True,
+            auto_run_enabled=True,
+            operation_mode="semi_auto",
+            next_run_at=datetime.now() - timedelta(hours=1),
+        )
+
+        assert account_scheduler._is_eligible_for_auto_run(account)
 
     @pytest.mark.asyncio
     async def test_get_due_accounts_excludes_manual_mode(self, db_session):
@@ -608,6 +624,68 @@ class TestNextRunAtRefresh:
 
         # next_run_at should be None when no frequency is set
         assert account.next_run_at is None
+
+
+class TestSchedulerRunTaskStatus:
+    """Regression tests for scheduler account status bookkeeping."""
+
+    @pytest.mark.asyncio
+    async def test_scheduler_preserves_failed_task_status(self, db_session, monkeypatch):
+        """
+        TaskService.run_task persists failures without re-raising. The scheduler
+        must not mark that account run successful after the failed task returns.
+        """
+        account = AccountModel(
+            id="test-scheduler-failed-status",
+            name="Scheduler Failed Status",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            posting_frequency="daily",
+            last_run_status="never_run",
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        class _SessionContext:
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        async def _swallowed_task_failure(task_id, db):
+            task = await db.get(TaskModel, task_id)
+            task.status = "failed"
+            task.error_message = "orchestrator boom"
+            db.add(task)
+            await db.commit()
+            await account_service.update_account_run_status(
+                task.account_id,
+                db,
+                "failed",
+                "orchestrator boom",
+            )
+            await db.commit()
+
+        monkeypatch.setattr("app.db.session.async_session_factory", lambda: _SessionContext())
+        monkeypatch.setattr(
+            "app.services.task_service.task_service.run_task",
+            _swallowed_task_failure,
+        )
+
+        await account_scheduler._run_account_task(account.id)
+
+        await db_session.refresh(account)
+        task_result = await db_session.execute(
+            select(TaskModel).where(TaskModel.account_id == account.id)
+        )
+        task = task_result.scalar_one()
+        assert task.status == "failed"
+        assert account.last_run_status == "failed"
+        assert account.last_error_message == "orchestrator boom"
 
 
 class TestTemporaryTaskCompatibility:
