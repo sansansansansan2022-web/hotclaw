@@ -168,7 +168,10 @@ class AccountScheduler:
             return False
         # Must be past next_run_at
         now = datetime.now(timezone.utc)
-        if account.next_run_at > now:
+        next_run_at = account.next_run_at
+        if next_run_at.tzinfo is None:
+            next_run_at = next_run_at.replace(tzinfo=timezone.utc)
+        if next_run_at > now:
             return False
         return True
 
@@ -211,6 +214,17 @@ class AccountScheduler:
                 # Run the task
                 try:
                     await task_service.run_task(task.id, db)
+                    await db.refresh(task)
+                    if task.status != "completed":
+                        logger.error(
+                            "account_auto_run_finished_without_success",
+                            account_id=account_id,
+                            task_id=task.id,
+                            task_status=task.status,
+                            error=task.error_message,
+                        )
+                        return
+
                     # Task succeeded - update status
                     await account_service.update_account_run_status(account_id, db, "success")
                 except Exception as task_error:
