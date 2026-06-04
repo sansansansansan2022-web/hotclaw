@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getAccount, getApiOriginDebugInfo, getPendingDraftCount, getWeChatConfig, listAccountTasks, listDrafts, runAccount } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -134,7 +134,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const loadSequenceRef = useRef(0);
+  const [reloadKey, setReloadKey] = useState(0);
   const onboardingSource = searchParams.get("source");
   const showOnboardingChecklist = searchParams.get("onboarding") === "1";
   const seededSourceCount = Number(searchParams.get("seeded_sources") || "0");
@@ -373,78 +373,81 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         openAccountDrafts: "Open Account Drafts",
       };
 
-  const load = async () => {
-    const loadSequence = loadSequenceRef.current + 1;
-    loadSequenceRef.current = loadSequence;
+  useEffect(() => {
+    let active = true;
 
-    try {
-      setLoading(true);
-      setError(null);
-      setData(null);
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        setData(null);
 
-      const [account, tasksRes, draftsRes, pendingRes, wechatConfig] = await Promise.all([
-        getAccount(accountId),
-        listAccountTasks(accountId, 1, 8),
-        listDrafts(1, 8, { account_id: accountId }),
-        getPendingDraftCount(accountId).catch(() => ({ count: 0 })),
-        getWeChatConfig(accountId).catch(() => null),
-      ]);
+        const [account, tasksRes, draftsRes, pendingRes, wechatConfig] = await Promise.all([
+          getAccount(accountId),
+          listAccountTasks(accountId, 1, 8),
+          listDrafts(1, 8, { account_id: accountId }),
+          getPendingDraftCount(accountId).catch(() => ({ count: 0 })),
+          getWeChatConfig(accountId).catch(() => null),
+        ]);
 
-      const scopedTasks = tasksRes.tasks.filter((task) => task.account_id === accountId);
-      const filteredOutTaskCount = tasksRes.tasks.length - scopedTasks.length;
-      const scopedDrafts = draftsRes.drafts.filter((draft) => draft.account_id === accountId);
-      const filteredOutDraftCount = draftsRes.drafts.length - scopedDrafts.length;
+        const scopedTasks = tasksRes.tasks.filter((task) => task.account_id === accountId);
+        const filteredOutTaskCount = tasksRes.tasks.length - scopedTasks.length;
+        const scopedDrafts = draftsRes.drafts.filter((draft) => draft.account_id === accountId);
+        const filteredOutDraftCount = draftsRes.drafts.length - scopedDrafts.length;
 
-      if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
-        const apiInfo = getApiOriginDebugInfo();
-        console.info("[HotClaw][account-workspace] load", {
-          accountId,
-          apiOrigin: apiInfo.origin || "/api",
-          apiSource: apiInfo.source,
-          taskCount: scopedTasks.length,
-          draftCount: scopedDrafts.length,
-          filteredOutTaskCount,
-          filteredOutDraftCount,
-        });
-
-        if (filteredOutTaskCount || filteredOutDraftCount) {
-          console.warn("[HotClaw][account-workspace] filtered cross-account records", {
+        if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+          const apiInfo = getApiOriginDebugInfo();
+          console.info("[HotClaw][account-workspace] load", {
             accountId,
+            apiOrigin: apiInfo.origin || "/api",
+            apiSource: apiInfo.source,
+            taskCount: scopedTasks.length,
+            draftCount: scopedDrafts.length,
             filteredOutTaskCount,
             filteredOutDraftCount,
           });
+
+          if (filteredOutTaskCount || filteredOutDraftCount) {
+            console.warn("[HotClaw][account-workspace] filtered cross-account records", {
+              accountId,
+              filteredOutTaskCount,
+              filteredOutDraftCount,
+            });
+          }
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setData({
+          account,
+          wechatConfig,
+          tasks: scopedTasks,
+          drafts: scopedDrafts,
+          pendingReviewCount: pendingRes.count,
+          filteredOutTaskCount,
+          filteredOutDraftCount,
+        });
+      } catch (loadError) {
+        if (!active) {
+          return;
+        }
+
+        setError(loadError instanceof Error ? loadError.message : copy.loadError);
+      } finally {
+        if (active) {
+          setLoading(false);
         }
       }
+    };
 
-      if (loadSequenceRef.current !== loadSequence) {
-        return;
-      }
-
-      setData({
-        account,
-        wechatConfig,
-        tasks: scopedTasks,
-        drafts: scopedDrafts,
-        pendingReviewCount: pendingRes.count,
-        filteredOutTaskCount,
-        filteredOutDraftCount,
-      });
-    } catch (loadError) {
-      if (loadSequenceRef.current !== loadSequence) {
-        return;
-      }
-
-      setError(loadError instanceof Error ? loadError.message : copy.loadError);
-    } finally {
-      if (loadSequenceRef.current === loadSequence) {
-        setLoading(false);
-      }
-    }
-  };
-
-  useEffect(() => {
     void load();
-  }, [accountId]);
+
+    return () => {
+      active = false;
+    };
+  }, [accountId, copy.loadError, reloadKey]);
 
   const workspaceData = data?.account.account_id === accountId ? data : null;
 
@@ -579,7 +582,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
       {loading ? (
         <SkeletonRows rows={6} />
       ) : error ? (
-        <ErrorState title={copy.loadFailedTitle} description={error} retry={() => void load()} />
+        <ErrorState title={copy.loadFailedTitle} description={error} retry={() => setReloadKey((value) => value + 1)} />
       ) : workspaceData ? (
         <>
           <div className="flex flex-wrap items-center gap-2">
