@@ -134,6 +134,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const onboardingSource = searchParams.get("source");
   const showOnboardingChecklist = searchParams.get("onboarding") === "1";
   const seededSourceCount = Number(searchParams.get("seeded_sources") || "0");
@@ -372,66 +373,89 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         openAccountDrafts: "Open Account Drafts",
       };
 
-  const load = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  useEffect(() => {
+    let active = true;
 
-      const [account, tasksRes, draftsRes, pendingRes, wechatConfig] = await Promise.all([
-        getAccount(accountId),
-        listAccountTasks(accountId, 1, 8),
-        listDrafts(1, 8, { account_id: accountId }),
-        getPendingDraftCount(accountId).catch(() => ({ count: 0 })),
-        getWeChatConfig(accountId).catch(() => null),
-      ]);
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        setData(null);
 
-      const scopedTasks = tasksRes.tasks.filter((task) => task.account_id === accountId);
-      const filteredOutTaskCount = tasksRes.tasks.length - scopedTasks.length;
-      const scopedDrafts = draftsRes.drafts.filter((draft) => draft.account_id === accountId);
-      const filteredOutDraftCount = draftsRes.drafts.length - scopedDrafts.length;
+        const [account, tasksRes, draftsRes, pendingRes, wechatConfig] = await Promise.all([
+          getAccount(accountId),
+          listAccountTasks(accountId, 1, 8),
+          listDrafts(1, 8, { account_id: accountId }),
+          getPendingDraftCount(accountId).catch(() => ({ count: 0 })),
+          getWeChatConfig(accountId).catch(() => null),
+        ]);
 
-      if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
-        const apiInfo = getApiOriginDebugInfo();
-        console.info("[HotClaw][account-workspace] load", {
-          accountId,
-          apiOrigin: apiInfo.origin || "/api",
-          apiSource: apiInfo.source,
-          taskCount: scopedTasks.length,
-          draftCount: scopedDrafts.length,
-          filteredOutTaskCount,
-          filteredOutDraftCount,
-        });
+        const scopedTasks = tasksRes.tasks.filter((task) => task.account_id === accountId);
+        const filteredOutTaskCount = tasksRes.tasks.length - scopedTasks.length;
+        const scopedDrafts = draftsRes.drafts.filter((draft) => draft.account_id === accountId);
+        const filteredOutDraftCount = draftsRes.drafts.length - scopedDrafts.length;
 
-        if (filteredOutTaskCount || filteredOutDraftCount) {
-          console.warn("[HotClaw][account-workspace] filtered cross-account records", {
+        if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+          const apiInfo = getApiOriginDebugInfo();
+          console.info("[HotClaw][account-workspace] load", {
             accountId,
+            apiOrigin: apiInfo.origin || "/api",
+            apiSource: apiInfo.source,
+            taskCount: scopedTasks.length,
+            draftCount: scopedDrafts.length,
             filteredOutTaskCount,
             filteredOutDraftCount,
           });
+
+          if (filteredOutTaskCount || filteredOutDraftCount) {
+            console.warn("[HotClaw][account-workspace] filtered cross-account records", {
+              accountId,
+              filteredOutTaskCount,
+              filteredOutDraftCount,
+            });
+          }
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setData({
+          account,
+          wechatConfig,
+          tasks: scopedTasks,
+          drafts: scopedDrafts,
+          pendingReviewCount: pendingRes.count,
+          filteredOutTaskCount,
+          filteredOutDraftCount,
+        });
+      } catch (loadError) {
+        if (!active) {
+          return;
+        }
+
+        setError(loadError instanceof Error ? loadError.message : copy.loadError);
+      } finally {
+        if (active) {
+          setLoading(false);
         }
       }
+    };
 
-      setData({
-        account,
-        wechatConfig,
-        tasks: scopedTasks,
-        drafts: scopedDrafts,
-        pendingReviewCount: pendingRes.count,
-        filteredOutTaskCount,
-        filteredOutDraftCount,
-      });
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : copy.loadError);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
     void load();
-  }, [accountId]);
+
+    return () => {
+      active = false;
+    };
+  }, [accountId, copy.loadError, reloadKey]);
+
+  const workspaceData = data?.account.account_id === accountId ? data : null;
 
   const runNow = async () => {
+    if (!workspaceData) {
+      return;
+    }
+
     try {
       setRunning(true);
 
@@ -458,25 +482,25 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
   };
 
   const pendingDrafts = useMemo(
-    () => (data?.drafts ?? []).filter((draft) => draft.draft_status === "pending_review").slice(0, 6),
-    [data],
+    () => (workspaceData?.drafts ?? []).filter((draft) => draft.draft_status === "pending_review").slice(0, 6),
+    [workspaceData],
   );
 
   const automationPlan = useMemo(
-    () => (data ? getAutomationPlan(data.account, locale, token) : null),
-    [data, locale, token],
+    () => (workspaceData ? getAutomationPlan(workspaceData.account, locale, token) : null),
+    [workspaceData, locale, token],
   );
-  const latestOps = data?.account.latest_ops_context ?? null;
+  const latestOps = workspaceData?.account.latest_ops_context ?? null;
   const latestRunStrategy = latestOps?.run_strategy ?? null;
-  const latestEffectiveMode = data?.account.latest_effective_mode ?? latestRunStrategy?.effective_mode ?? null;
+  const latestEffectiveMode = workspaceData?.account.latest_effective_mode ?? latestRunStrategy?.effective_mode ?? null;
   const latestOpsDegraded =
-    data?.account.latest_ops_degraded ??
+    workspaceData?.account.latest_ops_degraded ??
     Boolean(
       automationPlan?.plan_type &&
         latestEffectiveMode &&
         automationPlan.plan_type !== latestEffectiveMode,
     );
-  const wechatConnection = getWeChatConnectionSummary(data?.wechatConfig ?? null, locale);
+  const wechatConnection = getWeChatConnectionSummary(workspaceData?.wechatConfig ?? null, locale);
 
   const onboardingTasks = useMemo(
     () => [
@@ -540,14 +564,14 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
     <div className="space-y-8">
       <PageHeader
         eyebrow={copy.pageEyebrow}
-        title={data?.account.name || copy.pageTitle}
+        title={workspaceData?.account.name || copy.pageTitle}
         description={copy.pageDescription}
         actions={
           <>
             <Link href={`/accounts/${accountId}`}>
               <Button variant="secondary">{copy.backToAccount}</Button>
             </Link>
-            <Button onClick={() => void runNow()} disabled={running}>
+            <Button onClick={() => void runNow()} disabled={running || !workspaceData}>
               <Icon name="play" className="h-4 w-4" />
               {running ? copy.running : copy.runNow}
             </Button>
@@ -558,12 +582,12 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
       {loading ? (
         <SkeletonRows rows={6} />
       ) : error ? (
-        <ErrorState title={copy.loadFailedTitle} description={error} retry={() => void load()} />
-      ) : data ? (
+        <ErrorState title={copy.loadFailedTitle} description={error} retry={() => setReloadKey((value) => value + 1)} />
+      ) : workspaceData ? (
         <>
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="brand">{copy.currentWorkspace}</Badge>
-            <Badge tone="muted">{data.account.name}</Badge>
+            <Badge tone="muted">{workspaceData.account.name}</Badge>
             <Badge tone="muted">{accountId}</Badge>
             <Badge tone={wechatConnection.tone}>{wechatConnection.title}</Badge>
           </div>
@@ -608,7 +632,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                   <Badge tone={wechatConnection.tone}>
                     {wechatConnectedParam === "1" && wechatConnection.connected ? copy.officialConnected : copy.officialPending}
                   </Badge>
-                  {data.wechatConfig?.app_id_masked ? <Badge tone="muted">{data.wechatConfig.app_id_masked}</Badge> : null}
+                  {workspaceData.wechatConfig?.app_id_masked ? <Badge tone="muted">{workspaceData.wechatConfig.app_id_masked}</Badge> : null}
                 </div>
                 <p className="mt-3 leading-6">
                   {wechatTestFailed
@@ -626,42 +650,42 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
             </Card>
           ) : null}
 
-          {data.filteredOutTaskCount || data.filteredOutDraftCount ? (
+          {workspaceData.filteredOutTaskCount || workspaceData.filteredOutDraftCount ? (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              {copy.filteredOutRecords(data.filteredOutTaskCount, data.filteredOutDraftCount)}
+              {copy.filteredOutRecords(workspaceData.filteredOutTaskCount, workspaceData.filteredOutDraftCount)}
             </div>
           ) : null}
 
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-6">
             <StatCard
               label={copy.activePlan}
-              value={operationModeLabel(automationPlan?.plan_type ?? data.account.operation_mode)}
+              value={operationModeLabel(automationPlan?.plan_type ?? workspaceData.account.operation_mode)}
               hint={automationPlan?.schedule_summary || copy.manualOnly}
               tone="brand"
               icon={<Icon name="workspace" className="h-6 w-6" />}
             />
             <StatCard
               label={copy.accountTasks}
-              value={formatNumber(data.tasks.length)}
+              value={formatNumber(workspaceData.tasks.length)}
               hint={copy.accountTasksHint}
               tone="info"
               icon={<Icon name="history" className="h-6 w-6" />}
             />
             <StatCard
               label={copy.pendingReview}
-              value={formatNumber(data.pendingReviewCount)}
+              value={formatNumber(workspaceData.pendingReviewCount)}
               hint={copy.pendingReviewHint}
               tone="warning"
               icon={<Icon name="drafts" className="h-6 w-6" />}
             />
             <StatCard
               label={copy.referenceSources}
-              value={formatNumber(data.account.reference_source_count ?? 0)}
+              value={formatNumber(workspaceData.account.reference_source_count ?? 0)}
               hint={copy.referenceHint(
-                formatNumber(data.account.reference_source_enabled_count ?? 0),
-                token(data.account.reference_source_last_sync_status ?? "none"),
+                formatNumber(workspaceData.account.reference_source_enabled_count ?? 0),
+                token(workspaceData.account.reference_source_last_sync_status ?? "none"),
               )}
-              tone={referenceSyncTone(data.account.reference_source_last_sync_status)}
+              tone={referenceSyncTone(workspaceData.account.reference_source_last_sync_status)}
               icon={<Icon name="settings" className="h-6 w-6" />}
             />
             <StatCard
@@ -669,14 +693,14 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
               value={
                 latestEffectiveMode
                   ? operationModeLabel(latestEffectiveMode)
-                  : operationModeLabel(automationPlan?.plan_type ?? data.account.operation_mode)
+                  : operationModeLabel(automationPlan?.plan_type ?? workspaceData.account.operation_mode)
               }
               hint={
                 latestOpsDegraded
-                  ? copy.downgradedFrom(operationModeLabel(automationPlan?.plan_type ?? data.account.operation_mode))
-                  : data.account.last_error_message || copy.latestRuntimePosture
+                  ? copy.downgradedFrom(operationModeLabel(automationPlan?.plan_type ?? workspaceData.account.operation_mode))
+                  : workspaceData.account.last_error_message || copy.latestRuntimePosture
               }
-              tone={latestOpsDegraded ? "warning" : taskTone(data.account.last_run_status)}
+              tone={latestOpsDegraded ? "warning" : taskTone(workspaceData.account.last_run_status)}
               icon={<Icon name="dashboard" className="h-6 w-6" />}
             />
             <StatCard
@@ -694,22 +718,22 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{copy.accountIdentity}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <Badge tone="brand">{data.account.name}</Badge>
+                    <Badge tone="brand">{workspaceData.account.name}</Badge>
                     <Badge tone="muted">{accountId}</Badge>
                   </div>
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{copy.positioning}</p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{data.account.positioning || copy.notSet}</p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-slate-600">{workspaceData.account.positioning || copy.notSet}</p>
                 </div>
                 <div className="grid gap-5 md:grid-cols-2">
                   <div>
                     <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{copy.audience}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{data.account.audience || copy.notSet}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{workspaceData.account.audience || copy.notSet}</p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{copy.toneStyle}</p>
-                    <p className="mt-2 text-sm leading-6 text-slate-600">{data.account.tone_style || copy.notSet}</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">{workspaceData.account.tone_style || copy.notSet}</p>
                   </div>
                 </div>
                 <div className="grid gap-5 md:grid-cols-2">
@@ -722,7 +746,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                     <div>
                       <p className="text-xs uppercase tracking-[0.18em] text-slate-400">{copy.automationFlags}</p>
                       <div className="mt-2 flex flex-wrap gap-2">
-                        <Badge tone={data.account.is_active ? "success" : "muted"}>{data.account.is_active ? copy.accountActive : copy.accountPaused}</Badge>
+                        <Badge tone={workspaceData.account.is_active ? "success" : "muted"}>{workspaceData.account.is_active ? copy.accountActive : copy.accountPaused}</Badge>
                         <Badge tone={automationPlan?.is_enabled ? "success" : "muted"}>{automationPlan?.is_enabled ? copy.planEnabled : copy.planDisabled}</Badge>
                       <Badge tone={automationPlan?.auto_publish_enabled ? "success" : "muted"}>
                         {automationPlan?.auto_publish_enabled ? copy.autoPublish : copy.manualPublish}
@@ -836,7 +860,9 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                   </p>
                   {latestOpsDegraded ? (
                     <p className="mt-1 text-xs text-amber-700">
-                      {copy.downgradedFrom(operationModeLabel(automationPlan?.plan_type ?? data.account.operation_mode))}
+                      {copy.downgradedFrom(
+                        operationModeLabel(automationPlan?.plan_type ?? workspaceData.account.operation_mode),
+                      )}
                     </p>
                   ) : null}
                 </div>
@@ -895,9 +921,9 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
             title={copy.tasksTitle}
             description={copy.tasksDesc}
           >
-            {data.tasks.length ? (
+            {workspaceData.tasks.length ? (
               <Table columns={[copy.taskColumn, copy.statusColumn, copy.createdColumn, copy.durationColumn, copy.actionColumn]}>
-                {data.tasks.map((task) => (
+                {workspaceData.tasks.map((task) => (
                   <tr key={task.task_id}>
                     <td className="px-5 py-4">
                       <div>
