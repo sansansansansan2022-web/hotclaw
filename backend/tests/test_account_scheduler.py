@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import account_scheduler
 from app.services.account_service import account_service
 from app.core.exceptions import (
     AccountNotFoundError,
@@ -246,6 +247,32 @@ class TestAccountServiceRun:
 class TestSchedulerEligibility:
     """Test scheduler eligibility checks."""
 
+    def test_scheduler_eligibility_accepts_naive_due_timestamp(self):
+        account = AccountModel(
+            id="test-naive-scheduler-due",
+            name="Naive Scheduler Due",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=datetime.now() - timedelta(minutes=1),
+        )
+
+        assert account_scheduler._is_eligible_for_auto_run(account) is True
+
+    def test_scheduler_eligibility_rejects_naive_future_timestamp(self):
+        account = AccountModel(
+            id="test-naive-scheduler-future",
+            name="Naive Scheduler Future",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=datetime.now() + timedelta(minutes=5),
+        )
+
+        assert account_scheduler._is_eligible_for_auto_run(account) is False
+
     @pytest.mark.asyncio
     async def test_get_due_accounts_excludes_manual_mode(self, db_session):
         """
@@ -361,6 +388,50 @@ class TestSchedulerEligibility:
         due_ids = [a.id for a in due_accounts]
 
         assert "test-due-no-auto" not in due_ids
+
+    @pytest.mark.asyncio
+    async def test_scheduler_preserves_failed_task_status(self, db_session, monkeypatch):
+        account = AccountModel(
+            id="test-scheduler-failure-preserved",
+            name="Scheduler Failure Preserved",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=datetime.now() - timedelta(minutes=1),
+            posting_frequency="daily",
+            last_run_status="never_run",
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        class SessionContext:
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        async def fail_task(task_id, db):
+            task = await db.get(TaskModel, task_id)
+            task.status = "failed"
+            task.error_message = "orchestrator boom"
+            task.completed_at = datetime.now(timezone.utc)
+            db.add(task)
+            await db.commit()
+
+        monkeypatch.setattr("app.db.session.async_session_factory", lambda: SessionContext())
+        monkeypatch.setattr("app.services.task_service.task_service.run_task", fail_task)
+
+        await account_scheduler._run_account_task(account.id)
+
+        refreshed_account = await db_session.get(AccountModel, account.id)
+        assert refreshed_account.last_run_status == "failed"
+        assert refreshed_account.last_error_message == "orchestrator boom"
+
+        task_result = await db_session.execute(select(TaskModel).where(TaskModel.account_id == account.id))
+        saved_task = task_result.scalar_one()
+        assert saved_task.status == "failed"
 
 
 class TestAccountCRUDWithStatus:

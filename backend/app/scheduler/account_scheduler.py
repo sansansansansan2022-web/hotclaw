@@ -168,9 +168,17 @@ class AccountScheduler:
             return False
         # Must be past next_run_at
         now = datetime.now(timezone.utc)
-        if account.next_run_at > now:
+        next_run_at = self._normalize_next_run_at(account.next_run_at)
+        if next_run_at is None or next_run_at > now:
             return False
         return True
+
+    def _normalize_next_run_at(self, value) -> datetime | None:
+        if not isinstance(value, datetime):
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     async def _run_account_task_limited(self, account_id: str) -> None:
         """Run account task with semaphore to limit concurrency."""
@@ -211,6 +219,20 @@ class AccountScheduler:
                 # Run the task
                 try:
                     await task_service.run_task(task.id, db)
+                    completed_task = await task_service.get_task(task.id, db)
+                    if completed_task.status == "failed":
+                        error_msg = completed_task.error_message or "Task failed"
+                        logger.error(
+                            "account_task_failed",
+                            account_id=account_id,
+                            task_id=task.id,
+                            error=error_msg
+                        )
+                        await account_service.update_account_run_status(
+                            account_id, db, "failed", error_msg
+                        )
+                        await db.commit()
+                        return
                     # Task succeeded - update status
                     await account_service.update_account_run_status(account_id, db, "success")
                 except Exception as task_error:
