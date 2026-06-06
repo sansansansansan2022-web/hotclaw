@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { listAccounts, listDrafts } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatDateTime, formatNumber, truncate } from "@/lib/utils";
@@ -26,14 +26,15 @@ export function DraftsCenterPage({ initialAccountId }: { initialAccountId?: stri
   const [draftStatus, setDraftStatus] = useState<string>("all");
   const [publishStatus, setPublishStatus] = useState<string>("all");
   const [accountId, setAccountId] = useState<string>(initialAccountId || "all");
+  const loadSeq = useRef(0);
 
   useEffect(() => {
-    if (initialAccountId) {
-      setAccountId(initialAccountId);
-    }
+    setAccountId(initialAccountId || "all");
   }, [initialAccountId]);
 
   const load = async () => {
+    const seq = loadSeq.current + 1;
+    loadSeq.current = seq;
     try {
       setLoading(true);
       setError(null);
@@ -45,12 +46,16 @@ export function DraftsCenterPage({ initialAccountId }: { initialAccountId?: stri
         }),
         listAccounts(1, 100).catch(() => ({ accounts: [], pagination: { page: 1, page_size: 100, total: 0 } })),
       ]);
+      if (seq !== loadSeq.current) return;
       setDrafts(draftsRes.drafts);
       setAccounts(accountsRes.accounts);
     } catch (loadError) {
+      if (seq !== loadSeq.current) return;
       setError(loadError instanceof Error ? loadError.message : t("drafts.loadError"));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) {
+        setLoading(false);
+      }
     }
   };
 

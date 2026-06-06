@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createWeChatConfig, getWeChatConfig, listAccounts, testWeChatConnection, updateWeChatConfig } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -39,12 +39,16 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadSeq = useRef(0);
 
   const load = async (targetAccountId?: string | null) => {
+    const seq = loadSeq.current + 1;
+    loadSeq.current = seq;
     try {
       setLoading(true);
       setError(null);
       const accountsRes = await listAccounts(1, 100).catch(() => ({ accounts: [], pagination: { page: 1, page_size: 100, total: 0 } }));
+      if (seq !== loadSeq.current) return;
       setAccounts(accountsRes.accounts);
 
       const resolvedAccountId = targetAccountId ?? accountId ?? accountsRes.accounts[0]?.account_id ?? null;
@@ -58,6 +62,7 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
 
       try {
         const config = await getWeChatConfig(resolvedAccountId);
+        if (seq !== loadSeq.current) return;
         setExisting(config);
         setForm({
           app_id: "",
@@ -69,13 +74,17 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
           is_enabled: config.is_enabled,
         });
       } catch {
+        if (seq !== loadSeq.current) return;
         setExisting(null);
         setForm(emptyForm);
       }
     } catch (loadError) {
+      if (seq !== loadSeq.current) return;
       setError(loadError instanceof Error ? loadError.message : t("wechat.loadError"));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -173,6 +182,7 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
                 value={selectedAccountId ?? ""}
                 onChange={(event) => {
                   const nextId = event.target.value;
+                  loadSeq.current += 1;
                   setSelectedAccountId(nextId);
                   router.push(`/settings/wechat/${nextId}`);
                 }}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAccount, getAccount, updateAccount } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -56,21 +56,33 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
   const [loading, setLoading] = useState(Boolean(accountId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadSeq = useRef(0);
 
   const editing = Boolean(accountId);
 
   useEffect(() => {
-    if (!accountId) return;
+    const seq = loadSeq.current + 1;
+    loadSeq.current = seq;
+    if (!accountId) {
+      setForm(initialForm);
+      setLoading(false);
+      setError(null);
+      return;
+    }
     const load = async () => {
       try {
         setLoading(true);
         setError(null);
         const detail = await getAccount(accountId);
+        if (seq !== loadSeq.current) return;
         setForm(normalize(detail));
       } catch (loadError) {
+        if (seq !== loadSeq.current) return;
         setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载账号" : "Unable to load account");
       } finally {
-        setLoading(false);
+        if (seq === loadSeq.current) {
+          setLoading(false);
+        }
       }
     };
     void load();

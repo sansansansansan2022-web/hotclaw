@@ -78,6 +78,7 @@ class AccountScheduler:
         self._running = False
         self._task: asyncio.Task | None = None
         self._semaphore = asyncio.Semaphore(MAX_CONCURRENT_RUNS)
+        self._scheduled_account_ids: set[str] = set()
 
     async def start(self) -> None:
         """Start the scheduler loop."""
@@ -146,7 +147,12 @@ class AccountScheduler:
                 )
                 continue
 
+            if account.id in self._scheduled_account_ids:
+                logger.info("account_skip_already_scheduled", account_id=account.id)
+                continue
+
             # Use semaphore to limit concurrent runs
+            self._scheduled_account_ids.add(account.id)
             asyncio.create_task(self._run_account_task_limited(account.id))
 
     def _is_eligible_for_auto_run(self, account) -> bool:
@@ -174,8 +180,11 @@ class AccountScheduler:
 
     async def _run_account_task_limited(self, account_id: str) -> None:
         """Run account task with semaphore to limit concurrency."""
-        async with self._semaphore:
-            await self._run_account_task(account_id)
+        try:
+            async with self._semaphore:
+                await self._run_account_task(account_id)
+        finally:
+            self._scheduled_account_ids.discard(account_id)
 
     async def _run_account_task(self, account_id: str) -> None:
         """
@@ -211,6 +220,23 @@ class AccountScheduler:
                 # Run the task
                 try:
                     await task_service.run_task(task.id, db)
+                    await db.refresh(task)
+                    if task.status == "failed":
+                        logger.warning(
+                            "account_auto_run_finished_failed",
+                            account_id=account_id,
+                            task_id=task.id,
+                            error=task.error_message,
+                        )
+                        return
+                    if task.status != "completed":
+                        logger.warning(
+                            "account_auto_run_finished_unexpected_status",
+                            account_id=account_id,
+                            task_id=task.id,
+                            task_status=task.status,
+                        )
+                        return
                     # Task succeeded - update status
                     await account_service.update_account_run_status(account_id, db, "success")
                 except Exception as task_error:
