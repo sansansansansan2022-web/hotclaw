@@ -207,14 +207,15 @@ async def test_disable_account_api_persists_inactive_state(client, db_session):
     )
     db_session.add(account)
     await db_session.commit()
+    account_id = account.id
 
-    resp = await client.post(f"/api/v1/accounts/{account.id}/disable")
+    resp = await client.post(f"/api/v1/accounts/{account_id}/disable")
 
     assert resp.status_code == 200
     assert resp.json()["is_active"] is False
 
     await db_session.rollback()
     db_session.expire_all()
-    saved = await db_session.get(AccountModel, account.id)
+    saved = await db_session.get(AccountModel, account_id)
     assert saved is not None
     assert saved.is_active is False

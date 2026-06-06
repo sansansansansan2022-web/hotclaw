@@ -9,6 +9,8 @@ Covers:
 5. Error message tracking
 """
 
+import asyncio
+
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
@@ -678,6 +680,7 @@ async def test_scheduler_preserves_failed_task_status(db_session, monkeypatch):
     )
     db_session.add(account)
     await db_session.commit()
+    account_id = account.id
 
     session_factory = async_sessionmaker(
         db_session.bind, class_=AsyncSession, expire_on_commit=False
@@ -713,16 +716,16 @@ async def test_scheduler_preserves_failed_task_status(db_session, monkeypatch):
     monkeypatch.setattr("app.services.task_service.task_service.run_task", fake_run_task)
 
     scheduler = AccountScheduler()
-    await scheduler._run_account_task(account.id)
+    await scheduler._run_account_task(account_id)
 
     db_session.expire_all()
-    saved_account = await db_session.get(AccountModel, account.id)
+    saved_account = await db_session.get(AccountModel, account_id)
     assert saved_account is not None
     assert saved_account.last_run_status == "failed"
     assert saved_account.last_error_message == "orchestrator boom"
 
     task_result = await db_session.execute(
-        select(TaskModel).where(TaskModel.account_id == account.id)
+        select(TaskModel).where(TaskModel.account_id == account_id)
     )
     saved_task = task_result.scalar_one()
     assert saved_task.status == "failed"
@@ -741,13 +744,16 @@ async def test_scheduler_reserves_account_before_background_task(db_session, mon
         next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
     )
     scheduled_coros = []
+    started = asyncio.Event()
+    release = asyncio.Event()
 
     async def fake_get_due_accounts(db):
         return [account]
 
-    def fake_create_task(coro):
-        scheduled_coros.append(coro)
-        return SimpleNamespace(cancel=lambda: None)
+    async def fake_run_account_task_limited(account_id):
+        scheduled_coros.append(account_id)
+        started.set()
+        await release.wait()
 
     session_factory = async_sessionmaker(
         db_session.bind, class_=AsyncSession, expire_on_commit=False
@@ -757,14 +763,15 @@ async def test_scheduler_reserves_account_before_background_task(db_session, mon
         "app.services.account_service.account_service.get_due_accounts",
         fake_get_due_accounts,
     )
-    monkeypatch.setattr("app.scheduler.account_scheduler.asyncio.create_task", fake_create_task)
 
     scheduler = AccountScheduler()
+    monkeypatch.setattr(scheduler, "_run_account_task_limited", fake_run_account_task_limited)
     await scheduler._check_and_run_due_accounts()
+    await started.wait()
     await scheduler._check_and_run_due_accounts()
 
     assert len(scheduled_coros) == 1
     assert account.id in scheduler._scheduled_account_ids
 
-    for coro in scheduled_coros:
-        coro.close()
+    release.set()
+    await asyncio.sleep(0)
