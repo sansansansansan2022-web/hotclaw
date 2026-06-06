@@ -12,9 +12,12 @@ Covers:
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from sqlalchemy import select
 
+from conftest import test_session_factory
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import AccountScheduler
 from app.services.account_service import account_service
 from app.core.exceptions import (
     AccountNotFoundError,
@@ -656,3 +659,106 @@ class TestTemporaryTaskCompatibility:
         # The _refresh_account_next_run and _update_account_run_status_on_failure
         # methods should be called with None and gracefully skip
         # (This is implicitly tested - if there was an error, the test would fail)
+
+
+@pytest.mark.asyncio
+async def test_scheduler_preserves_failed_task_status(db_session, monkeypatch):
+    import app.db.session as session_module
+
+    account = AccountModel(
+        id="test-scheduler-failure-preserved",
+        name="Scheduler Failure Preserved",
+        positioning="Test positioning",
+        operation_mode="semi_auto",
+        auto_run_enabled=True,
+        is_active=True,
+        posting_frequency="daily",
+        next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        last_run_status="never_run",
+    )
+    db_session.add(account)
+    await db_session.commit()
+
+    monkeypatch.setattr(session_module, "async_session_factory", test_session_factory)
+
+    async def fake_evaluate_account_run(account_obj, db, allow_auto=False):
+        return {
+            "run_strategy": {
+                "allow_run": True,
+                "effective_mode": account_obj.operation_mode,
+                "allow_auto_publish": False,
+            }
+        }
+
+    async def fake_run_task(task_id, db):
+        task = await db.get(TaskModel, task_id)
+        assert task is not None
+        task.status = "failed"
+        task.error_message = "orchestrator boom"
+        task.completed_at = datetime.now(timezone.utc)
+        db.add(task)
+        await db.commit()
+        await account_service.update_account_run_status(
+            task.account_id, db, "failed", "orchestrator boom"
+        )
+        await db.commit()
+
+    monkeypatch.setattr(
+        "app.services.account_service.account_harness_service.evaluate_account_run",
+        fake_evaluate_account_run,
+    )
+    monkeypatch.setattr("app.services.task_service.task_service.run_task", fake_run_task)
+
+    scheduler = AccountScheduler()
+    await scheduler._run_account_task(account.id)
+
+    db_session.expire_all()
+    saved_account = await db_session.get(AccountModel, account.id)
+    assert saved_account is not None
+    assert saved_account.last_run_status == "failed"
+    assert saved_account.last_error_message == "orchestrator boom"
+
+    task_result = await db_session.execute(
+        select(TaskModel).where(TaskModel.account_id == account.id)
+    )
+    saved_task = task_result.scalar_one()
+    assert saved_task.status == "failed"
+    assert saved_task.error_message == "orchestrator boom"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_reserves_account_before_background_task(monkeypatch):
+    import app.db.session as session_module
+
+    account = SimpleNamespace(
+        id="test-scheduler-reserved",
+        is_active=True,
+        auto_run_enabled=True,
+        operation_mode="semi_auto",
+        next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+    )
+    scheduled_coros = []
+
+    async def fake_get_due_accounts(db):
+        return [account]
+
+    def fake_create_task(coro):
+        scheduled_coros.append(coro)
+        return SimpleNamespace(cancel=lambda: None)
+
+    monkeypatch.setattr(session_module, "async_session_factory", test_session_factory)
+    monkeypatch.setattr(
+        "app.services.account_service.account_service.get_due_accounts",
+        fake_get_due_accounts,
+    )
+    monkeypatch.setattr("app.scheduler.account_scheduler.asyncio.create_task", fake_create_task)
+
+    scheduler = AccountScheduler()
+    await scheduler._check_and_run_due_accounts()
+    await scheduler._check_and_run_due_accounts()
+
+    assert len(scheduled_coros) == 1
+    assert account.id in scheduler._scheduled_account_ids
+
+    for coro in scheduled_coros:
+        coro.close()

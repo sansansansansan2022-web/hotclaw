@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { disableAccount, enableAccount, getAccount, getApiOriginDebugInfo, getPendingDraftCount, getWeChatConfig, runAccount } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatDateTime, formatDuration, formatNumber, truncate } from "@/lib/utils";
@@ -88,8 +88,11 @@ export function AccountDetailPage({ accountId }: { accountId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirmDisable, setConfirmDisable] = useState(false);
+  const loadSeq = useRef(0);
 
   const load = async () => {
+    const seq = loadSeq.current + 1;
+    loadSeq.current = seq;
     try {
       setLoading(true);
       setError(null);
@@ -97,13 +100,19 @@ export function AccountDetailPage({ accountId }: { accountId: string }) {
         getAccount(accountId),
         getPendingDraftCount(accountId).catch(() => ({ count: 0 })),
       ]);
+      if (seq !== loadSeq.current) return;
       setDetail(detailRes);
       setPendingCount(pendingRes.count);
-      setWeChatConfig(await getWeChatConfig(accountId).catch(() => null));
+      const config = await getWeChatConfig(accountId).catch(() => null);
+      if (seq !== loadSeq.current) return;
+      setWeChatConfig(config);
     } catch (loadError) {
+      if (seq !== loadSeq.current) return;
       setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载账号详情。" : "Unable to load account detail.");
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) {
+        setLoading(false);
+      }
     }
   };
 

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createAutomationPlan,
   getAccount,
@@ -103,18 +103,25 @@ export function AutomationPlanPage({ accountId }: { accountId: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadSeq = useRef(0);
 
   const load = async () => {
+    const seq = loadSeq.current + 1;
+    loadSeq.current = seq;
     try {
       setLoading(true);
       setError(null);
       const [account, plan] = await Promise.all([getAccount(accountId), getAutomationPlan(accountId)]);
+      if (seq !== loadSeq.current) return;
       setData({ account, plan });
       setForm(buildInitialForm(plan));
     } catch (loadError) {
+      if (seq !== loadSeq.current) return;
       setError(loadError instanceof Error ? loadError.message : t("automationPlan.loadError"));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) {
+        setLoading(false);
+      }
     }
   };
 

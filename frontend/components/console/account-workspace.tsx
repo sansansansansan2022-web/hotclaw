@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getAccount, getApiOriginDebugInfo, getPendingDraftCount, getWeChatConfig, listAccountTasks, listDrafts, runAccount } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -134,6 +134,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadSeq = useRef(0);
   const onboardingSource = searchParams.get("source");
   const showOnboardingChecklist = searchParams.get("onboarding") === "1";
   const seededSourceCount = Number(searchParams.get("seeded_sources") || "0");
@@ -373,6 +374,8 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
       };
 
   const load = async () => {
+    const seq = loadSeq.current + 1;
+    loadSeq.current = seq;
     try {
       setLoading(true);
       setError(null);
@@ -389,6 +392,8 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
       const filteredOutTaskCount = tasksRes.tasks.length - scopedTasks.length;
       const scopedDrafts = draftsRes.drafts.filter((draft) => draft.account_id === accountId);
       const filteredOutDraftCount = draftsRes.drafts.length - scopedDrafts.length;
+
+      if (seq !== loadSeq.current) return;
 
       if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
         const apiInfo = getApiOriginDebugInfo();
@@ -421,9 +426,12 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         filteredOutDraftCount,
       });
     } catch (loadError) {
+      if (seq !== loadSeq.current) return;
       setError(loadError instanceof Error ? loadError.message : copy.loadError);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) {
+        setLoading(false);
+      }
     }
   };
 
