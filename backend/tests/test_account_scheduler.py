@@ -14,8 +14,8 @@ import pytest_asyncio
 from datetime import datetime, timezone, timedelta
 from types import SimpleNamespace
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from conftest import test_session_factory
 from app.models.tables import AccountModel, TaskModel
 from app.scheduler.account_scheduler import AccountScheduler
 from app.services.account_service import account_service
@@ -679,7 +679,10 @@ async def test_scheduler_preserves_failed_task_status(db_session, monkeypatch):
     db_session.add(account)
     await db_session.commit()
 
-    monkeypatch.setattr(session_module, "async_session_factory", test_session_factory)
+    session_factory = async_sessionmaker(
+        db_session.bind, class_=AsyncSession, expire_on_commit=False
+    )
+    monkeypatch.setattr(session_module, "async_session_factory", session_factory)
 
     async def fake_evaluate_account_run(account_obj, db, allow_auto=False):
         return {
@@ -727,7 +730,7 @@ async def test_scheduler_preserves_failed_task_status(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_scheduler_reserves_account_before_background_task(monkeypatch):
+async def test_scheduler_reserves_account_before_background_task(db_session, monkeypatch):
     import app.db.session as session_module
 
     account = SimpleNamespace(
@@ -746,7 +749,10 @@ async def test_scheduler_reserves_account_before_background_task(monkeypatch):
         scheduled_coros.append(coro)
         return SimpleNamespace(cancel=lambda: None)
 
-    monkeypatch.setattr(session_module, "async_session_factory", test_session_factory)
+    session_factory = async_sessionmaker(
+        db_session.bind, class_=AsyncSession, expire_on_commit=False
+    )
+    monkeypatch.setattr(session_module, "async_session_factory", session_factory)
     monkeypatch.setattr(
         "app.services.account_service.account_service.get_due_accounts",
         fake_get_due_accounts,
