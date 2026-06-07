@@ -388,6 +388,7 @@ async def disable_account(
     """
     try:
         account = await account_service.disable_account(account_id, db)
+        await db.commit()
         return AccountSummary(
             account_id=account.id,
             name=account.name,

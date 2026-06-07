@@ -208,9 +208,40 @@ class AccountScheduler:
                     operation_mode=account.operation_mode
                 )
 
-                # Run the task
+                # Run the task. TaskService persists failures internally instead
+                # of re-raising, so inspect the saved task before marking success.
                 try:
                     await task_service.run_task(task.id, db)
+
+                    finished_task = await task_service.get_task(task.id, db)
+                    if finished_task.status == "failed":
+                        error_msg = finished_task.error_message or "任务执行失败"
+                        logger.error(
+                            "account_task_failed",
+                            account_id=account_id,
+                            task_id=task.id,
+                            error=error_msg,
+                        )
+                        await account_service.update_account_run_status(
+                            account_id, db, "failed", error_msg
+                        )
+                        await db.commit()
+                        return
+
+                    if finished_task.status != "completed":
+                        error_msg = f"任务结束状态异常: {finished_task.status}"
+                        logger.error(
+                            "account_task_unexpected_status",
+                            account_id=account_id,
+                            task_id=task.id,
+                            status=finished_task.status,
+                        )
+                        await account_service.update_account_run_status(
+                            account_id, db, "failed", error_msg
+                        )
+                        await db.commit()
+                        return
+
                     # Task succeeded - update status
                     await account_service.update_account_run_status(account_id, db, "success")
                 except Exception as task_error:
