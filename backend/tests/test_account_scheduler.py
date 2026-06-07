@@ -14,7 +14,9 @@ import pytest_asyncio
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 
+from app.api import account_routes
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import account_scheduler
 from app.services.account_service import account_service
 from app.core.exceptions import (
     AccountNotFoundError,
@@ -197,6 +199,42 @@ class TestAccountServiceRun:
         assert account.last_run_status == "running"
         assert account.last_error_message is None
         assert task.id is not None
+
+    @pytest.mark.asyncio
+    async def test_scheduler_preserves_failed_task_status(
+        self, db_session, semi_auto_account, monkeypatch
+    ):
+        """
+        Scheduler should not mark an account successful when TaskService caught
+        and persisted a task failure.
+        """
+        error_message = "scheduler orchestrator boom"
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError(error_message)
+
+        class _SessionContext:
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        monkeypatch.setattr("app.db.session.async_session_factory", lambda: _SessionContext())
+        monkeypatch.setattr("app.services.task_service.orchestrator_engine.run", _boom)
+
+        await account_scheduler._run_account_task(semi_auto_account.id)
+
+        await db_session.refresh(semi_auto_account)
+        task_result = await db_session.execute(
+            select(TaskModel).where(TaskModel.account_id == semi_auto_account.id)
+        )
+        saved_task = task_result.scalar_one()
+
+        assert saved_task.status == "failed"
+        assert saved_task.error_message == error_message
+        assert semi_auto_account.last_run_status == "failed"
+        assert semi_auto_account.last_error_message == error_message
 
     # -------------------------------------------------------------------------
     # Test: Update account run status
@@ -422,6 +460,28 @@ class TestAccountCRUDWithStatus:
                 {"operation_mode": "bad_mode"},
                 db_session
             )
+
+    @pytest.mark.asyncio
+    async def test_disable_account_route_commits_persisted_state(self, db_session):
+        """Disable API should persist is_active=False after the request ends."""
+        account = AccountModel(
+            id="test-disable-route",
+            name="Disable Route Test",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        response = await account_routes.disable_account(account.id, db_session)
+        assert response.is_active is False
+
+        await db_session.rollback()
+        await db_session.refresh(account)
+
+        assert account.is_active is False
 
 
 class TestDueAccountsExcludesRunningTasks:
