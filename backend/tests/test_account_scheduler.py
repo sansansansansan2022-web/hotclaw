@@ -12,10 +12,13 @@ Covers:
 import pytest
 import pytest_asyncio
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import account_scheduler
 from app.services.account_service import account_service
+from app.services.task_service import task_service
 from app.core.exceptions import (
     AccountNotFoundError,
     AccountInactiveError,
@@ -245,6 +248,30 @@ class TestAccountServiceRun:
 
 class TestSchedulerEligibility:
     """Test scheduler eligibility checks."""
+
+    def test_final_eligibility_accepts_due_naive_datetime(self):
+        """
+        SQLite may return naive datetimes; the scheduler's final guard should
+        still compare them as UTC rather than crashing the whole tick.
+        """
+        account = SimpleNamespace(
+            is_active=True,
+            auto_run_enabled=True,
+            operation_mode="semi_auto",
+            next_run_at=datetime.now() - timedelta(minutes=1),
+        )
+
+        assert account_scheduler._is_eligible_for_auto_run(account)
+
+    def test_final_eligibility_rejects_future_naive_datetime(self):
+        account = SimpleNamespace(
+            is_active=True,
+            auto_run_enabled=True,
+            operation_mode="semi_auto",
+            next_run_at=datetime.now() + timedelta(minutes=1),
+        )
+
+        assert not account_scheduler._is_eligible_for_auto_run(account)
 
     @pytest.mark.asyncio
     async def test_get_due_accounts_excludes_manual_mode(self, db_session):
@@ -544,6 +571,79 @@ class TestDueAccountsExcludesRunningTasks:
         due_ids = [a.id for a in due_accounts]
 
         assert "test-completed-account" in due_ids
+
+
+@pytest.mark.asyncio
+async def test_scheduler_preserves_failed_task_status(db_session, monkeypatch):
+    """
+    TaskService.run_task persists failures and returns; the scheduler must not
+    overwrite that failed account state as success.
+    """
+    account = AccountModel(
+        id="scheduler-failed-account",
+        name="Scheduler Failed Account",
+        positioning="Test positioning",
+        operation_mode="semi_auto",
+        auto_run_enabled=True,
+        is_active=True,
+        next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+        posting_frequency="daily",
+        last_run_status="never_run",
+    )
+    task = TaskModel(
+        id="scheduler-failed-task",
+        account_id=account.id,
+        workflow_id="default_pipeline",
+        status="pending",
+        input_data={"positioning": "Test positioning"},
+    )
+    db_session.add_all([account, task])
+    await db_session.commit()
+
+    class SessionContext:
+        async def __aenter__(self):
+            return db_session
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_session_factory():
+        return SessionContext()
+
+    async def fake_run_account(account_id, db, allow_auto=False):
+        assert account_id == account.id
+        assert allow_auto is True
+        saved_account = await db.get(AccountModel, account.id)
+        saved_account.last_run_status = "running"
+        db.add(saved_account)
+        await db.flush()
+        saved_task = await db.get(TaskModel, task.id)
+        return saved_account, saved_task
+
+    async def fake_run_task(task_id, db):
+        assert task_id == task.id
+        saved_task = await db.get(TaskModel, task.id)
+        saved_task.status = "failed"
+        saved_task.error_message = "orchestrator exploded"
+        saved_task.completed_at = datetime.now(timezone.utc)
+        db.add(saved_task)
+        saved_account = await db.get(AccountModel, account.id)
+        saved_account.last_run_status = "failed"
+        saved_account.last_error_message = "orchestrator exploded"
+        db.add(saved_account)
+        await db.commit()
+
+    monkeypatch.setattr("app.db.session.async_session_factory", fake_session_factory)
+    monkeypatch.setattr(account_service, "run_account", fake_run_account)
+    monkeypatch.setattr(task_service, "run_task", fake_run_task)
+
+    await account_scheduler._run_account_task(account.id)
+
+    saved_account = await db_session.get(AccountModel, account.id)
+    saved_task = await db_session.get(TaskModel, task.id)
+    assert saved_task.status == "failed"
+    assert saved_account.last_run_status == "failed"
+    assert saved_account.last_error_message == "orchestrator exploded"
 
 
 class TestNextRunAtRefresh:

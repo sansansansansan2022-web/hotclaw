@@ -193,3 +193,33 @@ async def test_account_run_api_creates_account_owned_task_and_schedules_backgrou
     coro = scheduled.get("coro")
     if coro is not None:
         coro.close()
+
+
+@pytest.mark.asyncio
+async def test_disable_account_api_commits_status_change(db_session, monkeypatch):
+    account = AccountModel(
+        id="acct-disable-api",
+        name="Disable API",
+        positioning="Disable account positioning",
+        operation_mode="semi_auto",
+        is_active=True,
+    )
+    db_session.add(account)
+    await db_session.commit()
+
+    original_commit = db_session.commit
+    committed = False
+
+    async def tracking_commit():
+        nonlocal committed
+        committed = True
+        await original_commit()
+
+    monkeypatch.setattr(db_session, "commit", tracking_commit)
+
+    response = await account_routes.disable_account(account.id, db_session)
+
+    assert committed
+    assert response.is_active is False
+    await db_session.refresh(account)
+    assert account.is_active is False
