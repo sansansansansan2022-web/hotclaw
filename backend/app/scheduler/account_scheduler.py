@@ -38,7 +38,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from app.core.logger import get_logger
-from app.core.tracer import set_trace_id, generate_trace_id, generate_task_id
+from app.core.tracer import set_trace_id, generate_trace_id
 from app.core.exceptions import (
     AccountNotFoundError,
     AccountInactiveError,
@@ -166,11 +166,18 @@ class AccountScheduler:
         # Must have next_run_at set
         if not account.next_run_at:
             return False
-        # Must be past next_run_at
+        # Must be past next_run_at. SQLite can hydrate naive datetimes even
+        # when callers stored UTC-aware values, so normalize before comparing.
+        next_run_at = self._as_utc(account.next_run_at)
         now = datetime.now(timezone.utc)
-        if account.next_run_at > now:
+        if next_run_at > now:
             return False
         return True
+
+    def _as_utc(self, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     async def _run_account_task_limited(self, account_id: str) -> None:
         """Run account task with semaphore to limit concurrency."""
@@ -188,7 +195,6 @@ class AccountScheduler:
         from app.db.session import async_session_factory
         from app.services.account_service import account_service
         from app.services.task_service import task_service
-        from app.orchestrator.engine import orchestrator_engine
 
         trace_id = generate_trace_id()
         set_trace_id(trace_id)
@@ -211,6 +217,22 @@ class AccountScheduler:
                 # Run the task
                 try:
                     await task_service.run_task(task.id, db)
+                    await db.refresh(task)
+                    if task.status != "completed":
+                        error_msg = task.error_message or f"Task finished with status '{task.status}'"
+                        logger.error(
+                            "account_task_finished_unsuccessfully",
+                            account_id=account_id,
+                            task_id=task.id,
+                            task_status=task.status,
+                            error=error_msg,
+                        )
+                        await account_service.update_account_run_status(
+                            account_id, db, "failed", error_msg
+                        )
+                        await db.commit()
+                        return
+
                     # Task succeeded - update status
                     await account_service.update_account_run_status(account_id, db, "success")
                 except Exception as task_error:
