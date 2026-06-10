@@ -248,7 +248,11 @@ class AccountService:
         if automation_plan_payload:
             await automation_plan_service.upsert_plan(account, automation_plan_payload, db)
         elif has_legacy_plan_updates:
-            await automation_plan_service.sync_plan_from_account_legacy(account, db)
+            active_plan = await automation_plan_service.get_active_plan(account.id, db)
+            if active_plan:
+                await automation_plan_service.get_effective_summary(account, db)
+            else:
+                await automation_plan_service.sync_plan_from_account_legacy(account, db)
 
         db.add(account)
         await db.flush()

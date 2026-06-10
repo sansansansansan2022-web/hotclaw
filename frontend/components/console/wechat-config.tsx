@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createWeChatConfig, getWeChatConfig, listAccounts, testWeChatConnection, updateWeChatConfig } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -34,30 +34,37 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
   const pushToast = useAppStore((state) => state.pushToast);
   const [accounts, setAccounts] = useState<AccountSummary[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(accountId ?? null);
+  const [loadedAccountId, setLoadedAccountId] = useState<string | null>(null);
   const [existing, setExisting] = useState<WeChatConfigDetail | null>(null);
   const [form, setForm] = useState<ConfigFormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadSeq = useRef(0);
 
   const load = async (targetAccountId?: string | null) => {
+    const requestId = loadSeq.current + 1;
+    loadSeq.current = requestId;
     try {
       setLoading(true);
       setError(null);
       const accountsRes = await listAccounts(1, 100).catch(() => ({ accounts: [], pagination: { page: 1, page_size: 100, total: 0 } }));
+      if (requestId !== loadSeq.current) return;
       setAccounts(accountsRes.accounts);
 
-      const resolvedAccountId = targetAccountId ?? accountId ?? accountsRes.accounts[0]?.account_id ?? null;
+      const resolvedAccountId = targetAccountId ?? accountId ?? null;
       setSelectedAccountId(resolvedAccountId);
 
       if (!resolvedAccountId) {
         setExisting(null);
         setForm(emptyForm);
+        setLoadedAccountId(null);
         return;
       }
 
       try {
         const config = await getWeChatConfig(resolvedAccountId);
+        if (requestId !== loadSeq.current) return;
         setExisting(config);
         setForm({
           app_id: "",
@@ -68,14 +75,20 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
           only_fans_can_comment: config.only_fans_can_comment,
           is_enabled: config.is_enabled,
         });
+        setLoadedAccountId(resolvedAccountId);
       } catch {
+        if (requestId !== loadSeq.current) return;
         setExisting(null);
         setForm(emptyForm);
+        setLoadedAccountId(resolvedAccountId);
       }
     } catch (loadError) {
+      if (requestId !== loadSeq.current) return;
       setError(loadError instanceof Error ? loadError.message : t("wechat.loadError"));
     } finally {
-      setLoading(false);
+      if (requestId === loadSeq.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -84,13 +97,14 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
   }, [accountId]);
 
   const selectedAccount = useMemo(() => accounts.find((account) => account.account_id === selectedAccountId) ?? null, [accounts, selectedAccountId]);
+  const canSubmit = Boolean(selectedAccountId && selectedAccountId === loadedAccountId && !loading && !saving);
 
   const setField = <K extends keyof ConfigFormState>(key: K, value: ConfigFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
 
   const submit = async () => {
-    if (!selectedAccountId) return;
+    if (!selectedAccountId || selectedAccountId !== loadedAccountId || loading) return;
     try {
       setSaving(true);
       setError(null);
@@ -174,9 +188,16 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
                 onChange={(event) => {
                   const nextId = event.target.value;
                   setSelectedAccountId(nextId);
+                  setLoadedAccountId(null);
+                  setExisting(null);
+                  setForm(emptyForm);
+                  setLoading(true);
                   router.push(`/settings/wechat/${nextId}`);
                 }}
               >
+                <option value="" disabled>
+                  {locale === "zh-CN" ? "请选择账号" : "Choose an account"}
+                </option>
                 {accounts.map((account) => (
                   <option key={account.account_id} value={account.account_id}>
                     {account.name}
@@ -279,7 +300,7 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
                   <Button variant="secondary" onClick={() => void runConnectionTest()}>
                     {locale === "zh-CN" ? "测试连接" : "Test Connection"}
                   </Button>
-                  <Button disabled={saving || !selectedAccountId} onClick={() => void submit()}>
+                  <Button disabled={!canSubmit} onClick={() => void submit()}>
                     {saving ? (locale === "zh-CN" ? "保存中..." : "Saving...") : existing ? (locale === "zh-CN" ? "保存配置" : "Save Configuration") : (locale === "zh-CN" ? "创建配置" : "Create Configuration")}
                   </Button>
                 </div>
