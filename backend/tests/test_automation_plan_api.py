@@ -104,3 +104,62 @@ async def test_patch_automation_plan_updates_legacy_account_fields(client):
     assert detail["max_posts_per_day"] == 2
     assert detail["min_interval_minutes"] == 180
     assert detail["automation_plan_summary"]["plan_type"] == "full_auto"
+
+
+async def test_account_profile_patch_does_not_overwrite_active_automation_plan(client):
+    account_id = await _create_account(
+        client,
+        {
+            "name": "Automation Profile Edit Account",
+            "positioning": "Account with plan-backed automation settings.",
+            "operation_mode": "manual",
+            "automation_plan": {
+                "plan_type": "full_auto",
+                "is_enabled": True,
+                "run_strategy": "scheduled",
+                "schedule_type": "daily",
+                "schedule_config": {"time": "07:45"},
+                "auto_publish_enabled": True,
+                "publish_review_required": False,
+                "max_posts_per_day": 2,
+                "min_interval_minutes": 180,
+            },
+        },
+    )
+
+    response = await client.patch(
+        f"/api/v1/accounts/{account_id}",
+        json={
+            "name": "Renamed Profile",
+            "positioning": "Updated profile positioning only.",
+            "operation_mode": "manual",
+            "auto_run_enabled": False,
+            "auto_publish_enabled": False,
+            "posting_frequency": "weekly",
+            "posting_time": "12:00",
+            "max_posts_per_day": 9,
+            "min_interval_minutes": 30,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    plan_response = await client.get(f"/api/v1/accounts/{account_id}/automation-plan")
+    assert plan_response.status_code == 200
+    plan = plan_response.json()
+    assert plan["plan_type"] == "full_auto"
+    assert plan["is_enabled"] is True
+    assert plan["auto_publish_enabled"] is True
+    assert plan["schedule_type"] == "daily"
+    assert plan["schedule_config"]["time"] == "07:45"
+    assert plan["max_posts_per_day"] == 2
+    assert plan["min_interval_minutes"] == 180
+
+    detail_response = await client.get(f"/api/v1/accounts/{account_id}")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["name"] == "Renamed Profile"
+    assert detail["operation_mode"] == "full_auto"
+    assert detail["auto_run_enabled"] is True
+    assert detail["auto_publish_enabled"] is True
+    assert detail["posting_frequency"] == "daily"
+    assert detail["posting_time"] == "07:45"

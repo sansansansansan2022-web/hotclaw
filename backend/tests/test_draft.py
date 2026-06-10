@@ -7,8 +7,14 @@ import pytest_asyncio
 from datetime import datetime, timezone
 from sqlalchemy import select
 
-from app.models.tables import AccountModel, TaskModel, ArticleDraftModel
+from app.models.tables import AccountModel, TaskModel, ArticleDraftModel, AuditResultModel, SystemConfigModel
+from app.models.wechat_config import WeChatConfigModel
 from app.services.draft_service import draft_service
+from app.services.publish_decision_service import (
+    PublishDecision,
+    PublishReasonCode,
+    publish_decision_service,
+)
 from app.core.exceptions import (
     DraftNotFoundError,
     DraftInvalidStatusError,
@@ -139,6 +145,88 @@ class TestDraftService:
         assert draft.draft_status == "approved"
         assert draft.publish_status == "not_published"
         assert draft.confirmed_by == "system"
+
+    @pytest.mark.asyncio
+    async def test_task_audit_result_is_persisted_and_blocks_full_auto_publish(self, db_session):
+        account = AccountModel(
+            id="draft-audit-full-auto",
+            name="Draft Audit Full Auto",
+            positioning="A full-auto account that must honor generated audit results.",
+            operation_mode="full_auto",
+            auto_run_enabled=True,
+            auto_publish_enabled=True,
+            is_active=True,
+            publish_paused=False,
+        )
+        task = TaskModel(
+            id="draft-audit-task",
+            account_id=account.id,
+            workflow_id="default_pipeline",
+            status="completed",
+            result_data={
+                "content": {
+                    "selected_title": "Sensitive Draft",
+                    "content_markdown": "# Sensitive Draft\n\nNeeds review.",
+                    "word_count": 20,
+                },
+                "audit_result": {
+                    "passed": False,
+                    "risk_level": "high",
+                    "overall_comment": "Generated audit found high risk content.",
+                    "issues": [{"type": "sensitive", "severity": "high"}],
+                },
+            },
+        )
+        db_session.add_all(
+            [
+                account,
+                task,
+                WeChatConfigModel(
+                    account_id=account.id,
+                    app_id="wx-audit-app",
+                    app_secret="wx-audit-secret",
+                    is_enabled=True,
+                ),
+                SystemConfigModel(
+                    key="global_publish_enabled",
+                    value="true",
+                    value_type="boolean",
+                    category="publish",
+                ),
+                SystemConfigModel(
+                    key="global_emergency_stop",
+                    value="false",
+                    value_type="boolean",
+                    category="publish",
+                ),
+            ]
+        )
+        await db_session.commit()
+
+        draft = await draft_service.create_draft_from_task(
+            task_id=task.id,
+            result_data=task.result_data,
+            account_id=account.id,
+            operation_mode="full_auto",
+            db=db_session,
+        )
+        await db_session.flush()
+
+        audit_result = (
+            await db_session.execute(
+                select(AuditResultModel).where(AuditResultModel.draft_id == draft.id)
+            )
+        ).scalar_one()
+        assert audit_result.risk_level == "high"
+        assert audit_result.passed is False
+
+        decision = await publish_decision_service.decide_publish(
+            draft.id,
+            db_session,
+            source="full_auto",
+        )
+        assert decision.decision == PublishDecision.BLOCK
+        assert decision.reason_code == PublishReasonCode.AUDIT_HIGH_RISK
 
     @pytest.mark.asyncio
     async def test_confirm_publish_state_machine(self, db_session, pending_draft):

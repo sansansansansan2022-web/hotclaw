@@ -112,6 +112,7 @@ class DraftService:
 
         db.add(draft)
         await db.flush()
+        self._persist_audit_result(task_id, draft.id, normalized_result.get("audit_result"), db)
         logger.info(
             "draft_created",
             draft_id=draft.id,
@@ -122,6 +123,43 @@ class DraftService:
         )
 
         return draft
+
+    def _persist_audit_result(
+        self,
+        task_id: str,
+        draft_id: int,
+        audit_result: Any,
+        db: AsyncSession,
+    ) -> None:
+        if not isinstance(audit_result, dict):
+            return
+
+        risk_level = str(audit_result.get("risk_level") or "low").strip().lower()
+        if risk_level not in {"low", "medium", "high"}:
+            risk_level = "medium"
+
+        issues = audit_result.get("issues")
+        if not isinstance(issues, list):
+            issues = []
+
+        passed = audit_result.get("passed")
+        if not isinstance(passed, bool):
+            passed = risk_level == "low" and not issues
+
+        overall_comment = (
+            audit_result.get("overall_comment")
+            or audit_result.get("comment")
+            or audit_result.get("summary")
+        )
+        audit = AuditResultModel(
+            task_id=task_id,
+            draft_id=draft_id,
+            passed=passed,
+            risk_level=risk_level,
+            issues=issues,
+            overall_comment=str(overall_comment) if overall_comment is not None else None,
+        )
+        db.add(audit)
 
     def _count_words(self, text: str) -> int:
         """Count Chinese + English words in text."""

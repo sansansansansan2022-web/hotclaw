@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAccount, getAccount, updateAccount } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
-import type { AccountCreateRequest, AccountDetail, OperationMode, PostingFrequency } from "@/types";
+import type { AccountCreateRequest, AccountDetail, AccountUpdateRequest, OperationMode, PostingFrequency } from "@/types";
 import { Button, Card, ErrorState, Input, PageHeader, Select, Textarea } from "@/components/console/ui";
 import { useAppStore } from "@/store/appStore";
 
@@ -45,6 +45,20 @@ function normalize(detail: AccountDetail): AccountCreateRequest {
     publish_paused: detail.publish_paused,
     max_posts_per_day: detail.max_posts_per_day,
     min_interval_minutes: detail.min_interval_minutes,
+  };
+}
+
+function buildProfileUpdatePayload(form: AccountCreateRequest): AccountUpdateRequest {
+  return {
+    name: form.name,
+    category: form.category,
+    positioning: form.positioning,
+    audience: form.audience,
+    tone_style: form.tone_style,
+    content_strategy: form.content_strategy,
+    reference_accounts: form.reference_accounts,
+    is_active: form.is_active,
+    publish_paused: form.publish_paused,
   };
 }
 
@@ -115,7 +129,7 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
       setSaving(true);
       setError(null);
       if (editing && accountId) {
-        await updateAccount(accountId, form);
+        await updateAccount(accountId, buildProfileUpdatePayload(form));
         pushToast({
           tone: "success",
           title: locale === "zh-CN" ? "账号已更新" : "Account updated",
