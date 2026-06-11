@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getAccount, getApiOriginDebugInfo, getPendingDraftCount, getWeChatConfig, listAccountTasks, listDrafts, runAccount } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -134,6 +134,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
   const onboardingSource = searchParams.get("source");
   const showOnboardingChecklist = searchParams.get("onboarding") === "1";
   const seededSourceCount = Number(searchParams.get("seeded_sources") || "0");
@@ -373,21 +374,25 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
       };
 
   const load = async () => {
+    const requestId = ++loadRequestRef.current;
+    const requestedAccountId = accountId;
     try {
       setLoading(true);
       setError(null);
+      setData(null);
 
       const [account, tasksRes, draftsRes, pendingRes, wechatConfig] = await Promise.all([
-        getAccount(accountId),
-        listAccountTasks(accountId, 1, 8),
-        listDrafts(1, 8, { account_id: accountId }),
-        getPendingDraftCount(accountId).catch(() => ({ count: 0 })),
-        getWeChatConfig(accountId).catch(() => null),
+        getAccount(requestedAccountId),
+        listAccountTasks(requestedAccountId, 1, 8),
+        listDrafts(1, 8, { account_id: requestedAccountId }),
+        getPendingDraftCount(requestedAccountId).catch(() => ({ count: 0 })),
+        getWeChatConfig(requestedAccountId).catch(() => null),
       ]);
+      if (loadRequestRef.current !== requestId || account.account_id !== requestedAccountId) return;
 
-      const scopedTasks = tasksRes.tasks.filter((task) => task.account_id === accountId);
+      const scopedTasks = tasksRes.tasks.filter((task) => task.account_id === requestedAccountId);
       const filteredOutTaskCount = tasksRes.tasks.length - scopedTasks.length;
-      const scopedDrafts = draftsRes.drafts.filter((draft) => draft.account_id === accountId);
+      const scopedDrafts = draftsRes.drafts.filter((draft) => draft.account_id === requestedAccountId);
       const filteredOutDraftCount = draftsRes.drafts.length - scopedDrafts.length;
 
       if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
@@ -421,9 +426,12 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         filteredOutDraftCount,
       });
     } catch (loadError) {
+      if (loadRequestRef.current !== requestId) return;
       setError(loadError instanceof Error ? loadError.message : copy.loadError);
     } finally {
-      setLoading(false);
+      if (loadRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
   };
 
