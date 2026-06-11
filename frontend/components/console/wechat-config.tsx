@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createWeChatConfig, getWeChatConfig, listAccounts, testWeChatConnection, updateWeChatConfig } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -36,28 +36,34 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(accountId ?? null);
   const [existing, setExisting] = useState<WeChatConfigDetail | null>(null);
   const [form, setForm] = useState<ConfigFormState>(emptyForm);
+  const [formAccountId, setFormAccountId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
 
   const load = async (targetAccountId?: string | null) => {
+    const requestId = ++loadRequestRef.current;
     try {
       setLoading(true);
       setError(null);
       const accountsRes = await listAccounts(1, 100).catch(() => ({ accounts: [], pagination: { page: 1, page_size: 100, total: 0 } }));
+      if (loadRequestRef.current !== requestId) return;
       setAccounts(accountsRes.accounts);
 
       const resolvedAccountId = targetAccountId ?? accountId ?? accountsRes.accounts[0]?.account_id ?? null;
       setSelectedAccountId(resolvedAccountId);
+      setExisting(null);
+      setForm(emptyForm);
+      setFormAccountId(null);
 
       if (!resolvedAccountId) {
-        setExisting(null);
-        setForm(emptyForm);
         return;
       }
 
       try {
         const config = await getWeChatConfig(resolvedAccountId);
+        if (loadRequestRef.current !== requestId || config.account_id !== resolvedAccountId) return;
         setExisting(config);
         setForm({
           app_id: "",
@@ -68,14 +74,20 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
           only_fans_can_comment: config.only_fans_can_comment,
           is_enabled: config.is_enabled,
         });
+        setFormAccountId(resolvedAccountId);
       } catch {
+        if (loadRequestRef.current !== requestId) return;
         setExisting(null);
         setForm(emptyForm);
+        setFormAccountId(resolvedAccountId);
       }
     } catch (loadError) {
+      if (loadRequestRef.current !== requestId) return;
       setError(loadError instanceof Error ? loadError.message : t("wechat.loadError"));
     } finally {
-      setLoading(false);
+      if (loadRequestRef.current === requestId) {
+        setLoading(false);
+      }
     }
   };
 
@@ -91,6 +103,14 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
 
   const submit = async () => {
     if (!selectedAccountId) return;
+    if (loading || formAccountId !== selectedAccountId || (existing && existing.account_id !== selectedAccountId)) {
+      pushToast({
+        tone: "warning",
+        title: locale === "zh-CN" ? "请等待账号配置加载完成" : "Wait for account config to load",
+        message: locale === "zh-CN" ? "账号正在切换，当前表单不会保存到新账号。" : "The account is still switching, so the current form was not saved to the new account.",
+      });
+      return;
+    }
     try {
       setSaving(true);
       setError(null);
@@ -174,6 +194,10 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
                 onChange={(event) => {
                   const nextId = event.target.value;
                   setSelectedAccountId(nextId);
+                  setExisting(null);
+                  setForm(emptyForm);
+                  setFormAccountId(null);
+                  setSaving(false);
                   router.push(`/settings/wechat/${nextId}`);
                 }}
               >
@@ -279,7 +303,7 @@ export function WeChatConfigPage({ accountId }: { accountId?: string }) {
                   <Button variant="secondary" onClick={() => void runConnectionTest()}>
                     {locale === "zh-CN" ? "测试连接" : "Test Connection"}
                   </Button>
-                  <Button disabled={saving || !selectedAccountId} onClick={() => void submit()}>
+                  <Button disabled={saving || !selectedAccountId || formAccountId !== selectedAccountId} onClick={() => void submit()}>
                     {saving ? (locale === "zh-CN" ? "保存中..." : "Saving...") : existing ? (locale === "zh-CN" ? "保存配置" : "Save Configuration") : (locale === "zh-CN" ? "创建配置" : "Create Configuration")}
                   </Button>
                 </div>

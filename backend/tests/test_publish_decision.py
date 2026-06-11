@@ -24,8 +24,10 @@ from app.models.tables import (
     ArticleDraftModel,
     AuditResultModel,
     SystemConfigModel,
+    TaskModel,
 )
 from app.models.wechat_config import WeChatConfigModel
+from app.services.draft_service import draft_service
 from app.services.publish_decision_service import (
     publish_decision_service,
     PublishDecision,
@@ -199,6 +201,51 @@ class TestAccountPublishPaused:
 
 class TestAuditResultGating:
     """Test audit result-based gating."""
+
+    @pytest.mark.asyncio
+    async def test_generated_high_risk_audit_blocks_created_draft(
+        self, db_session, full_auto_account, wechat_config, system_config
+    ):
+        """Draft creation should persist task audit output for publish gating."""
+        task = TaskModel(
+            id="test-task-generated-high-risk",
+            account_id=full_auto_account.id,
+            workflow_id="default_pipeline",
+            status="completed",
+            result_data={
+                "content": {
+                    "summary": "测试摘要",
+                    "content_markdown": "# 高风险内容\n\n正文内容",
+                    "content_html": "<h1>高风险内容</h1><p>正文内容</p>",
+                },
+                "titles": {"selected_title": "高风险内容", "candidates": ["高风险内容"]},
+                "topics": {"selected_topic": "测试选题"},
+                "audit_result": {
+                    "passed": False,
+                    "risk_level": "high",
+                    "overall_comment": "生成审核发现高风险内容",
+                    "issues": [{"type": "sensitive", "severity": "high"}],
+                },
+            },
+        )
+        db_session.add(task)
+        await db_session.commit()
+
+        draft = await draft_service.create_draft_from_task(
+            task_id=task.id,
+            result_data=task.result_data,
+            account_id=full_auto_account.id,
+            operation_mode="full_auto",
+            db=db_session,
+        )
+        await db_session.commit()
+
+        result = await publish_decision_service.decide_publish(
+            draft.id, db_session, source="full_auto"
+        )
+
+        assert result.decision == PublishDecision.BLOCK
+        assert result.reason_code == PublishReasonCode.AUDIT_HIGH_RISK
 
     @pytest.mark.asyncio
     async def test_high_risk_blocks(

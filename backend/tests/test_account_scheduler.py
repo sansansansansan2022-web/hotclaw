@@ -15,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import select
 
 from app.models.tables import AccountModel, TaskModel
+from app.scheduler.account_scheduler import account_scheduler
 from app.services.account_service import account_service
 from app.core.exceptions import (
     AccountNotFoundError,
@@ -241,6 +242,56 @@ class TestAccountServiceRun:
 
         await db_session.refresh(semi_auto_account)
         assert len(semi_auto_account.last_error_message) <= 500
+
+
+class TestSchedulerTaskResultSync:
+    """Test production scheduler handling of task terminal status."""
+
+    @pytest.mark.asyncio
+    async def test_scheduler_preserves_failed_task_status(self, db_session, monkeypatch):
+        account = AccountModel(
+            id="test-scheduler-failed-task",
+            name="Scheduler Failed Task",
+            positioning="Test positioning",
+            operation_mode="semi_auto",
+            auto_run_enabled=True,
+            is_active=True,
+            next_run_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            posting_frequency="daily",
+            last_run_status="never_run",
+        )
+        db_session.add(account)
+        await db_session.commit()
+
+        class ExistingSessionContext:
+            async def __aenter__(self):
+                return db_session
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        monkeypatch.setattr(
+            "app.db.session.async_session_factory",
+            lambda: ExistingSessionContext(),
+        )
+
+        async def fail_orchestrator(*args, **kwargs):
+            raise RuntimeError("critical scheduler failure")
+
+        monkeypatch.setattr("app.services.task_service.orchestrator_engine.run", fail_orchestrator)
+
+        await account_scheduler._run_account_task(account.id)
+
+        await db_session.refresh(account)
+        task_result = await db_session.execute(
+            select(TaskModel).where(TaskModel.account_id == account.id)
+        )
+        task = task_result.scalar_one()
+
+        assert task.status == "failed"
+        assert task.error_message == "critical scheduler failure"
+        assert account.last_run_status == "failed"
+        assert account.last_error_message == "critical scheduler failure"
 
 
 class TestSchedulerEligibility:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createAccount, getAccount, updateAccount } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -53,24 +53,41 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
   const router = useRouter();
   const pushToast = useAppStore((state) => state.pushToast);
   const [form, setForm] = useState<AccountCreateRequest>(initialForm);
+  const [loadedAccountId, setLoadedAccountId] = useState<string | null>(null);
   const [loading, setLoading] = useState(Boolean(accountId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const loadRequestRef = useRef(0);
 
   const editing = Boolean(accountId);
 
   useEffect(() => {
-    if (!accountId) return;
+    const requestId = ++loadRequestRef.current;
+    if (!accountId) {
+      setForm(initialForm);
+      setLoadedAccountId(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+    const requestedAccountId = accountId;
+    setForm(initialForm);
+    setLoadedAccountId(null);
     const load = async () => {
       try {
         setLoading(true);
         setError(null);
-        const detail = await getAccount(accountId);
+        const detail = await getAccount(requestedAccountId);
+        if (loadRequestRef.current !== requestId || detail.account_id !== requestedAccountId) return;
         setForm(normalize(detail));
+        setLoadedAccountId(requestedAccountId);
       } catch (loadError) {
+        if (loadRequestRef.current !== requestId) return;
         setError(loadError instanceof Error ? loadError.message : locale === "zh-CN" ? "无法加载账号" : "Unable to load account");
       } finally {
-        setLoading(false);
+        if (loadRequestRef.current === requestId) {
+          setLoading(false);
+        }
       }
     };
     void load();
@@ -102,6 +119,14 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
   };
 
   const submit = async () => {
+    if (editing && accountId && (loading || loadedAccountId !== accountId)) {
+      pushToast({
+        tone: "warning",
+        title: locale === "zh-CN" ? "请等待账号加载完成" : "Wait for account to load",
+        message: locale === "zh-CN" ? "账号正在切换，当前表单不会保存到新账号。" : "The account is still switching, so the current form was not saved to the new account.",
+      });
+      return;
+    }
     if (!form.name.trim() || !form.positioning.trim()) {
       pushToast({
         tone: "warning",
@@ -297,7 +322,7 @@ export function AccountFormPage({ accountId }: { accountId?: string }) {
           </div>
 
           <div className="flex justify-end">
-            <Button disabled={saving} onClick={() => void submit()}>
+            <Button disabled={saving || (editing && loadedAccountId !== accountId)} onClick={() => void submit()}>
               {saving ? (locale === "zh-CN" ? "保存中..." : "Saving...") : editing ? (locale === "zh-CN" ? "保存修改" : "Save Changes") : locale === "zh-CN" ? "创建账号" : "Create Account"}
             </Button>
           </div>
