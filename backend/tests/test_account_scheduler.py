@@ -100,10 +100,10 @@ class TestAccountServiceRun:
     async def test_manual_account_cannot_be_auto_run(self, db_session, manual_account):
         """
         Manual mode accounts should raise AccountValidationError when
-        allow_auto=False (default) to prevent auto-scheduling.
+        allow_auto=True to prevent auto-scheduling.
         """
         with pytest.raises(AccountValidationError) as exc_info:
-            await account_service.run_account(manual_account.id, db_session, allow_auto=False)
+            await account_service.run_account(manual_account.id, db_session, allow_auto=True)
 
         assert "manual mode" in str(exc_info.value.message).lower()
         assert exc_info.value.code == 6003  # AccountValidationError
@@ -579,10 +579,11 @@ class TestNextRunAtRefresh:
 
         # next_run_at should be updated to a future date
         assert account.next_run_at is not None
-        assert account.next_run_at > old_next_run
+        next_run_at = account.next_run_at.replace(tzinfo=timezone.utc) if account.next_run_at.tzinfo is None else account.next_run_at
+        assert next_run_at > old_next_run
         # Should be approximately 7 days (weekly) in the future
         expected_delta = timedelta(days=7)
-        actual_delta = account.next_run_at - datetime.now(timezone.utc)
+        actual_delta = next_run_at - datetime.now(timezone.utc)
         assert abs(actual_delta.days - expected_delta.days) <= 1  # Allow 1 day tolerance
 
     @pytest.mark.asyncio

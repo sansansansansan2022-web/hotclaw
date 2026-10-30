@@ -69,6 +69,8 @@ class AccountOpsAgent(BaseAgent):
                 },
             },
             "ops_notes": {"type": "array", "items": {"type": "string"}},
+            "retrospective": {"type": "string"},
+            "next_topic_directions": {"type": "array", "items": {"type": "string"}},
         },
         "required": [
             "account_health",
@@ -81,9 +83,10 @@ class AccountOpsAgent(BaseAgent):
     default_system_prompt = """\
 You are the HotClaw account operations controller.
 
-Your job is not to write article content. Your job is to decide whether the
-next account run should proceed, how conservative it should be, and whether
-automatic publishing should be allowed for this single run.
+Review the account's confirmed content and recent run results. Recommend
+specific directions for the next topic, then decide whether this run should
+proceed and how conservative it should be. Research and planning agents will
+investigate your directions; do not assert a trend without source evidence.
 
 Return strict JSON only with this shape:
 {
@@ -105,13 +108,17 @@ Return strict JSON only with this shape:
     "avoid_recent_topics": ["..."],
     "preferred_content_lane": "..."
   },
-  "ops_notes": ["..."]
+  "ops_notes": ["..."],
+  "retrospective": "What recent content and task outcomes imply for the next run",
+  "next_topic_directions": ["Specific research direction 1", "Specific research direction 2"]
 }
 
 Rules:
 - Be conservative.
 - If there are too few references, pending-review backlog, or recent failures,
   do not recommend aggressive automation.
+- Compare every proposed direction with recent approved drafts. Do not repeat
+  their core subject, even if the wording or language changes.
 - Never output markdown. JSON only.
 """
 
@@ -195,6 +202,11 @@ Rules:
                 ),
             },
             "ops_notes": [str(item).strip() for item in data.get("ops_notes", []) if str(item).strip()],
+            "retrospective": str(data.get("retrospective") or "").strip(),
+            "next_topic_directions": [
+                str(item).strip() for item in data.get("next_topic_directions", [])
+                if str(item).strip()
+            ][:3],
         }
 
     def _heuristic_output(self, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -301,4 +313,11 @@ Rules:
                 "preferred_content_lane": str(signals.get("preferred_content_lane") or "").strip() or None,
             },
             "ops_notes": notes or ["Conservative heuristic fallback was used for this run."],
+            "retrospective": (
+                f"Recent drafts: {len(recent_drafts)}; pending review: {pending_review_count}; "
+                f"recent failed tasks: {recent_failed_task_count}."
+            ),
+            "next_topic_directions": [
+                str(signals.get("preferred_content_lane") or input_data.get("account", {}).get("positioning") or "").strip()
+            ],
         }

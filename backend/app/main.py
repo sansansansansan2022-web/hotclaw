@@ -58,8 +58,6 @@ from app.api.platform_capability_routes import router as platform_capability_rou
 from app.agents.profile_agent import ProfileAgent
 from app.agents.hot_topic_agent import HotTopicAgent
 from app.agents.topic_planner_agent import TopicPlannerAgent
-from app.agents.rewrite_agent import RewriteAgent
-from app.agents.post_process_agent import PostProcessAgent
 from app.agents.content_writer_agent import ContentWriterAgent
 from app.agents.audit_agent import AuditAgent
 from app.agents.account_ops_agent import AccountOpsAgent
@@ -98,8 +96,6 @@ def _register_agents() -> None:
     agent_registry.register(HotTopicAgent())
     agent_registry.register(TopicPlannerAgent())
     agent_registry.register(ContentWriterAgent())
-    agent_registry.register(RewriteAgent())
-    agent_registry.register(PostProcessAgent())
     agent_registry.register(AuditAgent())
     agent_registry.register(AccountOpsAgent())
 

@@ -28,7 +28,6 @@ CRITICAL_SCHEMA: dict[str, tuple[str, ...]] = {
         "account_id",
         "selected_recommendation_ids_json",
         "selected_reference_source_ids_json",
-        "task_reference_sources_json",
         "source_confirmed",
         "outline_confirmed",
         "preview_version",

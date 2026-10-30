@@ -3,6 +3,7 @@
 统一管理所有 LLM Provider 的配置，支持从环境变量加载。
 """
 
+import os
 from functools import lru_cache
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
@@ -193,7 +194,8 @@ def get_llm_config() -> LLMConfig:
     """获取 LLM 配置单例（带缓存）"""
     global _llm_config
     if _llm_config is None:
-        _llm_config = LLMConfig()
+        selected = os.getenv("LLM_DEFAULT_PROVIDER")
+        _llm_config = LLMConfig(default_provider=selected) if selected else LLMConfig()
     return _llm_config
 
 

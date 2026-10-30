@@ -617,6 +617,8 @@ export interface OpsContext {
   operation_stage?: string | null;
   run_strategy: RunStrategy;
   ops_notes: string[];
+  retrospective?: string;
+  next_topic_directions?: string[];
   signals?: {
     enabled_reference_source_count?: number;
     pending_review_count?: number;

@@ -32,15 +32,15 @@ def test_inject_execution_meta_appends_stage_envelopes():
     assert execution_meta["publishability"] == "review_only"
 
 
-def test_audit_blocker_skips_rewrite():
+def test_failed_audit_triggers_one_writer_revision():
     engine = OrchestratorEngine()
-    blocker_audit = {"publish_decision": "blocker", "risk_level": "high", "rewrite_required": True}
-    medium_audit = {"publish_decision": "rewrite", "risk_level": "medium", "rewrite_required": False}
+    blocker_audit = {"publish_decision": "blocker", "risk_level": "high", "passed": False}
+    medium_audit = {"publish_decision": "rewrite", "risk_level": "medium", "passed": False}
     blocker_workspace = Workspace(task_id="task-1", input_data={})
     medium_workspace = Workspace(task_id="task-2", input_data={})
     blocker_workspace.set("audit_result", blocker_audit)
     medium_workspace.set("audit_result", medium_audit)
 
     assert engine._is_audit_blocker(blocker_audit) is True
-    assert engine._should_run_rewrite(blocker_workspace) is False
+    assert engine._should_run_rewrite(blocker_workspace) is True
     assert engine._should_run_rewrite(medium_workspace) is True

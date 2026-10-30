@@ -299,6 +299,12 @@ Rules:
                 "",
                 "ACCOUNT SNAPSHOT",
                 article_assembler_service.to_pretty_json(account_snapshot),
+                "ACCOUNT OPS RETROSPECTIVE AND NEXT DIRECTIONS",
+                article_assembler_service.to_pretty_json({
+                    "retrospective": ops_context.get("retrospective") or "",
+                    "next_topic_directions": ops_context.get("next_topic_directions") or [],
+                    "avoid_recent_topics": (ops_context.get("run_strategy") or {}).get("avoid_recent_topics") or [],
+                }),
                 "",
                 "QUERY PLAN",
                 article_assembler_service.to_pretty_json(query_plan),
@@ -326,6 +332,7 @@ Rules:
                 "- Provide 3-5 topics.",
                 "- Each topic must include title, angle, hook, target_emotion, estimated_appeal, reasoning, why_now, reference_basis, target_reader, content_lane, topic_kind, evidence_refs.",
                 "- angle should explain the account-owned perspective, not just paraphrase the hot topic title.",
+                "- Reject any candidate that repeats the core subject of an avoided recent topic, even if paraphrased or translated.",
                 "- If the topic is grounded in a paper or repo, topic_kind and evidence_refs must reflect that evidence explicitly.",
                 "- For xiaohongshu, title should read like a note topic, angle should include the visual/card expression, hook should include the cover-page promise or comment trigger.",
             ]
@@ -381,7 +388,7 @@ Rules:
                         "angle": str(item.get("angle") or "").strip(),
                         "hook": str(item.get("hook") or "").strip(),
                         "target_emotion": str(item.get("target_emotion") or "").strip(),
-                        "estimated_appeal": float(item.get("estimated_appeal") or 0.0),
+                        "estimated_appeal": self._appeal_score(item.get("estimated_appeal")),
                         "reasoning": str(item.get("reasoning") or "").strip(),
                         "why_now": str(item.get("why_now") or "").strip(),
                         "reference_basis": str(item.get("reference_basis") or "").strip(),
@@ -416,6 +423,17 @@ Rules:
                 "candidates": title_candidates,
             },
         }
+
+    @staticmethod
+    def _appeal_score(value: Any) -> float:
+        if isinstance(value, str):
+            label = value.strip().lower()
+            if label in {"high", "medium", "low"}:
+                return {"high": 0.8, "medium": 0.5, "low": 0.2}[label]
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return 0.0
 
     def _parse_json(self, content: str) -> dict[str, Any]:
         """解析 LLM 返回的 JSON 内容。

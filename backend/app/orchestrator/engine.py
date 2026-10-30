@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.registry import agent_registry
 from app.core.config import settings
+from app.llm.config import get_llm_config
 from app.core.exceptions import AgentExecutionError, AgentTimeoutError
 from app.core.logger import get_logger
 from app.core.tracer import get_trace_id
@@ -56,6 +57,7 @@ REWRITE_NODE_IDS = {
 
 QUALITY_GATE_NODE_IDS = {
     "audit",
+    "audit_revision",
 }
 
 POST_PROCESS_NODE_IDS = {
@@ -174,8 +176,8 @@ DEFAULT_WORKFLOW_NODES = [
     },
     {
         "node_id": "rewrite_agent",
-        "agent_id": "rewrite_agent",
-        "name": "Rewrite Agent",
+        "agent_id": "content_writer_agent",
+        "name": "Writer Revision",
         "timeout_seconds": 600,
         "input_mapping": {
             "titles": "titles",
@@ -196,9 +198,26 @@ DEFAULT_WORKFLOW_NODES = [
         "required": False,
     },
     {
+        "node_id": "audit_revision",
+        "agent_id": "audit_agent",
+        "name": "Audit Revision",
+        "input_mapping": {
+            "titles": "titles",
+            "content": "content",
+            "profile": "profile",
+            "account_context": "account_context",
+            "selected_evidence": "selected_evidence",
+            "citation_guardrails": "citation_guardrails",
+        },
+        "output_key": "audit_result",
+        "required": False,
+    },
+    {
         "node_id": "post_process_agent",
-        "agent_id": "post_process_agent",
-        "name": "Post-process Agent",
+        "agent_id": "post_process_service",
+        "name": "Post-process",
+        "executor": "service",
+        "service": "post_process",
         "input_mapping": {
             "content": "content",
             "assembled_article": "assembled_article",
@@ -321,6 +340,9 @@ class OrchestratorEngine:
                 continue
             if node_id in REWRITE_NODE_IDS and not self._should_run_rewrite(workspace):
                 await self._record_skipped_node(task.id, node_def, db, "audit_skip_rewrite")
+                continue
+            if node_id == "audit_revision" and not (workspace.get("rewrite_result") or {}).get("used_rewrite"):
+                await self._record_skipped_node(task.id, node_def, db, "no_writer_revision")
                 continue
             if node_def.get("executor") != "service":
                 agent = agent_registry.get(node_def["agent_id"])
@@ -808,6 +830,15 @@ class OrchestratorEngine:
         task_id: str | None = None,
         account_id: str | None = None,
     ) -> AgentResult:
+        if node_def.get("service") == "post_process":
+            from app.agents.post_process_agent import PostProcessAgent
+            from app.services.post_process_service import post_process_service
+
+            prepared = await post_process_service.prepare(
+                formatter=PostProcessAgent(), input_data=input_data,
+            )
+            return AgentResult(status="success", agent_name=node_def["agent_id"], data=prepared)
+
         if node_def.get("service") == "account_ops_finalize":
             audit_result = input_data.get("audit_result") if isinstance(input_data.get("audit_result"), dict) else {}
             post_process_result = (
@@ -1420,16 +1451,7 @@ class OrchestratorEngine:
         audit_result = workspace.get("audit_result")
         if not isinstance(audit_result, dict):
             return False
-        if self._is_audit_blocker(audit_result):
-            return False
-        if str(audit_result.get("risk_level") or "").strip().lower() == "medium":
-            return True
-        rewrite_required = audit_result.get("rewrite_required")
-        if isinstance(rewrite_required, bool):
-            return rewrite_required
-        if bool(audit_result.get("passed")):
-            return False
-        return True
+        return audit_result.get("passed") is False
 
     def _is_audit_blocker(self, audit_result: Any) -> bool:
         if not isinstance(audit_result, dict):
@@ -1766,7 +1788,7 @@ class OrchestratorEngine:
         model_name = settings.llm_model_name.strip()
         if "/" in model_name:
             return model_name.split("/", 1)[0]
-        return "dashscope"
+        return get_llm_config().default_provider
 
     def _model_hint(self) -> str:
         model_name = settings.llm_model_name.strip()

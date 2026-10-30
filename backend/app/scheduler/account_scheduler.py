@@ -35,7 +35,6 @@ Account Scheduler - background task for auto-running accounts.
 """
 
 import asyncio
-from datetime import datetime, timezone
 
 from app.core.logger import get_logger
 from app.core.tracer import set_trace_id, generate_trace_id, generate_task_id
@@ -123,54 +122,36 @@ class AccountScheduler:
         """
         from app.db.session import async_session_factory
         from app.services.account_service import account_service
+        from app.services.automation_plan_service import automation_plan_service
 
         async with async_session_factory() as db:
             due_accounts = await account_service.get_due_accounts(db)
+            eligible_ids = []
+            for account in due_accounts:
+                summary = await automation_plan_service.get_effective_summary(account, db)
+                if self._is_eligible_for_auto_run(account, summary):
+                    eligible_ids.append(account.id)
+                else:
+                    logger.info("account_skipped", account_id=account.id, reason="automation plan no longer due")
             await db.commit()
 
-        if not due_accounts:
+        if not eligible_ids:
             return
 
-        logger.info("scheduler_tick", due_account_count=len(due_accounts))
+        logger.info("scheduler_tick", due_account_count=len(eligible_ids))
 
-        for account in due_accounts:
-            # Check eligibility one more time before scheduling
-            if not self._is_eligible_for_auto_run(account):
-                logger.info(
-                    "account_skipped",
-                    account_id=account.id,
-                    reason="ineligible for auto run",
-                    is_active=account.is_active,
-                    auto_run_enabled=account.auto_run_enabled,
-                    operation_mode=account.operation_mode
-                )
-                continue
-
+        for account_id in eligible_ids:
             # Use semaphore to limit concurrent runs
-            asyncio.create_task(self._run_account_task_limited(account.id))
+            asyncio.create_task(self._run_account_task_limited(account_id))
 
-    def _is_eligible_for_auto_run(self, account) -> bool:
+    def _is_eligible_for_auto_run(self, account, plan_summary: dict) -> bool:
         """
         Final eligibility check before scheduling.
         This is a defensive check - main filtering is in get_due_accounts.
         """
-        # Must be active
-        if not account.is_active:
-            return False
-        # Must have auto run enabled
-        if not account.auto_run_enabled:
-            return False
-        # Must be semi_auto or full_auto (not manual)
-        if account.operation_mode == "manual":
-            return False
-        # Must have next_run_at set
-        if not account.next_run_at:
-            return False
-        # Must be past next_run_at
-        now = datetime.now(timezone.utc)
-        if account.next_run_at > now:
-            return False
-        return True
+        from app.services.automation_plan_service import automation_plan_service
+
+        return bool(account.is_active) and automation_plan_service.should_auto_run(plan_summary)
 
     async def _run_account_task_limited(self, account_id: str) -> None:
         """Run account task with semaphore to limit concurrency."""
@@ -188,7 +169,6 @@ class AccountScheduler:
         from app.db.session import async_session_factory
         from app.services.account_service import account_service
         from app.services.task_service import task_service
-        from app.orchestrator.engine import orchestrator_engine
 
         trace_id = generate_trace_id()
         set_trace_id(trace_id)
@@ -208,29 +188,9 @@ class AccountScheduler:
                     operation_mode=account.operation_mode
                 )
 
-                # Run the task
-                try:
-                    await task_service.run_task(task.id, db)
-                    # Task succeeded - update status
-                    await account_service.update_account_run_status(account_id, db, "success")
-                except Exception as task_error:
-                    # Task failed - update status with error
-                    error_msg = str(task_error)
-                    logger.error(
-                        "account_task_failed",
-                        account_id=account_id,
-                        task_id=task.id,
-                        error=error_msg
-                    )
-                    await account_service.update_account_run_status(
-                        account_id, db, "failed", error_msg
-                    )
-                    # Re-raise to update task status
-                    raise
-
-                # Refresh next run time after completion
-                await account_service.refresh_next_run(account_id, db)
-                await db.commit()
+                # TaskService owns task/account status and next-run persistence for
+                # both manual and scheduled runs.
+                await task_service.run_task(task.id, db)
 
                 logger.info(
                     "account_auto_run_completed",

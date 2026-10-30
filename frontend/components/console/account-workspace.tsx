@@ -664,6 +664,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                   </Link>
                 </div>
               </div>
+
             </Card>
           ) : null}
 
@@ -955,6 +956,24 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                   </div>
                 </div>
               </div>
+              {latestOps?.retrospective || latestOps?.next_topic_directions?.length ? (
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                      {locale === "zh-CN" ? "本轮复盘" : "Run retrospective"}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">{latestOps.retrospective || copy.notRecorded}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                      {locale === "zh-CN" ? "下一轮选题方向" : "Next topic directions"}
+                    </p>
+                    <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-700">
+                      {(latestOps.next_topic_directions ?? []).map((direction) => <li key={direction}>{direction}</li>)}
+                    </ol>
+                  </div>
+                </div>
+              ) : null}
             </Card>
           ) : null}
 

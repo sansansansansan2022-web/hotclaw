@@ -65,13 +65,14 @@ class DeepSeekProvider(LLMProvider):
     ) -> LLMResponse:
         """执行 DeepSeek LLM 调用"""
         model = self.get_model_name(options)
+        litellm_model = model if model.startswith("deepseek/") else f"deepseek/{model}"
         messages = self.build_messages(prompt, options)
 
         start_time = time.perf_counter()
 
         try:
             response = await litellm.acompletion(
-                model=model,
+                model=litellm_model,
                 messages=messages,
                 api_key=self.api_key,
                 base_url=self.base_url,

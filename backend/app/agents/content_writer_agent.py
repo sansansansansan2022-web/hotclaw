@@ -24,9 +24,10 @@ import litellm
 
 from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
+from app.skills.review_rewrite_skills import RewriteMixin
 
 
-class ContentWriterAgent(BaseAgent):
+class ContentWriterAgent(BaseAgent, RewriteMixin):
     """内容写作 Agent - 基于话题和证据生成完整文章。
 
     核心职责：
@@ -128,6 +129,28 @@ Rules:
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
+        if isinstance(input_data.get("audit_result"), dict):
+            try:
+                article = input_data.get("content") or {}
+                response = await self.run_litellm_completion(
+                    context={**context, "system_prompt": RewriteMixin.default_system_prompt},
+                    completion_callable=litellm.acompletion,
+                    messages=[
+                        {"role": "system", "content": RewriteMixin.default_system_prompt},
+                        {"role": "user", "content": json.dumps({
+                            "instruction": "Revise the article once to address the audit findings. Keep claims grounded in the supplied evidence. Return JSON with revised_content_markdown, revision_summary, fixed_issues, changed_sections, used_rewrite.",
+                            "content_markdown": article.get("content_markdown") or "",
+                            "audit_result": input_data["audit_result"],
+                            "selected_evidence": input_data.get("selected_evidence") or [],
+                            "citation_guardrails": input_data.get("citation_guardrails") or {},
+                        }, ensure_ascii=False)},
+                    ],
+                    timeout=float(context.get("node_timeout_seconds") or settings.llm_timeout),
+                )
+                revised = RewriteMixin._normalize_rewrite(self, self._parse_json(response.choices[0].message.content))
+                return self._attach_runtime_trace(self._success(revised), context)
+            except Exception as exc:
+                return self._attach_runtime_trace(self._failure("REVISION_ERROR", str(exc)), context)
         """执行内容写作。
 
         主要步骤：

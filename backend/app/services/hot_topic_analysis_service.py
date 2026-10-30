@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from time import monotonic
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 import litellm
@@ -76,6 +77,10 @@ class HotTopicAnalysisService:
                     or skill_result.get("data", {}).get("topics")
                     or []
                 )
+                if not search_results:
+                    search_results = await self._fetch_news_fallback(
+                        profile=profile, account_context=account_context, query_plan=query_plan,
+                    )
 
             evidence_results = self._evidence_to_search_results(evidence_payload.get("selected_evidence") or [])
             combined_results = self._merge_search_results(search_results, evidence_results)
@@ -145,6 +150,7 @@ class HotTopicAnalysisService:
                     reference_digest=merged_reference_digest,
                     selected_evidence=evidence_payload.get("selected_evidence") or [],
                     evidence_summaries=evidence_payload.get("evidence_summaries") or {},
+                    ops_context=ops_context,
                     timeout_seconds=self._llm_timeout_for_remaining_budget(remaining_budget),
                 )
 
@@ -167,6 +173,36 @@ class HotTopicAnalysisService:
                 agent._failure(code="HOT_TOPIC_ERROR", message=str(exc)),
                 context,
             )
+
+    async def _fetch_news_fallback(
+        self, *, profile: dict[str, Any], account_context: dict[str, Any], query_plan: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        from app.services.news_source_service import news_source_service
+
+        snapshot = SimpleNamespace(
+            positioning_summary=account_context.get("positioning") or profile.get("positioning_raw") or "",
+            audience_summary=account_context.get("audience") or profile.get("target_audience") or "",
+            tone_summary=account_context.get("tone_style") or "",
+        )
+        try:
+            candidates, _ = await asyncio.wait_for(
+                news_source_service.collect_candidates(snapshot=snapshot, query_plan=query_plan),
+                timeout=30,
+            )
+        except Exception as exc:
+            logger.warning("hot_topic_news_fallback_failed", error=str(exc))
+            return []
+        return [
+            {
+                "title": item["title"],
+                "source": item.get("source_name") or "news",
+                "url": item.get("source_url") or "",
+                "snippet": item.get("summary") or "",
+                "source_type": "news_article",
+                "relevance_score": item.get("relevance_score") or 0,
+            }
+            for item in candidates[:12] if isinstance(item, dict) and item.get("title")
+        ]
 
     async def fallback(
         self,
@@ -416,6 +452,7 @@ class HotTopicAnalysisService:
         reference_digest: dict[str, Any],
         selected_evidence: list[dict[str, Any]],
         evidence_summaries: dict[str, Any],
+        ops_context: dict[str, Any],
         timeout_seconds: int,
     ) -> list[dict[str, Any]]:
         if not search_results:
@@ -429,6 +466,7 @@ class HotTopicAnalysisService:
             reference_digest=reference_digest,
             selected_evidence=selected_evidence,
             evidence_summaries=evidence_summaries,
+            ops_context=ops_context,
         )
 
         try:
@@ -462,6 +500,7 @@ class HotTopicAnalysisService:
         reference_digest: dict[str, Any],
         selected_evidence: list[dict[str, Any]],
         evidence_summaries: dict[str, Any],
+        ops_context: dict[str, Any],
     ) -> str:
         account_snapshot = {
             "account_name": account_context.get("account_name") or "unknown",
@@ -498,6 +537,8 @@ class HotTopicAnalysisService:
                 "",
                 "ACCOUNT SNAPSHOT",
                 json.dumps(account_snapshot, ensure_ascii=False, indent=2),
+                "ACCOUNT OPS RESEARCH DIRECTIONS",
+                json.dumps(ops_context.get("next_topic_directions") or [], ensure_ascii=False),
                 "",
                 "QUERY PLAN",
                 json.dumps(query_plan, ensure_ascii=False, indent=2),
