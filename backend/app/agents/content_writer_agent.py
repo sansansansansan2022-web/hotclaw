@@ -147,6 +147,7 @@ Rules:
         topics = input_data.get("topics", {})
         titles_data = input_data.get("titles", {})
         hot_topics = input_data.get("hot_topics", {})
+        account_context = input_data.get("account_context") or {}
         selected_evidence = input_data.get("selected_evidence") or []
         evidence_summaries = input_data.get("evidence_summaries") or {}
         citation_guardrails = input_data.get("citation_guardrails") or {}
@@ -163,6 +164,7 @@ Rules:
             topics=topics,
             titles_data=titles_data,
             hot_topics=hot_topics,
+            account_context=account_context,
             selected_evidence=selected_evidence,
             evidence_summaries=evidence_summaries,
             citation_guardrails=citation_guardrails,
@@ -198,6 +200,7 @@ Rules:
         topics: dict,
         titles_data: dict,
         hot_topics: dict,
+        account_context: dict | None = None,
         selected_evidence: list[dict],
         evidence_summaries: dict[str, str],
         citation_guardrails: dict[str, bool],
@@ -219,6 +222,7 @@ Rules:
         Returns:
             str: 完整的用户提示词
         """
+        account_context = account_context or {}
         # 提取账号信息
         tone = profile.get("tone", "neutral")
         domain = profile.get("domain", "unknown")
@@ -239,12 +243,17 @@ Rules:
             json.dumps(
                 {
                     "domain": domain,
-                    "tone": tone,
+                    "tone": account_context.get("tone_style") or tone,
                     "keywords": keywords,
+                    "positioning": account_context.get("positioning"),
+                    "audience": account_context.get("audience"),
                 },
                 ensure_ascii=False,
                 indent=2,
             ),
+            "",
+            "RECENT APPROVED ARTICLES (use as style examples; avoid repeating their topics or wording)",
+            json.dumps(account_context.get("recent_article_memories") or [], ensure_ascii=False, indent=2),
             "",
             "SELECTED TOPIC",
             json.dumps(top_topic, ensure_ascii=False, indent=2),

@@ -1425,13 +1425,6 @@ export interface AccountMemoryListResponse {
   memories: ContentMemory[];
 }
 
-export interface AccountMemoryActionResponse {
-  account_id: string;
-  status: string;
-  message?: string | null;
-  job_id?: string | null;
-}
-
 export interface AccountStyleProfileResponse {
   account_id: string;
   generated_at?: string | null;

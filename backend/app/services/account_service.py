@@ -17,7 +17,7 @@ Account Service - 账号服务模块
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
-from sqlalchemy import select, desc, func as sa_func
+from sqlalchemy import select, desc, func as sa_func, or_, cast, String
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,7 +30,7 @@ from app.core.exceptions import (
 )
 from app.core.logger import get_logger
 from app.core.tracer import generate_task_id, generate_account_id
-from app.models.tables import AccountModel, ReferenceSourceModel, TaskModel
+from app.models.tables import AccountModel, ArticleDraftModel, ReferenceSourceModel, TaskModel
 from app.services.automation_plan_service import automation_plan_service
 from app.services.account_harness_service import account_harness_service
 from app.services.article_assembler_service import article_assembler_service
@@ -704,6 +704,42 @@ class AccountService:
     # Account context (for agent injection)
     # -------------------------------------------------------------------------
 
+    async def list_article_memories(
+        self, account_id: str, db: AsyncSession, *, query: str = "", page: int = 1, page_size: int = 20
+    ) -> tuple[list[dict], int]:
+        """Use reviewed drafts as the account's article memory source of truth."""
+        stmt = select(ArticleDraftModel).where(
+            ArticleDraftModel.account_id == account_id,
+            or_(ArticleDraftModel.draft_status == "approved", ArticleDraftModel.publish_status == "published"),
+        )
+        if query:
+            pattern = f"%{query}%"
+            stmt = stmt.where(or_(
+                ArticleDraftModel.title.ilike(pattern),
+                ArticleDraftModel.summary.ilike(pattern),
+                cast(ArticleDraftModel.tags, String).ilike(pattern),
+            ))
+        total = (await db.execute(select(sa_func.count()).select_from(stmt.subquery()))).scalar_one()
+        rows = await db.execute(
+            stmt.order_by(desc(ArticleDraftModel.confirmed_at), desc(ArticleDraftModel.id))
+            .offset((page - 1) * page_size).limit(page_size)
+        )
+        memories = [
+            {
+                "id": draft.id,
+                "title": draft.title,
+                "summary": draft.summary,
+                "tags": draft.tags or [],
+                "source_draft_id": draft.id,
+                "source_task_id": draft.task_id,
+                "content_excerpt": article_assembler_service._clip_text(draft.content_markdown, 280),
+                "created_at": draft.created_at.isoformat() if draft.created_at else None,
+                "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,
+            }
+            for draft in rows.scalars().all()
+        ]
+        return memories, total
+
     async def get_account_context(self, account_id: str | None, db: AsyncSession) -> dict | None:
         """
         Build a lightweight context dict from an account.
@@ -764,6 +800,7 @@ class AccountService:
             reference_sources,
             limit=3,
         )
+        recent_memories, _ = await self.list_article_memories(account_id, db, page_size=3)
         return {
             "account_id": account.id,
             "account_name": account.name,
@@ -777,6 +814,7 @@ class AccountService:
             "reference_sources": reference_sources,
             "reference_source_briefs": reference_digest.get("source_digests", []),
             "reference_digest": reference_digest,
+            "recent_article_memories": recent_memories,
             "reference_style_guide": {
                 "preferred_source_names": reference_digest.get("preferred_source_names", []),
                 "style_takeaways": reference_digest.get("style_takeaways", []),

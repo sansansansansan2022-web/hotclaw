@@ -57,6 +57,24 @@ router = APIRouter(prefix="/api/v1/accounts", tags=["accounts"])
 # CRUD 操作
 # =============================================================================
 
+@router.get("/{account_id}/article-memories")
+async def list_article_memories(
+    account_id: str,
+    query: str = "",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await account_service.get_account(account_id, db)
+        memories, total = await account_service.list_article_memories(
+            account_id, db, query=query.strip(), page=page, page_size=page_size
+        )
+        return {"account_id": account_id, "total": total, "query": query or None, "memories": memories}
+    except AccountNotFoundError as e:
+        raise HTTPException(status_code=404, detail=e.message)
+
+
 @router.post("", response_model=AccountCreateData, status_code=201)
 async def create_account(
     req: AccountCreateRequest,

@@ -1,6 +1,5 @@
 import type {
   AccountCreateData,
-  AccountMemoryActionResponse,
   AccountMemoryListResponse,
   AccountCreateRequest,
   AccountDetail,
@@ -596,18 +595,6 @@ export async function listAccountMemories(
 
 export async function searchAccountMemories(accountId: string, query: string): Promise<AccountMemoryListResponse> {
   return listAccountMemories(accountId, { query });
-}
-
-export async function rebuildAccountMemories(accountId: string): Promise<AccountMemoryActionResponse> {
-  return request<AccountMemoryActionResponse>(`/accounts/${accountId}/article-memories/rebuild`, {
-    method: "POST",
-  });
-}
-
-export async function syncAccountMemories(accountId: string): Promise<AccountMemoryActionResponse> {
-  return request<AccountMemoryActionResponse>(`/accounts/${accountId}/article-memories/sync`, {
-    method: "POST",
-  });
 }
 
 export async function getAccountStyleProfile(accountId: string): Promise<AccountStyleProfileResponse> {
