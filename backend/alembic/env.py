@@ -3,11 +3,14 @@
 import asyncio
 from logging.config import fileConfig
 from sqlalchemy import pool
+from sqlalchemy import inspect
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
+from alembic.script import ScriptDirectory
 
 from app.core.config import settings
 from app.models.tables import Base
+import app.models.wechat_config  # noqa: F401 - register all runtime tables
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)
@@ -28,7 +31,14 @@ def run_migrations_offline() -> None:
 def do_run_migrations(connection):
     context.configure(connection=connection, target_metadata=target_metadata)
     with context.begin_transaction():
-        context.run_migrations()
+        if not inspect(connection).get_table_names():
+            # The historical migrations start after the core tables were created.
+            # A fresh install needs the current schema before it can be versioned.
+            target_metadata.create_all(connection)
+            context.get_context().stamp(ScriptDirectory.from_config(config), "head")
+            connection.commit()
+        else:
+            context.run_migrations()
 
 
 async def run_async_migrations() -> None:

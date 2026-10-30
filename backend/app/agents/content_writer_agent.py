@@ -24,9 +24,10 @@ import litellm
 
 from app.agents.base import AgentResult, BaseAgent
 from app.core.config import settings
+from app.skills.review_rewrite_skills import RewriteMixin
 
 
-class ContentWriterAgent(BaseAgent):
+class ContentWriterAgent(BaseAgent, RewriteMixin):
     """内容写作 Agent - 基于话题和证据生成完整文章。
 
     核心职责：
@@ -128,6 +129,28 @@ Rules:
 """
 
     async def execute(self, input_data: dict, context: dict) -> AgentResult:
+        if isinstance(input_data.get("audit_result"), dict):
+            try:
+                article = input_data.get("content") or {}
+                response = await self.run_litellm_completion(
+                    context={**context, "system_prompt": RewriteMixin.default_system_prompt},
+                    completion_callable=litellm.acompletion,
+                    messages=[
+                        {"role": "system", "content": RewriteMixin.default_system_prompt},
+                        {"role": "user", "content": json.dumps({
+                            "instruction": "Revise the article once to address the audit findings. Keep claims grounded in the supplied evidence. Return JSON with revised_content_markdown, revision_summary, fixed_issues, changed_sections, used_rewrite.",
+                            "content_markdown": article.get("content_markdown") or "",
+                            "audit_result": input_data["audit_result"],
+                            "selected_evidence": input_data.get("selected_evidence") or [],
+                            "citation_guardrails": input_data.get("citation_guardrails") or {},
+                        }, ensure_ascii=False)},
+                    ],
+                    timeout=float(context.get("node_timeout_seconds") or settings.llm_timeout),
+                )
+                revised = RewriteMixin._normalize_rewrite(self, self._parse_json(response.choices[0].message.content))
+                return self._attach_runtime_trace(self._success(revised), context)
+            except Exception as exc:
+                return self._attach_runtime_trace(self._failure("REVISION_ERROR", str(exc)), context)
         """执行内容写作。
 
         主要步骤：
@@ -147,6 +170,7 @@ Rules:
         topics = input_data.get("topics", {})
         titles_data = input_data.get("titles", {})
         hot_topics = input_data.get("hot_topics", {})
+        account_context = input_data.get("account_context") or {}
         selected_evidence = input_data.get("selected_evidence") or []
         evidence_summaries = input_data.get("evidence_summaries") or {}
         citation_guardrails = input_data.get("citation_guardrails") or {}
@@ -163,6 +187,7 @@ Rules:
             topics=topics,
             titles_data=titles_data,
             hot_topics=hot_topics,
+            account_context=account_context,
             selected_evidence=selected_evidence,
             evidence_summaries=evidence_summaries,
             citation_guardrails=citation_guardrails,
@@ -198,6 +223,7 @@ Rules:
         topics: dict,
         titles_data: dict,
         hot_topics: dict,
+        account_context: dict | None = None,
         selected_evidence: list[dict],
         evidence_summaries: dict[str, str],
         citation_guardrails: dict[str, bool],
@@ -219,6 +245,7 @@ Rules:
         Returns:
             str: 完整的用户提示词
         """
+        account_context = account_context or {}
         # 提取账号信息
         tone = profile.get("tone", "neutral")
         domain = profile.get("domain", "unknown")
@@ -239,12 +266,17 @@ Rules:
             json.dumps(
                 {
                     "domain": domain,
-                    "tone": tone,
+                    "tone": account_context.get("tone_style") or tone,
                     "keywords": keywords,
+                    "positioning": account_context.get("positioning"),
+                    "audience": account_context.get("audience"),
                 },
                 ensure_ascii=False,
                 indent=2,
             ),
+            "",
+            "RECENT APPROVED ARTICLES (use as style examples; avoid repeating their topics or wording)",
+            json.dumps(account_context.get("recent_article_memories") or [], ensure_ascii=False, indent=2),
             "",
             "SELECTED TOPIC",
             json.dumps(top_topic, ensure_ascii=False, indent=2),

@@ -209,6 +209,17 @@ class AccountHarnessService:
             avoid_recent_topics = self._derive_recent_topics(snapshot["recent_drafts"])
 
         ops_notes = self._normalize_string_list(agent_data.get("ops_notes"))
+        directions = self._normalize_string_list(agent_data.get("next_topic_directions"))[:3]
+        if not directions:
+            fallback_direction = str(signals.get("preferred_content_lane") or account.get("positioning") or "").strip()
+            directions = [fallback_direction] if fallback_direction else []
+        retrospective = str(agent_data.get("retrospective") or "").strip()
+        if not retrospective:
+            retrospective = (
+                f"Recent tasks: {len(snapshot['recent_tasks'])}; "
+                f"recent drafts: {len(snapshot['recent_drafts'])}; "
+                f"pending review: {signals['pending_review_count']}."
+            )
         issues = self._normalize_string_list(health_raw.get("issues"))
         operation_stage = str(agent_data.get("operation_stage") or "style_learning")
         requested_mode = str(plan_summary.get("plan_type") or "manual")
@@ -318,6 +329,8 @@ class AccountHarnessService:
                 "degrade_reason": ", ".join(degrade_reasons) if degrade_reasons else None,
             },
             "ops_notes": list(dict.fromkeys(ops_notes)),
+            "retrospective": retrospective,
+            "next_topic_directions": directions,
             "signals": {
                 **signals,
                 "recent_task_count": len(snapshot["recent_tasks"]),
@@ -488,6 +501,12 @@ class AccountHarnessService:
         account: AccountModel,
         recent_drafts: list[dict[str, Any]],
     ) -> str | None:
+        if account.category:
+            return account.category
+        if account.content_strategy:
+            return account.content_strategy.strip()[:80]
+        if account.positioning:
+            return account.positioning.strip()[:80]
         topic_counter: Counter[str] = Counter()
         for draft in recent_drafts:
             topic = str(draft.get("selected_topic") or "").strip()
@@ -495,12 +514,6 @@ class AccountHarnessService:
                 topic_counter[topic] += 1
         if topic_counter:
             return topic_counter.most_common(1)[0][0]
-        if account.category:
-            return account.category
-        if account.content_strategy:
-            return account.content_strategy.strip()[:80]
-        if account.positioning:
-            return account.positioning.strip()[:80]
         return None
 
     def _normalize_string_list(self, values: Any) -> list[str]:

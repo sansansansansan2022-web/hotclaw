@@ -271,7 +271,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         inspect: "查看",
         noTasksTitle: "这个账号还没有任务",
         noTasksDesc: "从这里发起一次运行后，这个工作台里就会开始累积任务历史。",
-        pendingDraftsTitle: "待审核草稿",
+        pendingDraftsTitle: "待处理草稿",
         pendingDraftsDesc: "这里只会显示属于这个账号、并且仍需人工处理的草稿。",
         titleColumn: "标题",
         draftStatusColumn: "草稿状态",
@@ -280,8 +280,8 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         accountDraftBadge: "账号草稿",
         noTopicSnapshot: "暂无选题快照",
         openDraft: "打开草稿",
-        noPendingDraftsTitle: "没有待审核草稿",
-        noPendingDraftsDesc: "这个账号当前没有待审核草稿。你仍然可以打开账号草稿中心查看完整列表。",
+        noPendingDraftsTitle: "没有待处理草稿",
+        noPendingDraftsDesc: "这个账号当前没有待处理草稿。你仍然可以打开账号草稿中心查看完整列表。",
         openAccountDrafts: "打开账号草稿",
       }
     : {
@@ -389,7 +389,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         inspect: "Inspect",
         noTasksTitle: "No account tasks yet",
         noTasksDesc: "Start this account from here and its task history will accumulate in this workspace.",
-        pendingDraftsTitle: "Pending Review Drafts",
+        pendingDraftsTitle: "Drafts Needing Action",
         pendingDraftsDesc: "Only drafts belonging to this account and still needing operator action appear here.",
         titleColumn: "Title",
         draftStatusColumn: "Draft Status",
@@ -398,8 +398,8 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
         accountDraftBadge: "Account Draft",
         noTopicSnapshot: "No selected topic snapshot",
         openDraft: "Open Draft",
-        noPendingDraftsTitle: "No pending review drafts",
-        noPendingDraftsDesc: "This account has no pending review drafts right now. You can still open the account draft center for the full list.",
+        noPendingDraftsTitle: "No drafts needing action",
+        noPendingDraftsDesc: "This account has no drafts needing action right now. You can still open the account draft center for the full list.",
         openAccountDrafts: "Open Account Drafts",
       };
 
@@ -489,7 +489,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
   };
 
   const pendingDrafts = useMemo(
-    () => (data?.drafts ?? []).filter((draft) => draft.draft_status === "pending_review").slice(0, 6),
+    () => (data?.drafts ?? []).filter((draft) => draft.draft_status === "pending_review" || draft.draft_status === "draft").slice(0, 6),
     [data],
   );
 
@@ -664,6 +664,7 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                   </Link>
                 </div>
               </div>
+
             </Card>
           ) : null}
 
@@ -955,6 +956,24 @@ export function AccountWorkspacePage({ accountId }: { accountId: string }) {
                   </div>
                 </div>
               </div>
+              {latestOps?.retrospective || latestOps?.next_topic_directions?.length ? (
+                <div className="mt-5 grid gap-4 md:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                      {locale === "zh-CN" ? "本轮复盘" : "Run retrospective"}
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">{latestOps.retrospective || copy.notRecorded}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">
+                      {locale === "zh-CN" ? "下一轮选题方向" : "Next topic directions"}
+                    </p>
+                    <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-700">
+                      {(latestOps.next_topic_directions ?? []).map((direction) => <li key={direction}>{direction}</li>)}
+                    </ol>
+                  </div>
+                </div>
+              ) : null}
             </Card>
           ) : null}
 

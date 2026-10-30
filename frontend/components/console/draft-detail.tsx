@@ -107,7 +107,7 @@ export function DraftDetailPage({ draftId }: { draftId: string }) {
   const actions = useMemo(() => {
     if (!detail) return { canApprove: false, canReject: false, canDiscard: false, canPublish: false, canRetry: false };
     return {
-      canApprove: detail.draft_status === "pending_review",
+      canApprove: detail.draft_status === "pending_review" || detail.draft_status === "draft",
       canReject: detail.draft_status === "pending_review",
       canDiscard: detail.draft_status === "pending_review",
       canPublish: detail.draft_status === "approved" && detail.publish_status !== "published",

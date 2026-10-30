@@ -2,16 +2,14 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { getAccount, listAccountMemories, rebuildAccountMemories, syncAccountMemories } from "@/lib/api";
+import { getAccount, listAccountMemories } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { formatDateTime, truncate } from "@/lib/utils";
 import type { AccountDetail, ContentMemory } from "@/types";
 import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, SkeletonRows, Table } from "@/components/console/ui";
-import { useAppStore } from "@/store/appStore";
 
 export function AccountMemoryPage({ accountId }: { accountId: string }) {
   const { locale } = useI18n();
-  const pushToast = useAppStore((state) => state.pushToast);
   const [account, setAccount] = useState<AccountDetail | null>(null);
   const [memories, setMemories] = useState<ContentMemory[]>([]);
   const [queryInput, setQueryInput] = useState("");
@@ -59,24 +57,6 @@ export function AccountMemoryPage({ accountId }: { accountId: string }) {
     [memories, selectedId],
   );
 
-  const runAction = async (action: () => Promise<{ message?: string | null }>, successTitle: string, fallbackMessage: string) => {
-    try {
-      const result = await action();
-      pushToast({
-        tone: "success",
-        title: successTitle,
-        message: result.message || fallbackMessage,
-      });
-      await load();
-    } catch (actionError) {
-      pushToast({
-        tone: "danger",
-        title: locale === "zh-CN" ? "操作失败" : "Action failed",
-        message: actionError instanceof Error ? actionError.message : locale === "zh-CN" ? "发生了意外错误。" : "Unexpected error.",
-      });
-    }
-  };
-
   const onSearch = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setQuery(queryInput.trim());
@@ -90,20 +70,14 @@ export function AccountMemoryPage({ accountId }: { accountId: string }) {
         title={account?.name ? `${account.name} · ${locale === "zh-CN" ? "内容记忆" : "Content Memory"}` : locale === "zh-CN" ? "账号内容记忆" : "Account Content Memory"}
         description={
           locale === "zh-CN"
-            ? "查看账号积累的历史文章记忆，支持搜索、重建和同步，便于检查风格检索资产。"
-            : "Inspect stored article memories for an account, with search, rebuild and sync actions for retrieval assets."
+            ? "查看已确认文章形成的账号记忆，供后续创作参考。"
+            : "Inspect approved articles used as account memory for future writing."
         }
         actions={
           <>
             <Link href={`/accounts/${accountId}`}>
               <Button variant="secondary">{locale === "zh-CN" ? "返回账号" : "Back to Account"}</Button>
             </Link>
-            <Button variant="secondary" onClick={() => void runAction(() => syncAccountMemories(accountId), locale === "zh-CN" ? "同步已触发" : "Sync started", locale === "zh-CN" ? "记忆同步任务已触发。" : "Memory sync was triggered.")}>
-              {locale === "zh-CN" ? "同步记忆" : "Sync Memories"}
-            </Button>
-            <Button onClick={() => void runAction(() => rebuildAccountMemories(accountId), locale === "zh-CN" ? "重建已触发" : "Rebuild started", locale === "zh-CN" ? "记忆重建任务已触发。" : "Memory rebuild was triggered.")}>
-              {locale === "zh-CN" ? "重建记忆" : "Rebuild Memory"}
-            </Button>
           </>
         }
       />

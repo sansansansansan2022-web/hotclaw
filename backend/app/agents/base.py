@@ -24,6 +24,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.llm.config import get_llm_config
 
 logger = get_logger(__name__)
 
@@ -148,7 +149,7 @@ class BaseAgent(ABC):
     def get_effective_model_config(self, context: dict | None = None) -> dict[str, Any]:
         runtime_config = (context or {}).get("agent_model_config")
         if isinstance(runtime_config, dict) and runtime_config:
-            provider_id = str(runtime_config.get("provider_id") or "").strip() or "dashscope"
+            provider_id = str(runtime_config.get("provider_id") or "").strip() or get_llm_config().default_provider
             model = str(runtime_config.get("model") or runtime_config.get("default_model") or "").strip()
             if not model:
                 model = settings.llm_model_name.strip()
@@ -161,9 +162,10 @@ class BaseAgent(ABC):
             }
 
         model = settings.llm_model_name.strip()
+        provider_id = get_llm_config().default_provider
         return {
-            "provider_id": "dashscope",
-            "model": self._normalize_model_name("dashscope", model),
+            "provider_id": provider_id,
+            "model": self._normalize_model_name(provider_id, model),
             "api_key": settings.llm_api_key,
             "base_url": settings.llm_api_base_url,
             "timeout": settings.llm_timeout,

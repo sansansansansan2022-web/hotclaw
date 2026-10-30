@@ -199,6 +199,35 @@ def test_manual_risk_recovery_keeps_post_process_enabled():
     assert ops_context["run_strategy"]["allow_post_process"] is True
 
 
+def test_manager_directions_reach_research_and_planning():
+    from app.agents.topic_planner_agent import TopicPlannerAgent
+    from app.services.query_planner_service import query_planner_service
+
+    snapshot = _risk_recovery_snapshot(trigger_source="manual")
+    ops_context = account_harness_service._normalize_ops_context(
+        snapshot,
+        {
+            "retrospective": "The previous account tutorial was confirmed; explore its next practical step.",
+            "next_topic_directions": ["AI workflow deployment pitfalls"],
+            "run_strategy": {"effective_mode": "manual"},
+        },
+        fallback_used=False,
+    )
+    query_plan = query_planner_service.build_plan(
+        profile={}, account_context=snapshot["account"], ops_context=ops_context,
+    )
+    planner_prompt = TopicPlannerAgent()._build_user_prompt({
+        "account_context": snapshot["account"],
+        "ops_context": ops_context,
+        "hot_topics": {"hot_topics": []},
+        "query_plan": query_plan,
+    })
+
+    assert ops_context["retrospective"].startswith("The previous account tutorial")
+    assert query_plan["selected_topic"] == "AI workflow deployment pitfalls"
+    assert "AI workflow deployment pitfalls" in planner_prompt
+
+
 def test_scheduler_risk_recovery_can_keep_post_process_disabled():
     ops_context = account_harness_service._normalize_ops_context(
         _risk_recovery_snapshot(trigger_source="scheduler"),

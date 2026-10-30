@@ -160,7 +160,9 @@ class QueryPlannerService:
             or profile.get("domain")
             or ""
         )
-        topic_hint = self._clean_text(selected_topic) or self._pick_hot_topic(hot_topics)
+        directions = ops_context.get("next_topic_directions") or []
+        manager_direction = directions[0] if isinstance(directions, list) and directions else None
+        topic_hint = self._clean_text(selected_topic) or self._pick_hot_topic(hot_topics) or self._clean_text(manager_direction)
         title_hint = self._clean_text(selected_title)
 
         lane_id, lane_reason = self._infer_lane(

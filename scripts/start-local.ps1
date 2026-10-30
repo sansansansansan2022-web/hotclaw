@@ -170,7 +170,7 @@ function Start-DetachedCmd {
     }
 
     $launcher = ('start "" /min cmd.exe /c "cd /d {0} && {1}{2}"' -f $WorkingDirectory, $environmentPrefix, $InnerCommand)
-    $process = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d', '/c', $launcher -WorkingDirectory $repoRoot -WindowStyle Minimized -PassThru
+    $process = Start-Process -FilePath 'cmd.exe' -ArgumentList '/d', '/c', $launcher -WorkingDirectory $repoRoot -WindowStyle Hidden -PassThru
     if (-not $process) {
         throw 'Failed to launch detached process'
     }
@@ -258,7 +258,7 @@ Ensure-Directory $pidDir
 Ensure-Directory $logDir
 
 if (!(Test-Path $backendPython)) {
-    throw "Backend virtualenv python not found at $backendPython"
+    $backendPython = (Get-Command python -ErrorAction Stop).Source
 }
 
 $npmPath = Resolve-NpmPath
@@ -272,7 +272,6 @@ Push-Location $backendDir
 try {
     Write-Step 'Running backend migrations'
     Invoke-ExternalCommand -FilePath $backendPython -Arguments @('-m', 'alembic', 'upgrade', 'head') -Label 'alembic upgrade head'
-    Invoke-ExternalCommand -FilePath $backendPython -Arguments @('-m', 'alembic', 'stamp', 'head') -Label 'alembic stamp head'
 } finally {
     Pop-Location
 }
